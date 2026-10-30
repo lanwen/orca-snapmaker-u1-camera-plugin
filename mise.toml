@@ -31,6 +31,11 @@ run = "python scripts/release.py publish"
 description = "Print the current version and whether it is final"
 run = "python scripts/release.py info"
 
+[tasks."release:publish-cloud"]
+description = "Publish the verified GitHub release to Orca Cloud using GitHub Actions OIDC"
+tools = { github-cli = "2.102.0" }
+run = "python scripts/publish_cloud.py"
+
 [tasks."release:prepare-pr"]
 description = "Prepare local release or next-development PR changes"
 depends = ["setup"]

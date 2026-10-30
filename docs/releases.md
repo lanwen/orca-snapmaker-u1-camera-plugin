@@ -10,7 +10,9 @@ Use Conventional Commit PR titles and squash merges so the merged commit carries
    It chooses the version from changes since the last stable tag, removes `.dev0`, updates `uv.lock`, and adds a changelog section.
 2. Merging the release PR publishes that exact merge commit as `v<version>`.
    The workflow verifies the files in a draft release before publishing it.
-3. Successful publication opens a signed PR on `automation/next-snapshot` for the next patch development version.
+3. The same publishing job uploads the verified GitHub release artifact to Orca Cloud.
+   Snapshot preparation starts only after both publications succeed.
+4. Successful publication opens a signed PR on `automation/next-snapshot` for the next patch development version.
    For example, release `0.3.0` is followed by `0.3.1.dev0`.
    The workflow waits for the snapshot commit's Check workflow to pass, then squash-merges that exact commit.
    Development versions are not published as GitHub releases.
@@ -61,3 +63,24 @@ This edits `pyproject.toml`, `uv.lock`, and `CHANGELOG.md` and writes the propos
 It requires Git history and stable release tags in the local checkout.
 The publishing fallback is `mise run release` from a clean checkout of the final release commit with GitHub CLI authentication.
 It refuses development versions, mismatched tags, and changes to published assets.
+
+## Orca Cloud publishing
+
+In Orca Cloud, open Shared Plugins → your plugin → Edit plugin → GitHub publishing.
+Connect `lanwen/orca-snapmaker-u1-camera-plugin` to the existing listing.
+No Orca Cloud secret is required.
+See the [trusted publishing guide](https://cloud.orcaslicer.com/wiki/#publish-from-github).
+
+The existing publish job grants `id-token: write` and runs `mise run release:publish-cloud` after GitHub publication.
+It requests a short-lived GitHub OIDC token with audience `orcacloud`.
+It verifies the source commit and release assets before uploading the exact plugin bytes.
+The version comes from `pyproject.toml`, and the changelog comes from the published GitHub release notes.
+It does not use `GITHUB_REF_NAME` because this workflow runs on `main`, not a release tag.
+The upload runs directly in this workflow, so it does not depend on a separate `release: published` event.
+
+Cloud failures leave the GitHub release intact and prevent the next snapshot PR from opening.
+After fixing a failure, rerun the failed publishing job from the original release run.
+GitHub publication verifies existing immutable assets before retrying the Cloud upload.
+The Cloud version must be greater than the listing's current version.
+Orca Cloud rejects duplicate versions without replacing them, so rerunning an already successful Cloud upload reports an error.
+If only snapshot preparation fails, rerun that failed job instead of the successful publishing job.
