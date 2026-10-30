@@ -11,8 +11,8 @@ Use Conventional Commit PR titles and squash merges so the merged commit carries
 2. Merging the release PR publishes that exact merge commit as `v<version>`.
    The workflow verifies the files in a draft release before publishing it.
 3. A separate `publish-cloud` job waits for GitHub publication and uploads the verified release artifact to Orca Cloud.
-   Snapshot preparation starts only after both publications succeed.
-4. Successful publication opens a signed PR on `automation/next-snapshot` for the next patch development version.
+4. After validation of a final version on `main`, snapshot preparation runs independently of both publishing jobs.
+   It opens a signed PR on `automation/next-snapshot` for the next patch development version.
    For example, release `0.3.0` is followed by `0.3.1.dev0`.
    The workflow waits for the snapshot commit's Check workflow to pass, then squash-merges that exact commit.
    Development versions are not published as GitHub releases.
@@ -80,7 +80,8 @@ The version comes from `pyproject.toml`, and the changelog comes from the publis
 It does not use `GITHUB_REF_NAME` because this workflow runs on `main`, not a release tag.
 The upload runs directly in this workflow, so it does not depend on a separate `release: published` event.
 
-Cloud failures leave the GitHub release intact and prevent the next snapshot PR from opening.
+Cloud failures leave the GitHub release intact.
+Snapshot preparation does not wait for publication and can advance the development version even when a publishing job fails.
 After fixing a failure, rerun the failed `publish-cloud` job from the original release run.
 The successful GitHub publishing job does not need to run again.
 The Cloud version must be greater than the listing's current version.
