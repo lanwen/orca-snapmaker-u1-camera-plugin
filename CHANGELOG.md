@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.4
+
+- fix: identify the Cloud publisher to avoid Cloudflare rejection (#14) ([25cc0ee](https://github.com/lanwen/orca-snapmaker-u1-camera-plugin/commit/25cc0eef8b14351ab285ae13f84e147a5145eb48))
+
 ## 0.3.3
 
 - ci: publish GitHub release assets to Orca Cloud (#11) ([3bcf58a](https://github.com/lanwen/orca-snapmaker-u1-camera-plugin/commit/3bcf58a87c062fd64fb1a76300ae3c147d3b802e))

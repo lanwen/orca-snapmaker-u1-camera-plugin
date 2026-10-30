@@ -1,6 +1,6 @@
 [project]
 name = "orca-snapmaker-u1-camera-plugin"
-version = "0.3.4.dev0"
+version = "0.3.4"
 description = "A dedicated U1 camera tab with playback and chamber light controls."
 authors = [{ name = "lanwen" }]
 license = "MIT"
