@@ -149,16 +149,16 @@ class FakeGitHub:
                 return json.dumps({"sha": self.tag_sha})
             if "/commits/" in args[1]:
                 raise RuntimeError("No commit found for SHA: v0.3.0 (HTTP 422)")
-            if "/releases/tags/" in args[1] and self.release and not self.release["draft"]:
-                return json.dumps(dict(self.release, assets=[{"name": name} for name in self.assets]))
-            if "/releases?" in args[1]:
-                records = ([dict(self.release, tag_name="v0.3.0", assets=[{"name": name} for name in self.assets])]
-                           if self.release else [])
-                return json.dumps(records)
+            if args[1].endswith("/releases/1") and self.release:
+                return json.dumps(dict(self.release, id=1, assets=[{"name": name} for name in self.assets]))
             raise RuntimeError("Not Found (HTTP 404)")
         operation = args[1]
-        if operation == "create":
-            self.release = {"draft": True, "target_commitish": args[args.index("--target") + 1]}
+        if operation == "view":
+            if self.release is None:
+                raise RuntimeError("release not found")
+            return json.dumps({"databaseId": 1})
+        elif operation == "create":
+            self.release = {"draft": True, "tag_name": "untagged-draft", "target_commitish": args[args.index("--target") + 1]}
         elif operation == "upload":
             for filename in args[3:args.index("--repo")]:
                 path = Path(filename)
@@ -243,14 +243,16 @@ class PublicationTests(ReleaseFixture):
         with patch.object(release, "gh", side_effect=github):
             with self.assertRaisesRegex(RuntimeError, "HTTP 422"):
                 release.publish()
-        self.assertFalse(any(call[0] == "release" for call in self.github.calls))
+        self.assertFalse(any(call[:2] in [("release", "create"), ("release", "upload"), ("release", "edit")]
+                             for call in self.github.calls))
 
-    def test_release_lookup_finds_drafts_beyond_the_first_page(self):
-        draft = {"tag_name": "v0.3.0", "draft": True}
-        with patch.object(release, "api", side_effect=[[{"tag_name": "other"}] * 100, [draft]]) as api:
-            self.assertEqual(release.release_by_tag("v0.3.0"), draft)
-        self.assertEqual([call.args[0] for call in api.call_args_list],
-                         ["releases?per_page=100&page=1", "releases?per_page=100&page=2"])
+    def test_pending_tag_lookup_finds_draft_without_a_matching_rest_tag_name(self):
+        self.github.release = {"tag_name": "untagged-draft", "draft": True,
+                               "target_commitish": self.github.sha}
+        draft = release.release_by_tag("v0.3.0")
+        self.assertTrue(draft["draft"])
+        self.assertEqual(draft["tag_name"], "untagged-draft")
+        self.assertIn(("api", "repos/example/plugin/releases/1"), self.github.calls)
 
     def test_dirty_checkout_cannot_publish(self):
         with patch.object(release, "git", return_value=" M pyproject.toml"):

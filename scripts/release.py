@@ -120,18 +120,14 @@ def tag_commit(tag):
 
 
 def release_by_tag(tag, optional=False):
-    # Listing includes drafts, which the tag endpoint omits until publication.
-    page = 1
-    while True:
-        releases = api(f"releases?per_page=100&page={page}")
-        for release in releases:
-            if release["tag_name"] == tag:
-                return release
-        if len(releases) < 100:
-            if optional:
-                return None
-            raise ValueError(f"Release {tag} was not found")
-        page += 1
+    # gh resolves a draft's pending tag through GraphQL; REST tag lookups cannot.
+    try:
+        identity = json.loads(gh("release", "view", tag, "--repo", repository(), "--json", "databaseId"))
+    except RuntimeError as error:
+        if optional and str(error) == "release not found":
+            return None
+        raise
+    return api(f"releases/{identity['databaseId']}")
 
 
 def verify_commit(release, tag, sha):
