@@ -7,9 +7,17 @@
 Without an explicit host, the plugin asks to read the selected Snapmaker U1 preset's address and API key.
 The confirmation also covers reading that selected preset's JSON file if Orca's API has no address.
 Choose Yes to use the preset connection, or No to configure a host manually.
-The plugin saves your choice as `allow_preset_connection` in Config.
-Set it to `true` to allow access or `false` to disable access.
-This choice applies to selected U1 presets and can be changed at any time.
+The plugin saves a separate Yes or No for each preset in `allow_preset_connection` in Config.
+It identifies the preset by its file path, or by its name when no file path is available.
+Selecting another preset requires that preset's own approval.
+Returning to an approved preset does not show another prompt.
+The current saved decision is checked before each connection-setting read.
+
+To revoke one preset's permission, change its entry to `false`.
+Remove that entry to ask again, or set `allow_preset_connection` to `{}` to clear all decisions.
+Set the entire field to `false` to disable all preset connection access.
+Older global `true` approvals require a new confirmation for each preset.
+If the plugin cannot save the decision, it blocks access and asks you to configure a host manually or reload the plugin.
 If the page asks for an address, open the plugin's Config tab and save:
 
 ```json

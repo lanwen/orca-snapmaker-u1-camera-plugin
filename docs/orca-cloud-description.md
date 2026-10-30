@@ -20,7 +20,7 @@ Orca installs the required Python dependencies.
 
 Select a Snapmaker U1 printer in Prepare, then open the Snapmaker U1 tab.
 
-The plugin asks before reading the selected printer preset's address and API key.
+The plugin asks before reading each printer preset's address and API key and remembers your choice for that preset.
 Choose Yes to use that connection, or No to configure an address manually.
 If the page asks for an address, open the plugin's Config tab and save:
 
@@ -44,12 +44,12 @@ The stock camera feed delivers roughly 4–5 FPS.
 
 ## Data access
 
-With your consent, the plugin reads `print_host` and `printhost_apikey` from the selected U1 preset.
+With that preset's own saved consent, the plugin reads its `print_host` and `printhost_apikey` fields.
 If Orca's API has no address, it reads only that selected preset's JSON file.
 The API key is used only to connect to that printer and stays out of the camera page and logs.
 The plugin does not read Orca's private app configuration or scan other presets.
 An explicit plugin host bypasses preset access entirely.
-You can revoke preset connection access by setting `allow_preset_connection` to `false` in Config.
+You can revoke a preset's permission in `allow_preset_connection` in Config, or set the entire field to `false` to disable all preset access.
 
 ## Project
 
