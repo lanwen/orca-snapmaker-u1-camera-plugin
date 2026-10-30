@@ -8,6 +8,7 @@ import re
 import subprocess
 import tempfile
 import time
+import tomllib
 
 from build import ROOT, build
 from versioning import next_snapshot, parse_change, parse_version, read_version, release_version, set_version
@@ -97,6 +98,29 @@ def check_pr(event):
         raise ValueError("Release PR title must match the final pyproject.toml version")
 
 
+def snapshot_only(pr):
+    """Allow the light CI path only for an exact generated version-only bump."""
+    version = read_version(ROOT)
+    if (pr["head"]["ref"] != "automation/next-snapshot" or pr["base"]["ref"] != "main"
+            or pr["head"]["repo"]["full_name"] != pr["base"]["repo"]["full_name"]
+            or pr["title"] != f"chore(snapshot): start {version}"
+            or not any(label["name"] == "snapshot" for label in pr.get("labels", []))):
+        return False
+    base = pr["base"]["sha"]
+    if set(git("diff", "--name-only", base, "HEAD").splitlines()) != {"pyproject.toml", "uv.lock"}:
+        return False
+    original = git("show", f"{base}:pyproject.toml")
+    previous = tomllib.loads(original)["project"]["version"]
+    if parse_version(previous)[1] or version != next_snapshot(previous):
+        return False
+    for name in ("pyproject.toml", "uv.lock"):
+        before = git("show", f"{base}:{name}")
+        expected = before.replace(f'version = "{previous}"', f'version = "{version}"', 1)
+        if expected == before or (ROOT / name).read_text(encoding="utf-8").strip() != expected:
+            return False
+    return True
+
+
 def gh(*args, token=None):
     env = dict(os.environ, GH_TOKEN=token) if token else None
     result = subprocess.run(["gh", *args], cwd=ROOT, capture_output=True, text=True, env=env)
@@ -129,8 +153,9 @@ def merge_snapshot(number, sha, version):
         raise ValueError("Snapshot PR must change only pyproject.toml and uv.lock")
     for _ in range(120):
         runs = json.loads(gh("run", "list", "--repo", repository(), "--workflow", "check.yml",
-                             "--event", "pull_request", "--commit", sha, "--limit", "1",
+                             "--event", "pull_request", "--commit", sha, "--limit", "20",
                              "--json", "status,conclusion", token=os.environ.get("GH_CHECKS_TOKEN")))
+        runs = [run for run in runs if run["conclusion"] != "cancelled"]
         if runs and runs[0]["status"] == "completed":
             conclusion = runs[0]["conclusion"]
             if conclusion == "success":
@@ -241,7 +266,11 @@ def main():
         for key, value in (result or {}).items():
             print(f"{key}={value}")
     elif args.command == "check-pr":
-        check_pr(json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text(encoding="utf-8")))
+        event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text(encoding="utf-8"))
+        check_pr(event)
+        if os.environ.get("GITHUB_OUTPUT"):
+            with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+                output.write(f"snapshot_only={str(snapshot_only(event['pull_request'])).lower()}\n")
     elif args.command == "merge-snapshot":
         merge_snapshot(int(os.environ["SNAPSHOT_PR"]), os.environ["SNAPSHOT_HEAD_SHA"], os.environ["SNAPSHOT_VERSION"])
     else:

@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 import shutil
+import subprocess
 import sys
 import tempfile
 import tomllib
@@ -132,6 +133,58 @@ class PreparationTests(ReleaseFixture):
         self.assertEqual(git.call_args.args[-1], "v0.3.0..HEAD")
 
 
+class SnapshotOnlyTests(ReleaseFixture):
+    def setUp(self):
+        super().setUp()
+        self.write_version("0.3.0")
+        subprocess.run(["git", "init", "-q"], cwd=self.root, check=True)
+        release.git("add", "pyproject.toml", "uv.lock")
+        release.git("-c", "user.name=Test", "-c", "user.email=test@example.com",
+                    "commit", "-qm", "base")
+        self.pr = {"title": "chore(snapshot): start 0.3.1.dev0", "labels": [{"name": "snapshot"}],
+                   "head": {"ref": "automation/next-snapshot", "repo": {"full_name": "example/plugin"}},
+                   "base": {"ref": "main", "sha": release.git("rev-parse", "HEAD"),
+                            "repo": {"full_name": "example/plugin"}}}
+        self.write_version("0.3.1.dev0")
+        self.commit()
+
+    def commit(self):
+        release.git("add", "pyproject.toml", "uv.lock")
+        release.git("-c", "user.name=Test", "-c", "user.email=test@example.com",
+                    "commit", "-qm", "snapshot")
+
+    def test_exact_snapshot_version_bump_uses_light_checks(self):
+        self.assertTrue(release.snapshot_only(self.pr))
+
+    def test_label_alone_or_fork_cannot_skip_full_checks(self):
+        self.pr["head"]["ref"] = "feature/example"
+        self.assertFalse(release.snapshot_only(self.pr))
+        self.pr["head"]["ref"] = "automation/next-snapshot"
+        self.pr["head"]["repo"]["full_name"] = "other/fork"
+        self.assertFalse(release.snapshot_only(self.pr))
+
+    def test_other_edits_in_version_files_require_full_checks(self):
+        with (self.root / "uv.lock").open("a") as output:
+            output.write("\n# unrelated lock change\n")
+        self.commit()
+        self.assertFalse(release.snapshot_only(self.pr))
+
+    def test_other_changed_files_require_full_checks(self):
+        (self.root / "extra.py").write_text("pass\n")
+        release.git("add", "extra.py")
+        self.commit()
+        self.assertFalse(release.snapshot_only(self.pr))
+
+    def test_missing_label_or_unexpected_version_requires_full_checks(self):
+        self.pr["labels"] = []
+        self.assertFalse(release.snapshot_only(self.pr))
+        self.pr["labels"] = [{"name": "snapshot"}]
+        self.write_version("0.4.0.dev0")
+        self.pr["title"] = "chore(snapshot): start 0.4.0.dev0"
+        self.commit()
+        self.assertFalse(release.snapshot_only(self.pr))
+
+
 class SnapshotMergeTests(unittest.TestCase):
     def setUp(self):
         self.sha = "a" * 40
@@ -157,10 +210,19 @@ class SnapshotMergeTests(unittest.TestCase):
     def test_only_the_checked_snapshot_commit_is_squash_merged(self):
         release.merge_snapshot(3, self.sha, "0.3.1.dev0")
         self.github.assert_any_call("run", "list", "--repo", "example/plugin", "--workflow", "check.yml",
-                                    "--event", "pull_request", "--commit", self.sha, "--limit", "1",
+                                    "--event", "pull_request", "--commit", self.sha, "--limit", "20",
                                     "--json", "status,conclusion", token="checks-token")
         self.github.assert_any_call("pr", "merge", "3", "--repo", "example/plugin", "--squash",
                                     "--match-head-commit", self.sha)
+
+    def test_cancelled_run_does_not_hide_successful_run_for_same_commit(self):
+        runs = json.dumps([
+            {"status": "completed", "conclusion": "cancelled"},
+            {"status": "completed", "conclusion": "success"},
+        ])
+        self.github.side_effect = lambda *args, **kwargs: runs if args[:2] == ("run", "list") else ""
+        release.merge_snapshot(3, self.sha, "0.3.1.dev0")
+        self.assertEqual(self.github.call_args.args[:2], ("pr", "merge"))
 
     def test_waits_for_registered_checks_and_replacements_of_cancelled_runs(self):
         self.github.side_effect = [json.dumps(runs) for runs in [[],
