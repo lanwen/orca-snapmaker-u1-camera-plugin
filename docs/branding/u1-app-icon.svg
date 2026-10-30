@@ -1,0 +1,89 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+     width="1024" height="1024" viewBox="0 0 1024 1024"
+     role="img" aria-labelledby="title description">
+  <title id="title">U1 Lens app icon</title>
+  <desc id="description">A raised satin teal U and camera lens, with a short vertical 1,
+    on a softly beveled ivory ceramic tile. The area outside the tile is transparent.</desc>
+  <defs>
+    <path id="tile" d="M290 34H734C908 34 990 116 990 290V734C990 908 908 990 734 990H290C116 990 34 908 34 734V290C34 116 116 34 290 34Z"/>
+    <linearGradient id="ceramic" x1="180" y1="60" x2="830" y2="1000" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#fffefa"/>
+      <stop offset=".48" stop-color="#f6f4f0"/>
+      <stop offset=".78" stop-color="#f4f1ec"/>
+      <stop offset="1" stop-color="#e4dfd6"/>
+    </linearGradient>
+    <linearGradient id="rim" x1="180" y1="34" x2="840" y2="990" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#d9d3c9"/>
+      <stop offset=".3" stop-color="#eeebe5"/>
+      <stop offset="1" stop-color="#bfb8ac"/>
+    </linearGradient>
+    <radialGradient id="porcelainGlow" cx=".36" cy=".26" r=".76">
+      <stop stop-color="#fff" stop-opacity=".64"/>
+      <stop offset="1" stop-color="#fff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="teal" x1="15" y1="10" x2="50" y2="57" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#15baa1"/>
+      <stop offset=".43" stop-color="#0da98f"/>
+      <stop offset="1" stop-color="#008d77"/>
+    </linearGradient>
+    <filter id="tileShadow" x="8" y="16" width="1008" height="1008" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="7"/>
+      <feOffset dy="10" result="offset"/>
+      <feFlood flood-color="#4c4438" flood-opacity=".18"/>
+      <feComposite in2="offset" operator="in"/>
+    </filter>
+    <filter id="ceramicBevel" x="30" y="30" width="964" height="964" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="13" result="softEdge"/>
+      <feOffset in="softEdge" dx="-11" dy="-14" result="lowerEdge"/>
+      <feComposite in="SourceAlpha" in2="lowerEdge" operator="out" result="shadeMask"/>
+      <feFlood flood-color="#8c8273" flood-opacity=".29"/>
+      <feComposite in2="shadeMask" operator="in" result="shade"/>
+      <feGaussianBlur in="SourceAlpha" stdDeviation="5" result="fineEdge"/>
+      <feOffset in="fineEdge" dx="5" dy="7" result="upperEdge"/>
+      <feComposite in="SourceAlpha" in2="upperEdge" operator="out" result="lightMask"/>
+      <feFlood flood-color="#fff" flood-opacity=".95"/>
+      <feComposite in2="lightMask" operator="in" result="light"/>
+      <feMerge>
+        <feMergeNode in="SourceGraphic"/>
+        <feMergeNode in="shade"/>
+        <feMergeNode in="light"/>
+      </feMerge>
+    </filter>
+    <filter id="satinRelief" x="5" y="6" width="62" height="56" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feGaussianBlur in="SourceAlpha" stdDeviation=".62" result="softShadow"/>
+      <feOffset in="softShadow" dx=".14" dy=".88" result="offsetShadow"/>
+      <feFlood flood-color="#59513c" flood-opacity=".27"/>
+      <feComposite in2="offsetShadow" operator="in" result="shadow"/>
+      <feGaussianBlur in="SourceAlpha" stdDeviation=".27" result="roundEdge"/>
+      <feOffset in="roundEdge" dx="-.2" dy="-.29" result="lowerEdge"/>
+      <feComposite in="SourceAlpha" in2="lowerEdge" operator="out" result="shadeMask"/>
+      <feFlood flood-color="#005244" flood-opacity=".55"/>
+      <feComposite in2="shadeMask" operator="in" result="shade"/>
+      <feOffset in="roundEdge" dx=".16" dy=".22" result="upperEdge"/>
+      <feComposite in="SourceAlpha" in2="upperEdge" operator="out" result="lightMask"/>
+      <feFlood flood-color="#a3ffeb" flood-opacity=".72"/>
+      <feComposite in2="lightMask" operator="in" result="light"/>
+      <feGaussianBlur in="SourceAlpha" stdDeviation=".36" result="surface"/>
+      <feSpecularLighting in="surface" surfaceScale="1.2" specularConstant=".42" specularExponent="22" lighting-color="#c5fff1" result="reflection">
+        <feDistantLight azimuth="225" elevation="48"/>
+      </feSpecularLighting>
+      <feComposite in="reflection" in2="SourceAlpha" operator="in" result="shine"/>
+      <feMerge>
+        <feMergeNode in="shadow"/>
+        <feMergeNode in="SourceGraphic"/>
+        <feMergeNode in="shade"/>
+        <feMergeNode in="light"/>
+        <feMergeNode in="shine"/>
+      </feMerge>
+    </filter>
+  </defs>
+  <use xlink:href="#tile" fill="#000" filter="url(#tileShadow)"/>
+  <use xlink:href="#tile" fill="url(#ceramic)" filter="url(#ceramicBevel)"/>
+  <use xlink:href="#tile" fill="url(#porcelainGlow)" stroke="url(#rim)" stroke-width="2"/>
+  <!-- The three shapes keep the exact geometry of u1-logo.svg. -->
+  <g transform="translate(26.4 65) scale(13.6)" fill="none" stroke="url(#teal)" filter="url(#satinRelief)">
+    <path d="M13 13v21a19 19 0 0 0 38 0V13" stroke-width="7" stroke-linecap="round"/>
+    <circle cx="32" cy="25" r="10" stroke-width="6"/>
+    <path d="M60 12V30.5" stroke-width="5" stroke-linecap="round"/>
+  </g>
+</svg>
