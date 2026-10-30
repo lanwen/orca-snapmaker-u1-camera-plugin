@@ -24,7 +24,6 @@ run = "git diff --check"
 [tasks.release]
 description = "Publish the current final version as an immutable GitHub release"
 depends = ["check"]
-tools = { github-cli = "2.102.0" }
 run = "python scripts/release.py publish"
 
 [tasks."release:info"]
@@ -33,7 +32,6 @@ run = "python scripts/release.py info"
 
 [tasks."release:publish-cloud"]
 description = "Publish the verified GitHub release to Orca Cloud using GitHub Actions OIDC"
-tools = { github-cli = "2.102.0" }
 run = "python scripts/publish_cloud.py"
 
 [tasks."release:prepare-pr"]

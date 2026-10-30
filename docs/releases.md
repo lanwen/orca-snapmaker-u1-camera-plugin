@@ -52,6 +52,8 @@ Set repository variable `RELEASE_APP_CLIENT_ID` and secret `RELEASE_APP_PRIVATE_
 The App creates signed version PRs whose normal PR checks can run.
 Release PR automation stays disabled until the client ID is configured.
 GitHub release publication uses the workflow's repository token.
+Release tasks use the `gh` executable already on `PATH`, as provided by GitHub-hosted runners.
+For local publishing, install GitHub CLI and authenticate with `gh auth login` first.
 
 To prepare version changes locally without creating a commit or PR:
 
