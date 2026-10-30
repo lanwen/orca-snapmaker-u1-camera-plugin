@@ -20,8 +20,14 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
+          fetch-depth: 0
       - uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d # v5
-      - run: mise run check
       - name: Check Conventional Commit title and version policy
+        id: policy
         if: github.event_name == 'pull_request'
         run: mise run release:check-pr
+      - run: mise run check
+        if: steps.policy.outputs.snapshot_only != 'true'
+      - name: Verify snapshot diff
+        if: steps.policy.outputs.snapshot_only == 'true'
+        run: git diff --check HEAD^ HEAD
