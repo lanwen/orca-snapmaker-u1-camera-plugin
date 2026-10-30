@@ -33,9 +33,9 @@ Normal PRs must retain a development version.
 Only the generated release PR can carry a final version.
 Automation changes `main` through PRs only.
 
-Each release contains:
+New releases contain:
 
-- `orca-snapmaker-u1-camera-plugin.py`
+- `orca-snapmaker-u1-camera-plugin_any.py`
 - `SHA256SUMS`
 
 The stable project version, plugin metadata, changelog heading, and tag must agree.

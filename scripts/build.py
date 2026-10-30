@@ -43,7 +43,7 @@ def build(output_dir=ROOT / "dist", release_tag=None):
     license_text = (ROOT / "LICENSE").read_text(encoding="utf-8")
     license_notice = "\n".join("# " + line if line else "#" for line in license_text.splitlines())
     built = "\n".join(metadata) + license_notice + "\n\n" + source.replace(PAGE_MARKER, "PAGE = " + repr(page))
-    filename = project["name"] + ".py"
+    filename = project["name"] + "_any.py"
     compile(built, filename, "exec")
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)

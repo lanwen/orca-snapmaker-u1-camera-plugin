@@ -26,6 +26,7 @@ mise run check
 
 `mise run setup` creates the isolated Python environment from `uv.lock`.
 `mise run build` embeds `src/camera.html` into the generated Python plugin and adds Orca's metadata from `pyproject.toml`.
+The filename ends in `_any.py` for Orca Cloud's universal platform convention.
 It also writes `dist/SHA256SUMS`.
 `mise run test` builds first and tests the actual generated plugin, plus the source HTML page.
 `mise run check` runs those tests and checks the Git diff for whitespace errors.

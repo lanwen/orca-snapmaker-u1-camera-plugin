@@ -18,7 +18,7 @@ orca.base = object
 orca.plugin = lambda cls: cls
 orca.LifecycleEvent = types.SimpleNamespace(DeviceSelected="device", PresetSelected="preset")
 sys.modules["orca"] = orca
-spec = importlib.util.spec_from_file_location("plugin", Path(__file__).parents[1] / "dist" / "orca-snapmaker-u1-camera-plugin.py")
+spec = importlib.util.spec_from_file_location("plugin", Path(__file__).parents[1] / "dist" / "orca-snapmaker-u1-camera-plugin_any.py")
 plugin = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(plugin)
 

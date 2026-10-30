@@ -21,6 +21,7 @@ class BuildTests(unittest.TestCase):
         project = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]
         with tempfile.TemporaryDirectory() as directory:
             artifact = builder.build(Path(directory) / "first")
+            self.assertEqual(artifact.name, project["name"] + "_any.py")
             built = artifact.read_text()
             page = next(node.value for node in ast.parse(built).body
                         if isinstance(node, ast.Assign) and any(isinstance(target, ast.Name) and target.id == "PAGE"
@@ -34,7 +35,8 @@ class BuildTests(unittest.TestCase):
             license_text = (ROOT / "LICENSE").read_text()
             notice = "\n".join("# " + line if line else "#" for line in license_text.splitlines())
             self.assertIn(notice, built)
-            checksum = artifact.with_name("SHA256SUMS").read_text().split()[0]
+            checksum, filename = artifact.with_name("SHA256SUMS").read_text().split()
+            self.assertEqual(filename, artifact.name)
             self.assertEqual(checksum, hashlib.sha256(artifact.read_bytes()).hexdigest())
             again = builder.build(Path(directory) / "second")
             self.assertEqual(artifact.read_bytes(), again.read_bytes())

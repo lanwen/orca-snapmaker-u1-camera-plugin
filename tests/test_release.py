@@ -268,7 +268,7 @@ class PublicationTests(ReleaseFixture):
 
     def test_published_mismatched_assets_are_never_overwritten(self):
         release.publish()
-        self.github.assets["orca-snapmaker-u1-camera-plugin.py"] = b"changed"
+        self.github.assets["orca-snapmaker-u1-camera-plugin_any.py"] = b"changed"
         self.github.calls.clear()
         with self.assertRaisesRegex(ValueError, "immutable"):
             release.publish()

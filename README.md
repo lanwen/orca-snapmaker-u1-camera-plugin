@@ -9,7 +9,8 @@ A dedicated Snapmaker U1 tab with a full-viewport camera, printer status, and a 
 Requires an OrcaSlicer nightly with the Python Pages plugin API and a printer reachable on your local network.
 The stock HTTP connection is unencrypted, so use a trusted network.
 
-1. Download `orca-snapmaker-u1-camera-plugin.py` from [Releases](https://github.com/lanwen/orca-snapmaker-u1-camera-plugin/releases).
+1. Download `orca-snapmaker-u1-camera-plugin_any.py` from [Releases](https://github.com/lanwen/orca-snapmaker-u1-camera-plugin/releases).
+   Older releases omit `_any` from the filename.
 2. Open File → Plugins, choose Install local plugin, and select the downloaded file.
 3. Activate orca-snapmaker-u1-camera-plugin.
    Orca installs its Python dependencies.
