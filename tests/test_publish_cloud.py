@@ -32,7 +32,8 @@ class CloudPublicationTests(unittest.TestCase):
             context.start()
             self.addCleanup(context.stop)
         context = patch.dict("os.environ", {"ACTIONS_ID_TOKEN_REQUEST_URL": "https://oidc.example/?request=1",
-                                           "ACTIONS_ID_TOKEN_REQUEST_TOKEN": "request-token"})
+                                           "ACTIONS_ID_TOKEN_REQUEST_TOKEN": "request-token",
+                                           "GITHUB_EVENT_NAME": "release", "GITHUB_REF_NAME": "v0.3.2"})
         context.start()
         self.addCleanup(context.stop)
         context = patch("builtins.print")
@@ -98,6 +99,16 @@ class CloudPublicationTests(unittest.TestCase):
 
         cloud.urlopen.side_effect = respond
         self.assertEqual(cloud.publish(), "0.3.2")
+
+    def test_push_identity_or_wrong_release_tag_never_requests_oidc(self):
+        for event, tag in [("push", "main"), ("workflow_dispatch", "v0.3.2"), ("release", "v0.3.1")]:
+            with self.subTest(event=event, tag=tag), patch.dict("os.environ", {
+                "GITHUB_EVENT_NAME": event, "GITHUB_REF_NAME": tag,
+            }):
+                with self.assertRaisesRegex(ValueError, "release event.*matching version tag"):
+                    cloud.publish()
+        cloud.urlopen.assert_not_called()
+        cloud.release_by_tag.assert_not_called()
 
     def test_bad_checksum_or_missing_asset_never_requests_oidc(self):
         self.checksum = f"{'0' * 64}  {self.filename}\n"
