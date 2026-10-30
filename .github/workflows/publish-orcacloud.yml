@@ -1,0 +1,30 @@
+name: Publish to Orca Cloud
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: orca-cloud-${{ github.event.release.tag_name }}
+  cancel-in-progress: false
+
+jobs:
+  publish-cloud:
+    if: github.event.release.prerelease == false
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d # v5
+        with:
+          cache: false
+      - name: Publish the GitHub release artifact to Orca Cloud
+        run: mise run release:publish-cloud
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}

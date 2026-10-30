@@ -19,6 +19,8 @@ def publish():
     if parse_version(version)[1]:
         raise ValueError("Development versions cannot be published to Orca Cloud")
     tag = "v" + version
+    if os.environ.get("GITHUB_EVENT_NAME") != "release" or os.environ.get("GITHUB_REF_NAME") != tag:
+        raise ValueError("Orca Cloud publishing requires a release event with the matching version tag")
     release = release_by_tag(tag)
     if release["draft"] or release["prerelease"]:
         raise ValueError("Publish the stable GitHub release before uploading to Orca Cloud")
