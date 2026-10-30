@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<title>Snapmaker U1</title><style>
+:root { color-scheme:dark; font:14px system-ui,sans-serif; }
+* { box-sizing:border-box; }
+[hidden] { display:none !important; }
+html,body { margin:0; width:100%; height:100%; overflow:hidden; background:#0b0e12; color:#fff; }
+.viewer { position:fixed; inset:0; isolation:isolate; background:#0b0e12; }
+#image { width:100%; height:100%; object-fit:contain; display:block; }
+header { position:absolute; inset:0 0 auto; padding:26px 30px 50px; display:flex; align-items:start; justify-content:space-between; gap:24px; background:linear-gradient(#0009,transparent); z-index:3; pointer-events:none; }
+h1 { font-size:19px; font-weight:600; margin:0 0 5px; letter-spacing:-.3px; }
+#target { font-size:12px; color:#ffffffa0; overflow-wrap:anywhere; }
+#printer { margin-left:10px; font-size:12px; font-weight:400; color:#ffffffb0; }
+button { font:inherit; color:inherit; cursor:pointer; border:0; }
+button:disabled { opacity:.5; cursor:default; }
+button:focus-visible { outline:3px solid #68ddbd; outline-offset:5px; }
+#light { pointer-events:auto; display:flex; align-items:center; gap:10px; padding:10px 14px; border:1px solid #ffffff30; border-radius:999px; background:#161c24b3; backdrop-filter:blur(12px); white-space:nowrap; }
+.track { display:inline-flex; align-items:center; width:38px; height:22px; padding:3px; background:#ffffff35; border-radius:99px; transition:background .15s; }
+.thumb { width:16px; height:16px; border-radius:50%; background:white; transition:transform .15s; }
+#light[aria-checked="true"] .track { background:#249b7c; }
+#light[aria-checked="true"] .thumb { transform:translateX(16px); }
+#play,#warning { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:18px; background:radial-gradient(ellipse at center,#26313c80,transparent 70%); z-index:2; }
+#warning { color:#f3c568; padding:30px; text-align:center; pointer-events:none; }
+#warning svg { width:64px; height:64px; fill:none; stroke:currentColor; stroke-width:1.5; stroke-linecap:round; stroke-linejoin:round; }
+.play-circle { width:88px; height:88px; border:1px solid #ffffff4d; border-radius:50%; display:grid; place-items:center; background:#ffffff10; transition:background .15s,transform .15s; }
+#play:hover .play-circle { background:#ffffff20; transform:scale(1.04); }
+#play svg { width:30px; height:30px; margin-left:5px; fill:currentColor; }
+.play-label { font-size:15px; color:#e0e5ec; max-width:480px; padding:0 24px; }
+#empty { position:absolute; inset:0; display:grid; place-items:center; color:#ffffff80; pointer-events:none; }
+footer { position:absolute; inset:auto 0 0; min-height:100px; padding:36px 30px 24px; display:flex; justify-content:space-between; align-items:end; gap:20px; background:linear-gradient(transparent,#0009); z-index:3; pointer-events:none; }
+#camera { font-size:13px; color:#d7dee7; line-height:1.5; max-width:75%; }
+#stop { pointer-events:auto; display:flex; align-items:center; gap:9px; padding:10px 16px; border:1px solid #ffffff40; border-radius:999px; background:#17202bd9; opacity:0; transition:opacity .15s; }
+#stop svg { width:12px; height:12px; fill:currentColor; }
+.viewer:hover #stop,.viewer:focus-within #stop { opacity:1; }
+@media(hover:none) { #stop { opacity:1; } }
+@media(max-width:550px) { header { padding:18px; } footer { padding:36px 18px 18px; } #light { gap:8px; padding:8px 10px; } #target { max-width:180px; } }
+</style></head><body>
+<main class="viewer" aria-label="Snapmaker U1 camera">
+<img id="image" alt="Snapmaker U1 camera" hidden>
+<header><div><h1>Snapmaker U1 <span id="printer">Connecting</span></h1><div id="target">Selected printer</div></div>
+<button id="light" type="button" role="switch" aria-label="Chamber light" aria-checked="false" disabled>
+<span>Light</span><span class="track" aria-hidden="true"><span class="thumb"></span></span></button></header>
+<button id="play" type="button" aria-label="Play camera" disabled><span class="play-circle"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3v18l16-9z"/></svg></span><span id="play-label" class="play-label">Play camera</span></button>
+<div id="warning" role="status" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 2 21h20zM12 9v5m0 3v.01"/></svg><span id="warning-label">Set the printer address in plugin Config.</span></div>
+<div id="empty" hidden>Connecting to camera…</div>
+<footer><div id="camera" role="status">Ready to play</div><button id="stop" type="button" hidden aria-label="Stop camera"><svg viewBox="0 0 12 12" aria-hidden="true"><rect width="12" height="12" rx="2"/></svg>Stop</button></footer>
+</main><script>
+window.addEventListener('error', event => {
+  document.getElementById('camera').textContent = 'Player error: ' + event.message;
+});
+</script><script>
+const $ = id => document.getElementById(id);
+let active = false, playing = false, supported = false, targetUnavailable = false, generation = -1, lastFrame = 0, light = null;
+function clearImage() {
+  $('image').hidden = true;
+  $('image').removeAttribute('src');
+}
+function playbackControls() {
+  $('play').hidden = playing || targetUnavailable;
+  $('warning').hidden = !targetUnavailable;
+  $('stop').hidden = !playing;
+  $('empty').hidden = !playing;
+}
+function stopPlayback() {
+  playing = false;
+  clearImage();
+  playbackControls();
+  $('camera').textContent = 'Stopped';
+}
+function tick() {
+  if (document.hidden) {
+    if (active) {
+      stopPlayback(); active = false;
+      $('light').disabled = true;
+      orca.postMessage({type:'activity', active:false});
+    }
+    return;
+  }
+  active = true;
+  if (playing && Date.now() - lastFrame > 6000) {
+    clearImage(); $('empty').hidden = false;
+    $('camera').textContent = 'Waiting for camera — no recent image';
+  }
+  orca.postMessage({type:'activity', active:true, playing});
+}
+orca.onMessage(data => {
+  if (!active) return;
+  if (data.type === 'selection_changed') {
+    stopPlayback(); supported = false; $('play').disabled = true; $('light').disabled = true;
+    tick(); return;
+  }
+  if (data.type === 'target') {
+    supported = true; targetUnavailable = false; $('play').disabled = false;
+    $('play').hidden = playing; $('warning').hidden = true;
+    $('play-label').textContent = 'Play camera';
+    if (generation !== data.generation) {
+      clearImage(); lastFrame = Date.now();
+      $('empty').hidden = !playing;
+    }
+    if ($('target').textContent !== data.target) {
+      $('printer').textContent = 'Connecting';
+      light = null; $('light').disabled = true;
+    }
+    generation = data.generation; $('target').textContent = data.target;
+    return;
+  }
+  if (data.generation !== undefined && data.generation !== generation) return;
+  if (data.error) {
+    if (typeof data.supported === 'boolean') {
+      targetUnavailable = true;
+      stopPlayback(); supported = false; $('play').disabled = true;
+      $('target').textContent = 'Printer address unavailable'; $('printer').textContent = 'Unavailable';
+      $('warning-label').textContent = data.error;
+    }
+    clearImage(); $('light').disabled = true;
+    $('camera').textContent = data.error; return;
+  }
+  if (data.printer) $('printer').textContent = data.printer;
+  if ('light' in data) {
+    light = data.light;
+    $('light').disabled = light === null;
+    $('light').setAttribute('aria-checked', String(light === true));
+  }
+  if (data.camera && (playing || data.failed)) $('camera').textContent = data.camera;
+  if (data.failed) { clearImage(); $('empty').hidden = false; }
+  if (!playing) { $('empty').hidden = true; return; }
+  if (data.image) {
+    const frameGeneration = data.generation;
+    const acknowledge = () => {
+      if (active && playing && generation === frameGeneration)
+        orca.postMessage({type:'frame', generation:frameGeneration});
+    };
+    $('image').onload = () => {
+      if (active && playing && generation === frameGeneration) {
+        lastFrame = Date.now(); $('image').hidden = false; $('empty').hidden = true;
+      }
+      acknowledge();
+    };
+    $('image').onerror = () => {
+      clearImage(); $('camera').textContent = 'Could not display camera image';
+      acknowledge();
+    };
+    $('image').src = data.image;
+  }
+});
+$('play').onclick = () => {
+  if (document.hidden || !supported) return;
+  playing = true; lastFrame = Date.now();
+  playbackControls(); $('camera').textContent = 'Connecting…'; tick();
+};
+$('stop').onclick = () => { stopPlayback(); tick(); };
+$('light').onclick = () => {
+  if (active && !document.hidden && light !== null)
+    orca.postMessage({type:'light', enabled:!light});
+};
+document.addEventListener('visibilitychange', tick);
+window.addEventListener('pageshow', tick);
+window.addEventListener('pagehide', () => {
+  stopPlayback(); active = false;
+  orca.postMessage({type:'activity', active:false});
+});
+setInterval(tick, 1000);
+tick();
+</script></body></html>
