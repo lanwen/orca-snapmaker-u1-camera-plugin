@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/branding/u1-app-icon.png" alt="Snapmaker U1 camera plugin logo" width="160" height="160">
+</p>
+
 # orca-snapmaker-u1-camera-plugin
 
 A dedicated Snapmaker U1 tab with a full-viewport camera, printer status, and a chamber light toggle.
