@@ -40,7 +40,7 @@ def set_version(root, version):
         if in_project and re.match(r"version\s*=", line):
             lines[index] = f'version = "{version}"\n'
             path.write_text("".join(lines), encoding="utf-8")
-            subprocess.run(["uv", "lock", "--offline"], cwd=root, check=True)
+            subprocess.run(["uv", "lock"], cwd=root, check=True)
             return
     raise ValueError("Missing [project].version")
 
