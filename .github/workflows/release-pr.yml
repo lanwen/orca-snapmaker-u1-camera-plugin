@@ -4,6 +4,15 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      mode:
+        type: choice
+        options: [release, snapshot]
+        default: release
+      release_version:
+        description: Published version for snapshot preparation
+        type: string
+        required: false
   workflow_call:
     inputs:
       mode:
@@ -27,6 +36,10 @@ jobs:
   prepare:
     if: vars.RELEASE_APP_CLIENT_ID != ''
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
     steps:
       - name: Generate GitHub App token
         id: app-token
@@ -56,6 +69,7 @@ jobs:
           RELEASE_MODE: ${{ inputs.mode || 'release' }}
           RELEASE_VERSION: ${{ inputs.release_version }}
       - name: Open or update version PR
+        id: version-pr
         if: steps.prepare.outputs.changed == 'true'
         uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
         with:
@@ -72,3 +86,13 @@ jobs:
             pyproject.toml
             uv.lock
             CHANGELOG.md
+      - name: Merge snapshot PR after checks pass
+        if: steps.prepare.outputs.branch == 'automation/next-snapshot' && steps.version-pr.outputs.pull-request-number != ''
+        run: mise run release:merge-snapshot
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GH_CHECKS_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          SNAPSHOT_PR: ${{ steps.version-pr.outputs.pull-request-number }}
+          SNAPSHOT_HEAD_SHA: ${{ steps.version-pr.outputs.pull-request-head-sha }}
+          SNAPSHOT_VERSION: ${{ steps.prepare.outputs.version }}

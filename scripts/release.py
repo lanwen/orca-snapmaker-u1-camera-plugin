@@ -7,6 +7,7 @@ from pathlib import Path
 import re
 import subprocess
 import tempfile
+import time
 
 from build import ROOT, build
 from versioning import next_snapshot, parse_change, parse_version, read_version, release_version, set_version
@@ -96,8 +97,9 @@ def check_pr(event):
         raise ValueError("Release PR title must match the final pyproject.toml version")
 
 
-def gh(*args):
-    result = subprocess.run(["gh", *args], cwd=ROOT, capture_output=True, text=True)
+def gh(*args, token=None):
+    env = dict(os.environ, GH_TOKEN=token) if token else None
+    result = subprocess.run(["gh", *args], cwd=ROOT, capture_output=True, text=True, env=env)
     if result.returncode:
         raise RuntimeError(result.stderr.strip() or "GitHub request failed")
     return result.stdout
@@ -110,6 +112,34 @@ def api(path, optional=False):
         if optional and "HTTP 404" in str(error):
             return None
         raise
+
+
+def merge_snapshot(number, sha, version):
+    if number < 1 or not re.fullmatch(r"[0-9a-f]{40}", sha) or not parse_version(version)[1]:
+        raise ValueError("Expected a snapshot PR number, commit SHA, and development version")
+    pr = api(f"pulls/{number}")
+    if (pr["state"] != "open" or pr["draft"] or pr["base"]["ref"] != "main"
+            or pr["head"]["ref"] != "automation/next-snapshot" or pr["head"]["sha"] != sha
+            or pr["head"]["repo"]["full_name"] != repository()
+            or pr["title"] != f"chore(snapshot): start {version}"
+            or not any(label["name"] == "snapshot" for label in pr["labels"])):
+        raise ValueError("Only the generated snapshot PR can be merged automatically")
+    files = api(f"pulls/{number}/files?per_page=100")
+    if {file["filename"] for file in files} != {"pyproject.toml", "uv.lock"}:
+        raise ValueError("Snapshot PR must change only pyproject.toml and uv.lock")
+    for _ in range(120):
+        runs = json.loads(gh("run", "list", "--repo", repository(), "--workflow", "check.yml",
+                             "--event", "pull_request", "--commit", sha, "--limit", "1",
+                             "--json", "status,conclusion", token=os.environ.get("GH_CHECKS_TOKEN")))
+        if runs and runs[0]["status"] == "completed":
+            conclusion = runs[0]["conclusion"]
+            if conclusion == "success":
+                return gh("pr", "merge", str(number), "--repo", repository(), "--squash",
+                          "--match-head-commit", sha)
+            if conclusion != "cancelled":
+                raise ValueError("Snapshot PR check did not pass: " + conclusion)
+        time.sleep(5)
+    raise ValueError("Timed out waiting for snapshot PR checks")
 
 
 def tag_commit(tag):
@@ -196,7 +226,7 @@ def publish():
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=["info", "prepare-pr", "check-pr", "publish"])
+    parser.add_argument("command", choices=["info", "prepare-pr", "check-pr", "merge-snapshot", "publish"])
     args = parser.parse_args()
     if args.command == "info":
         version = read_version(ROOT)
@@ -212,6 +242,8 @@ def main():
             print(f"{key}={value}")
     elif args.command == "check-pr":
         check_pr(json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text(encoding="utf-8")))
+    elif args.command == "merge-snapshot":
+        merge_snapshot(int(os.environ["SNAPSHOT_PR"]), os.environ["SNAPSHOT_HEAD_SHA"], os.environ["SNAPSHOT_VERSION"])
     else:
         print(publish())
 

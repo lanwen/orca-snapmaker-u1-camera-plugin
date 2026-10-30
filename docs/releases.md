@@ -12,7 +12,13 @@ Use Conventional Commit PR titles and squash merges so the merged commit carries
    The workflow verifies the files in a draft release before publishing it.
 3. Successful publication opens a signed PR on `automation/next-snapshot` for the next patch development version.
    For example, release `0.3.0` is followed by `0.3.1.dev0`.
+   The workflow waits for the snapshot commit's Check workflow to pass, then squash-merges that exact commit.
    Development versions are not published as GitHub releases.
+
+Only snapshot PRs merge automatically.
+Release PRs still require a manual merge.
+The snapshot PR must change only `pyproject.toml` and `uv.lock`.
+Failed or missing checks leave the PR open.
 
 Release versions follow these Conventional Commit rules:
 

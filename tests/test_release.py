@@ -5,7 +5,7 @@ import sys
 import tempfile
 import tomllib
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 
 ROOT = Path(__file__).parents[1]
@@ -130,6 +130,69 @@ class PreparationTests(ReleaseFixture):
         self.assertEqual(len(changes), 1)
         self.assertTrue(changes[0][2].breaking)
         self.assertEqual(git.call_args.args[-1], "v0.3.0..HEAD")
+
+
+class SnapshotMergeTests(unittest.TestCase):
+    def setUp(self):
+        self.sha = "a" * 40
+        self.pr = {"state": "open", "draft": False, "title": "chore(snapshot): start 0.3.1.dev0",
+                   "base": {"ref": "main"}, "head": {"ref": "automation/next-snapshot", "sha": self.sha,
+                                                       "repo": {"full_name": "example/plugin"}},
+                   "labels": [{"name": "snapshot"}]}
+        self.files = [{"filename": "pyproject.toml"}, {"filename": "uv.lock"}]
+        context = patch.object(release, "api", side_effect=lambda path: self.files if "/files?" in path else self.pr)
+        context.start()
+        self.addCleanup(context.stop)
+        context = patch.dict("os.environ", {"GH_REPO": "example/plugin", "GH_CHECKS_TOKEN": "checks-token"})
+        context.start()
+        self.addCleanup(context.stop)
+        self.github = Mock(return_value=json.dumps([{"status": "completed", "conclusion": "success"}]))
+        context = patch.object(release, "gh", self.github)
+        context.start()
+        self.addCleanup(context.stop)
+        context = patch.object(release.time, "sleep")
+        context.start()
+        self.addCleanup(context.stop)
+
+    def test_only_the_checked_snapshot_commit_is_squash_merged(self):
+        release.merge_snapshot(3, self.sha, "0.3.1.dev0")
+        self.github.assert_any_call("run", "list", "--repo", "example/plugin", "--workflow", "check.yml",
+                                    "--event", "pull_request", "--commit", self.sha, "--limit", "1",
+                                    "--json", "status,conclusion", token="checks-token")
+        self.github.assert_any_call("pr", "merge", "3", "--repo", "example/plugin", "--squash",
+                                    "--match-head-commit", self.sha)
+
+    def test_waits_for_registered_checks_and_replacements_of_cancelled_runs(self):
+        self.github.side_effect = [json.dumps(runs) for runs in [[],
+            [{"status": "in_progress", "conclusion": None}],
+            [{"status": "completed", "conclusion": "cancelled"}],
+            [{"status": "completed", "conclusion": "success"}]]] + [""]
+        release.merge_snapshot(3, self.sha, "0.3.1.dev0")
+        self.assertEqual(self.github.call_args.args[:2], ("pr", "merge"))
+
+    def test_failed_or_missing_checks_never_merge(self):
+        for runs in [[], [{"status": "completed", "conclusion": "failure"}]]:
+            with self.subTest(runs=runs):
+                self.github.reset_mock()
+                self.github.return_value = json.dumps(runs)
+                with self.assertRaises(ValueError):
+                    release.merge_snapshot(3, self.sha, "0.3.1.dev0")
+                self.assertFalse(any(call.args[:2] == ("pr", "merge") for call in self.github.call_args_list))
+
+    def test_release_prs_changed_heads_and_unexpected_files_never_merge(self):
+        cases = [lambda: self.pr["head"].update(ref="automation/release"),
+                 lambda: self.pr["head"].update(sha="b" * 40),
+                 lambda: self.pr["head"]["repo"].update(full_name="someone/fork"),
+                 lambda: self.files.append({"filename": "src/plugin.py"})]
+        for mutate in cases:
+            with self.subTest(mutate=mutate):
+                original = json.loads(json.dumps(self.pr))
+                files = self.files.copy()
+                mutate()
+                with self.assertRaises(ValueError):
+                    release.merge_snapshot(3, self.sha, "0.3.1.dev0")
+                self.github.assert_not_called()
+                self.pr, self.files = original, files
 
 
 class FakeGitHub:

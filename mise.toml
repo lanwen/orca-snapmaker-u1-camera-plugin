@@ -39,3 +39,7 @@ run = "python scripts/release.py prepare-pr"
 [tasks."release:check-pr"]
 description = "Check the PR title and development/release version policy"
 run = "python scripts/release.py check-pr"
+
+[tasks."release:merge-snapshot"]
+description = "Merge the generated snapshot PR after its checks pass"
+run = "python scripts/release.py merge-snapshot"

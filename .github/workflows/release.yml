@@ -48,6 +48,9 @@ jobs:
 
   next-snapshot:
     needs: [validate, publish]
+    permissions:
+      contents: read
+      actions: read
     uses: ./.github/workflows/release-pr.yml
     with:
       mode: snapshot
