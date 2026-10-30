@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.3
+
+- ci: publish GitHub release assets to Orca Cloud (#11) ([3bcf58a](https://github.com/lanwen/orca-snapmaker-u1-camera-plugin/commit/3bcf58a87c062fd64fb1a76300ae3c147d3b802e))
+
 ## 0.3.2
 
 - fix: require consent before reading preset connection settings (#9) ([774985e](https://github.com/lanwen/orca-snapmaker-u1-camera-plugin/commit/774985eef5b3832dfa3d399c3d2a0a292a262d09))
