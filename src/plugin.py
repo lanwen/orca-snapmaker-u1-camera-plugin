@@ -286,6 +286,10 @@ class U1Page(orca.pages.PagesPluginCapabilityBase):
             if not self.save_config(json.dumps(dict(config, allow_preset_connection=permissions))):
                 self.preset_connection_save_failed = True
                 raise ValueError('Cannot save preset permission. Set "host" manually or reload the plugin to retry.')
+            effective = json.loads(self.get_config()).get("allow_preset_connection")
+            if not isinstance(effective, dict) or effective.get(identity) is not allowed:
+                self.preset_connection_save_failed = True
+                raise ValueError('Cannot save effective preset permission. Check Config or set "host" manually.')
             return allowed
         finally:
             self.preset_connection_prompt_open = False

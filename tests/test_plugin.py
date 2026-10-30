@@ -470,6 +470,19 @@ class TargetTests(unittest.TestCase):
         preset = orca.host.preset_bundle().current_printer_preset()
         self.assertNotIn("print_host", [call.args[0] for call in preset.config_value.call_args_list])
 
+    def test_saved_approval_must_be_visible_in_effective_config(self):
+        page = self.make_page({"printer_model": "Snapmaker U1", "print_host": "printer.local"}, {})
+        # A preset override can hide a successful global save from get_config().
+        page.get_config = lambda: "{}"
+        orca.host.ui.message.return_value = "yes"
+        with self.assertRaisesRegex(ValueError, "save.*permission"):
+            page.selected_target()
+        with self.assertRaisesRegex(ValueError, "access is disabled"):
+            page.selected_target()
+        orca.host.ui.message.assert_called_once()
+        preset = orca.host.preset_bundle().current_printer_preset()
+        self.assertNotIn("print_host", [call.args[0] for call in preset.config_value.call_args_list])
+
     def test_selection_change_during_consent_cannot_read_another_presets_credentials(self):
         values = {"printer_model": "Snapmaker U1", "print_host": "first.local"}
         page = self.make_page(values, {}, file="/profiles/first.json")

@@ -35,6 +35,7 @@ Before reading the address (`print_host`) or API key (`printhost_apikey`), it as
 Decisions are saved per preset in `allow_preset_connection` in plugin Config, using its file path or, when unavailable, its name.
 The current preset must have its own saved approval before its connection settings are read.
 There is no cached Yes that can override a cleared or revoked decision.
+After saving a decision, the plugin reads it back from Orca's effective configuration before allowing access.
 Legacy global approvals require new consent for each preset.
 Declining prevents both connection-setting reads and the JSON file fallback.
 If the API has no address, it checks only that selected preset's JSON file, when available.
