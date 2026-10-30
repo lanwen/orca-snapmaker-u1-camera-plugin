@@ -119,6 +119,21 @@ def tag_commit(tag):
     return api(f"commits/{tag}")  # Resolve annotated tags to their underlying commit too.
 
 
+def release_by_tag(tag, optional=False):
+    # Listing includes drafts, which the tag endpoint omits until publication.
+    page = 1
+    while True:
+        releases = api(f"releases?per_page=100&page={page}")
+        for release in releases:
+            if release["tag_name"] == tag:
+                return release
+        if len(releases) < 100:
+            if optional:
+                return None
+            raise ValueError(f"Release {tag} was not found")
+        page += 1
+
+
 def verify_commit(release, tag, sha):
     commit = tag_commit(tag)
     if commit is not None:
@@ -155,7 +170,7 @@ def publish():
     tag = "v" + version
     artifact = build(release_tag=tag)
     assets = [artifact, artifact.with_name("SHA256SUMS")]
-    release = api(f"releases/tags/{tag}", optional=True)
+    release = release_by_tag(tag, optional=True)
     if release is None:
         commit = tag_commit(tag)
         if commit is not None and commit["sha"] != sha:
@@ -168,18 +183,18 @@ def publish():
         notes.write_text(section[1].strip() + f"\n\nSource commit: `{sha}`.\n", encoding="utf-8")
         gh("release", "create", tag, "--draft", "--target", sha, "--title", f"Snapmaker U1 {tag}",
            "--notes-file", str(notes), "--repo", repository())
-        release = api(f"releases/tags/{tag}")
+        release = release_by_tag(tag)
     verify_commit(release, tag, sha)
     missing = verify_assets(release, tag, assets)
     if release["draft"]:
         if missing:
             gh("release", "upload", tag, *map(str, missing), "--repo", repository())
-        release = api(f"releases/tags/{tag}")
+        release = release_by_tag(tag)
         if verify_assets(release, tag, assets):
             raise ValueError("Draft release is missing assets")
         verify_commit(release, tag, sha)
         gh("release", "edit", tag, "--draft=false", "--repo", repository())
-        verify_commit(api(f"releases/tags/{tag}"), tag, sha)
+        verify_commit(release_by_tag(tag), tag, sha)
     return tag
 
 

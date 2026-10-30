@@ -149,8 +149,12 @@ class FakeGitHub:
                 return json.dumps({"sha": self.tag_sha})
             if "/commits/" in args[1]:
                 raise RuntimeError("No commit found for SHA: v0.3.0 (HTTP 422)")
-            if "/releases/tags/" in args[1] and self.release:
+            if "/releases/tags/" in args[1] and self.release and not self.release["draft"]:
                 return json.dumps(dict(self.release, assets=[{"name": name} for name in self.assets]))
+            if "/releases?" in args[1]:
+                records = ([dict(self.release, tag_name="v0.3.0", assets=[{"name": name} for name in self.assets])]
+                           if self.release else [])
+                return json.dumps(records)
             raise RuntimeError("Not Found (HTTP 404)")
         operation = args[1]
         if operation == "create":
@@ -240,6 +244,13 @@ class PublicationTests(ReleaseFixture):
             with self.assertRaisesRegex(RuntimeError, "HTTP 422"):
                 release.publish()
         self.assertFalse(any(call[0] == "release" for call in self.github.calls))
+
+    def test_release_lookup_finds_drafts_beyond_the_first_page(self):
+        draft = {"tag_name": "v0.3.0", "draft": True}
+        with patch.object(release, "api", side_effect=[[{"tag_name": "other"}] * 100, [draft]]) as api:
+            self.assertEqual(release.release_by_tag("v0.3.0"), draft)
+        self.assertEqual([call.args[0] for call in api.call_args_list],
+                         ["releases?per_page=100&page=1", "releases?per_page=100&page=2"])
 
     def test_dirty_checkout_cannot_publish(self):
         with patch.object(release, "git", return_value=" M pyproject.toml"):
