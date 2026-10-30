@@ -61,7 +61,8 @@ class ReleaseFixture(unittest.TestCase):
             context = patch.object(module, "ROOT", self.root)
             context.start()
             self.addCleanup(context.stop)
-        env = patch.dict("os.environ", {"GH_REPO": "example/plugin"})
+        # Release preparation must work without a developer's cached package metadata.
+        env = patch.dict("os.environ", {"GH_REPO": "example/plugin", "UV_CACHE_DIR": str(self.root / "uv-cache")})
         env.start()
         self.addCleanup(env.stop)
 
