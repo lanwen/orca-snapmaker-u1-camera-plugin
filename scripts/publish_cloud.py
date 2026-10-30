@@ -1,13 +1,16 @@
 """Publish the verified GitHub release artifact to the connected Orca Cloud plugin."""
 
+import hashlib
 import json
 import os
+from pathlib import Path
+import tempfile
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 import uuid
 
 from build import ROOT
-from release import git, release_by_tag, verify_assets, verify_commit
+from release import gh, git, release_by_tag, verify_commit
 from versioning import parse_version, read_version
 
 
@@ -20,8 +23,14 @@ def publish():
     if release["draft"] or release["prerelease"]:
         raise ValueError("Publish the stable GitHub release before uploading to Orca Cloud")
     verify_commit(release, tag, git("rev-parse", "HEAD"))
-    artifact = ROOT / "dist/orca-snapmaker-u1-camera-plugin_any.py"
-    verify_assets(release, tag, [artifact, artifact.with_name("SHA256SUMS")])
+    filename = "orca-snapmaker-u1-camera-plugin_any.py"
+    with tempfile.TemporaryDirectory() as directory:
+        gh("release", "download", tag, "--dir", directory,
+           "--pattern", filename, "--pattern", "SHA256SUMS")
+        artifact = (Path(directory) / filename).read_bytes()
+        checksum = (Path(directory) / "SHA256SUMS").read_text(encoding="utf-8").strip()
+        if checksum != f"{hashlib.sha256(artifact).hexdigest()}  {filename}":
+            raise ValueError("Released plugin does not match SHA256SUMS")
 
     oidc_url = os.environ["ACTIONS_ID_TOKEN_REQUEST_URL"] + "&audience=orcacloud"
     request = Request(oidc_url, headers={
@@ -37,9 +46,9 @@ def publish():
     boundary = uuid.uuid4().hex
     body = (
         f'--{boundary}\r\nContent-Disposition: form-data; name="metadata"\r\n\r\n{metadata}\r\n'
-        f'--{boundary}\r\nContent-Disposition: form-data; name="files"; filename="{artifact.name}"\r\n'
+        f'--{boundary}\r\nContent-Disposition: form-data; name="files"; filename="{filename}"\r\n'
         'Content-Type: application/octet-stream\r\n\r\n'
-    ).encode("utf-8") + artifact.read_bytes() + f"\r\n--{boundary}--\r\n".encode("ascii")
+    ).encode("utf-8") + artifact + f"\r\n--{boundary}--\r\n".encode("ascii")
     request = Request("https://api.orcaslicer.com/api/v1/plugin-publish/releases", data=body, headers={
         "Authorization": "Bearer " + token,
         "Content-Type": "multipart/form-data; boundary=" + boundary,

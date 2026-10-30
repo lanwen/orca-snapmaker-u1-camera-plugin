@@ -73,9 +73,9 @@ See the [trusted publishing guide](https://cloud.orcaslicer.com/wiki/#publish-fr
 
 The `publish-cloud` job depends on the GitHub `publish` job.
 Only the Cloud job grants `id-token: write`; its repository access is read-only.
-It runs `mise run release:publish-cloud`, which rebuilds the plugin in the fresh checkout.
+It runs `mise run release:publish-cloud`, which downloads the released plugin and `SHA256SUMS` from GitHub.
 It requests a short-lived GitHub OIDC token with audience `orcacloud`.
-It verifies the source commit and compares the rebuilt plugin and checksum against the immutable GitHub assets before uploading.
+It verifies the source commit and checks the downloaded plugin against `SHA256SUMS` before uploading those exact bytes.
 The version comes from `pyproject.toml`, and the changelog comes from the published GitHub release notes.
 It does not use `GITHUB_REF_NAME` because this workflow runs on `main`, not a release tag.
 The upload runs directly in this workflow, so it does not depend on a separate `release: published` event.
