@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.2
+
+- fix: require consent before reading preset connection settings (#9) ([774985e](https://github.com/lanwen/orca-snapmaker-u1-camera-plugin/commit/774985eef5b3832dfa3d399c3d2a0a292a262d09))
+- ci: fix snapshot check lookup and skip full tests for version bumps (#7) ([4327e67](https://github.com/lanwen/orca-snapmaker-u1-camera-plugin/commit/4327e67f9942b42b46f89859ec261a274b9c77a3))
+
 ## 0.3.1
 
 - docs: add approved U1 branding and README logo (#5) ([c9d119e](https://github.com/lanwen/orca-snapmaker-u1-camera-plugin/commit/c9d119e07315a2be4f1d04ca14af8468f24538cb))
