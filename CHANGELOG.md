@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.5
+
+- docs: replace app icon with a transparent vector render (#19) ([ae1cedb](https://github.com/lanwen/orca-snapmaker-u1-camera-plugin/commit/ae1cedb859ec9e15ccf0a344f019faf1a26ab113))
+- fix(ci): publish to Orca Cloud from release events (#17) ([6da6fde](https://github.com/lanwen/orca-snapmaker-u1-camera-plugin/commit/6da6fdefd061662e201f6ee5fd93bb549d43929d))
+
 ## 0.3.4
 
 - fix: identify the Cloud publisher to avoid Cloudflare rejection (#14) ([25cc0ee](https://github.com/lanwen/orca-snapmaker-u1-camera-plugin/commit/25cc0eef8b14351ab285ae13f84e147a5145eb48))
