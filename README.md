@@ -21,7 +21,7 @@ The stock HTTP connection is unencrypted, so use a trusted network.
 4. Allow the background thread and access to your printer when Orca asks.
 5. Select a Snapmaker U1 printer in Prepare, then open the Snapmaker U1 tab.
 
-The plugin asks before using each printer preset's address and API key and remembers your choice for that preset.
+The plugin asks once before using selected U1 presets' addresses and API keys and remembers your choice.
 You can decline and configure an address manually instead.
 If the page asks for an address, open the plugin's Config tab and save:
 

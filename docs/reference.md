@@ -32,11 +32,11 @@ Test the embedded webview when upgrading Orca or using another platform.
 An explicit plugin host takes priority over the selected preset.
 Without it, the plugin reads the selected U1 printer preset's connection settings through Orca's API.
 Before reading the address (`print_host`) or API key (`printhost_apikey`), it asks for consent in a native dialog.
-Decisions are saved per preset in `allow_preset_connection` in plugin Config, using its file path or, when unavailable, its name.
-The current preset must have its own saved approval before its connection settings are read.
+The decision is saved as `allow_preset_connection` in plugin Config and applies to all selected U1 presets.
+Switching presets does not require another confirmation.
+The current saved decision is checked before reading connection settings.
 There is no cached Yes that can override a cleared or revoked decision.
 After saving a decision, the plugin reads it back from Orca's effective configuration before allowing access.
-Legacy global approvals require new consent for each preset.
 Declining prevents both connection-setting reads and the JSON file fallback.
 If the API has no address, it checks only that selected preset's JSON file, when available.
 Orca's configured-device API deliberately omits IP addresses and credentials, and physical printer connections are not exposed through the preset-bundle API.

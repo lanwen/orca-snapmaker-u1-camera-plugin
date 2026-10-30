@@ -243,24 +243,15 @@ class U1Page(orca.pages.PagesPluginCapabilityBase):
         return "Snapmaker U1"
 
     def get_default_config(self):
-        return {"host": "", "allow_preset_connection": {}}
+        return {"host": "", "allow_preset_connection": None}
 
     def get_ui(self):
         if self.monitor:
             self.monitor.update(None)
         return PAGE
 
-    def allow_preset_connection(self, config, preset):
-        permissions = config.get("allow_preset_connection")
-        if permissions is False:
-            return False
-        # Legacy global approvals must be confirmed for the selected preset.
-        permissions = permissions if isinstance(permissions, dict) else {}
-        file, name = setting(preset.file), setting(preset.name)
-        if not file and not name:
-            raise ValueError('Cannot identify the selected preset. Set "host" in plugin Config.')
-        identity = "file:" + file if file else "name:" + name
-        allowed = permissions.get(identity)
+    def allow_preset_connection(self, config):
+        allowed = config.get("allow_preset_connection")
         if type(allowed) is bool:
             return allowed
         if self.preset_connection_prompt_open or self.preset_connection_save_failed:
@@ -268,26 +259,22 @@ class U1Page(orca.pages.PagesPluginCapabilityBase):
         # Fail closed if the modal dialog lets another page message run.
         self.preset_connection_prompt_open = True
         try:
-            file_description = f"Preset file: {file}\n\n" if file else ""
             choice = orca.host.ui.message(
-                f'Allow this plugin to read the printer address and API key for preset "{name}"?\n\n{file_description}'
+                "Allow this plugin to read the selected Snapmaker U1 preset's printer address and API key?\n\n"
                 "The connection fields are print_host and printhost_apikey. "
-                "If Orca's API has no address, it reads only this preset's JSON file.\n\n"
-                "Your choice applies only to this preset and is saved in plugin Config "
+                "If Orca's API has no address, it reads only the selected preset's JSON file.\n\n"
+                "Your choice applies to all selected U1 presets and is saved in plugin Config "
                 "as allow_preset_connection. Choose No to set host manually instead.",
                 title="Snapmaker U1: printer connection access", buttons="yes_no", icon="question")
             config = json.loads(self.get_config())
             if config.get("allow_preset_connection") is False:
                 return False
-            permissions = config.get("allow_preset_connection")
-            permissions = permissions if isinstance(permissions, dict) else {}
             allowed = choice == "yes"
-            permissions = {**permissions, identity: allowed}
-            if not self.save_config(json.dumps(dict(config, allow_preset_connection=permissions))):
+            if not self.save_config(json.dumps(dict(config, allow_preset_connection=allowed))):
                 self.preset_connection_save_failed = True
                 raise ValueError('Cannot save preset permission. Set "host" manually or reload the plugin to retry.')
             effective = json.loads(self.get_config()).get("allow_preset_connection")
-            if not isinstance(effective, dict) or effective.get(identity) is not allowed:
+            if effective is not allowed:
                 self.preset_connection_save_failed = True
                 raise ValueError('Cannot save effective preset permission. Check Config or set "host" manually.')
             return allowed
@@ -304,9 +291,9 @@ class U1Page(orca.pages.PagesPluginCapabilityBase):
         selection = setting(preset.file), setting(preset.name)
         if not is_u1_preset(preset):
             raise UnsupportedPrinter('Cannot determine a Snapmaker U1 address. Select a U1 preset or set "host" in plugin Config.')
-        if not self.allow_preset_connection(config, preset):
+        if not self.allow_preset_connection(config):
             raise ValueError('Preset connection access is disabled. Set "host" in plugin Config, '
-                             'or reset "allow_preset_connection" to {} to ask again.')
+                             'or reset "allow_preset_connection" to null to ask again.')
         # The modal consent dialog can dispatch selection events; refresh host handles.
         bundle = orca.host.preset_bundle()
         preset = bundle.current_printer_preset()

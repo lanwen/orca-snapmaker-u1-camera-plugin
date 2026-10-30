@@ -355,8 +355,7 @@ class TargetTests(unittest.TestCase):
         bundle.full_config_value.return_value = None
         page = plugin.U1Page()
         if config is None:
-            identity = "file:" + file if file else "name:" + preset.name
-            config = {"allow_preset_connection": {identity: True}}
+            config = {"allow_preset_connection": True}
         page.get_config = lambda: json.dumps(config)
 
         def save_config(value):
@@ -388,7 +387,7 @@ class TargetTests(unittest.TestCase):
                     read_file.assert_not_called()
                 orca.host.ui.message.assert_called_once()
                 page.save_config.assert_called_once_with(json.dumps({
-                    "allow_preset_connection": {"name:Custom printer": choice == "yes"},
+                    "allow_preset_connection": choice == "yes",
                 }))
                 if choice != "yes":
                     preset = orca.host.preset_bundle().current_printer_preset()
@@ -414,26 +413,17 @@ class TargetTests(unittest.TestCase):
             page.selected_target()
         self.assertEqual(orca.host.ui.message.call_count, 2)
 
-    def test_permission_does_not_follow_selection_to_another_preset(self):
-        page = self.make_page({"printer_model": "Snapmaker U1", "print_host": "printer.local",
-                               "printhost_apikey": "key"}, {}, file="/profiles/first.json")
+    def test_one_approval_covers_future_u1_preset_selections(self):
+        values = {"printer_model": "Snapmaker U1", "print_host": "first.local", "printhost_apikey": "first-key"}
+        page = self.make_page(values, {}, file="/profiles/first.json")
         orca.host.ui.message.return_value = "yes"
-        self.assertEqual(page.selected_target(), ("http://printer.local", "key"))
+        self.assertEqual(page.selected_target(), ("http://first.local", "first-key"))
         preset = orca.host.preset_bundle().current_printer_preset()
         preset.file = "/profiles/second.json"
-        preset.config_value.reset_mock()
-        orca.host.ui.message.return_value = "no"
+        values.update(print_host="second.local", printhost_apikey="second-key")
         page.on_lifecycle_event(orca.LifecycleEvent.PresetSelected, types.SimpleNamespace(msg="printer"))
-        with patch.object(plugin, "saved_connection") as read_file:
-            with self.assertRaisesRegex(ValueError, "access is disabled"):
-                page.selected_target()
-            read_file.assert_not_called()
-        self.assertNotIn("print_host", [call.args[0] for call in preset.config_value.call_args_list])
-        self.assertNotIn("printhost_apikey", [call.args[0] for call in preset.config_value.call_args_list])
-        self.assertEqual(orca.host.ui.message.call_count, 2)
-        preset.file = "/profiles/first.json"
-        self.assertEqual(page.selected_target(), ("http://printer.local", "key"))
-        self.assertEqual(orca.host.ui.message.call_count, 2)
+        self.assertEqual(page.selected_target(), ("http://second.local", "second-key"))
+        orca.host.ui.message.assert_called_once()
 
     def test_revocation_blocks_connection_reads_after_selection(self):
         config = {}
@@ -453,12 +443,11 @@ class TargetTests(unittest.TestCase):
         self.assertNotIn("print_host", [call.args[0] for call in preset.config_value.call_args_list])
         self.assertNotIn("printhost_apikey", [call.args[0] for call in preset.config_value.call_args_list])
 
-    def test_legacy_global_yes_requires_preset_approval(self):
+    def test_existing_global_approval_does_not_prompt_again(self):
         page = self.make_page({"printer_model": "Snapmaker U1", "print_host": "printer.local"},
                               {"allow_preset_connection": True})
-        with self.assertRaisesRegex(ValueError, "access is disabled"):
-            page.selected_target()
-        orca.host.ui.message.assert_called_once()
+        self.assertEqual(page.selected_target(), ("http://printer.local", ""))
+        orca.host.ui.message.assert_not_called()
 
     def test_failed_permission_save_does_not_allow_connection_reads(self):
         page = self.make_page({"printer_model": "Snapmaker U1", "print_host": "printer.local"}, {})
@@ -483,7 +472,7 @@ class TargetTests(unittest.TestCase):
         preset = orca.host.preset_bundle().current_printer_preset()
         self.assertNotIn("print_host", [call.args[0] for call in preset.config_value.call_args_list])
 
-    def test_selection_change_during_consent_cannot_read_another_presets_credentials(self):
+    def test_selection_change_during_consent_cannot_mix_connections(self):
         values = {"printer_model": "Snapmaker U1", "print_host": "first.local"}
         page = self.make_page(values, {}, file="/profiles/first.json")
         preset = orca.host.preset_bundle().current_printer_preset()
