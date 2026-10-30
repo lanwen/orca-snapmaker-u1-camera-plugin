@@ -143,8 +143,12 @@ class FakeGitHub:
     def __call__(self, *args):
         self.calls.append(args)
         if args[0] == "api":
+            if "/git/ref/tags/" in args[1] and self.tag_sha:
+                return json.dumps({"object": {"type": "commit", "sha": self.tag_sha}})
             if "/commits/" in args[1] and self.tag_sha:
                 return json.dumps({"sha": self.tag_sha})
+            if "/commits/" in args[1]:
+                raise RuntimeError("No commit found for SHA: v0.3.0 (HTTP 422)")
             if "/releases/tags/" in args[1] and self.release:
                 return json.dumps(dict(self.release, assets=[{"name": name} for name in self.assets]))
             raise RuntimeError("Not Found (HTTP 404)")
@@ -216,6 +220,26 @@ class PublicationTests(ReleaseFixture):
         with self.assertRaisesRegex(ValueError, "another commit"):
             release.publish()
         self.assertFalse(any(call[:2] == ("release", "create") for call in self.github.calls))
+
+    def test_annotated_tag_is_checked_against_its_underlying_commit(self):
+        self.github.tag_sha = self.github.sha
+        def github(*args):
+            if args[0] == "api" and "/git/ref/tags/" in args[1]:
+                return json.dumps({"object": {"type": "tag", "sha": "c" * 40}})
+            return self.github(*args)
+        with patch.object(release, "gh", side_effect=github):
+            self.assertEqual(release.publish(), "v0.3.0")
+        self.assertFalse(self.github.release["draft"])
+
+    def test_tag_lookup_errors_do_not_create_a_release(self):
+        def github(*args):
+            if args[0] == "api" and "/git/ref/tags/" in args[1]:
+                raise RuntimeError("Validation failed (HTTP 422)")
+            return self.github(*args)
+        with patch.object(release, "gh", side_effect=github):
+            with self.assertRaisesRegex(RuntimeError, "HTTP 422"):
+                release.publish()
+        self.assertFalse(any(call[0] == "release" for call in self.github.calls))
 
     def test_dirty_checkout_cannot_publish(self):
         with patch.object(release, "git", return_value=" M pyproject.toml"):

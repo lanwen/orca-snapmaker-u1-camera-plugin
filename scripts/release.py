@@ -112,8 +112,15 @@ def api(path, optional=False):
         raise
 
 
+def tag_commit(tag):
+    # The commits endpoint returns 422 for an unknown tag; the ref endpoint returns 404.
+    if api(f"git/ref/tags/{tag}", optional=True) is None:
+        return None
+    return api(f"commits/{tag}")  # Resolve annotated tags to their underlying commit too.
+
+
 def verify_commit(release, tag, sha):
-    commit = api(f"commits/{tag}", optional=True)
+    commit = tag_commit(tag)
     if commit is not None:
         if commit["sha"] != sha:
             raise ValueError(f"Existing tag {tag} does not point to release commit {sha}")
@@ -150,7 +157,7 @@ def publish():
     assets = [artifact, artifact.with_name("SHA256SUMS")]
     release = api(f"releases/tags/{tag}", optional=True)
     if release is None:
-        commit = api(f"commits/{tag}", optional=True)
+        commit = tag_commit(tag)
         if commit is not None and commit["sha"] != sha:
             raise ValueError(f"Existing tag {tag} points to another commit")
         changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
