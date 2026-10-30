@@ -354,12 +354,63 @@ class TargetTests(unittest.TestCase):
         bundle.current_printer_preset.return_value = preset
         bundle.full_config_value.return_value = None
         page = plugin.U1Page()
-        page.get_config = lambda: json.dumps(config or {})
+        page.get_config = lambda: json.dumps({"allow_preset_connection": True} if config is None else config)
+        page.save_config = Mock(return_value=True)
         page.post_message = Mock()
-        self.host = patch.object(orca, "host", types.SimpleNamespace(preset_bundle=lambda: bundle), create=True)
+        self.host = patch.object(orca, "host", types.SimpleNamespace(preset_bundle=lambda: bundle,
+                                ui=types.SimpleNamespace(message=Mock(return_value="no"))), create=True)
         self.host.start()
         self.addCleanup(self.host.stop)
         return page
+
+    def test_preset_connection_reads_require_consent_and_remember_the_decision(self):
+        for choice in ("yes", "no", "cancel"):
+            with self.subTest(choice=choice):
+                page = self.make_page({"printer_model": "Snapmaker U1", "print_host": "printer.local",
+                                       "printhost_apikey": "secret"}, {})
+                orca.host.ui.message.return_value = choice
+                with patch.object(plugin, "saved_connection") as read_file:
+                    for _ in range(2):
+                        if choice == "yes":
+                            self.assertEqual(page.selected_target(), ("http://printer.local", "secret"))
+                        else:
+                            with self.assertRaisesRegex(ValueError, "access is disabled"):
+                                page.selected_target()
+                    read_file.assert_not_called()
+                orca.host.ui.message.assert_called_once()
+                page.save_config.assert_called_once_with(json.dumps({"allow_preset_connection": choice == "yes"}))
+                if choice != "yes":
+                    preset = orca.host.preset_bundle().current_printer_preset()
+                    self.assertNotIn("print_host", [call.args[0] for call in preset.config_value.call_args_list])
+                    self.assertNotIn("printhost_apikey", [call.args[0] for call in preset.config_value.call_args_list])
+
+    def test_saved_denial_skips_prompt_and_file_read(self):
+        page = self.make_page({"printer_model": "Snapmaker U1"}, {"allow_preset_connection": False})
+        with patch.object(plugin, "saved_connection") as read_file:
+            with self.assertRaisesRegex(ValueError, "access is disabled"):
+                page.selected_target()
+            read_file.assert_not_called()
+        orca.host.ui.message.assert_not_called()
+
+    def test_pending_consent_blocks_reentrant_page_messages(self):
+        page = self.make_page({"printer_model": "Snapmaker U1", "print_host": "printer.local"}, {})
+
+        def confirm(*args, **kwargs):
+            with self.assertRaisesRegex(ValueError, "access is disabled"):
+                page.selected_target()
+            return "yes"
+
+        orca.host.ui.message.side_effect = confirm
+        self.assertEqual(page.selected_target(), ("http://printer.local", ""))
+        orca.host.ui.message.assert_called_once()
+
+    def test_consent_covers_the_selected_file_fallback(self):
+        page = self.make_page({"printer_model": "Snapmaker U1"}, {})
+        orca.host.ui.message.return_value = "yes"
+        with patch.object(plugin, "saved_connection", return_value=("printer.local", "key")) as read_file:
+            self.assertEqual(page.selected_target(), ("http://printer.local", "key"))
+            read_file.assert_called_once()
+        orca.host.ui.message.assert_called_once()
 
     def test_selected_preset_and_manual_host_credential_isolation(self):
         page = self.make_page({"printer_model": "Snapmaker U1", "print_host": "printer.local",

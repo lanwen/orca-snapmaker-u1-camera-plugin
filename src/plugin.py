@@ -236,17 +236,37 @@ class U1Page(orca.pages.PagesPluginCapabilityBase):
     def __init__(self):
         super().__init__()
         self.monitor = None
+        self.preset_connection_allowed = None
 
     def get_name(self):
         return "Snapmaker U1"
 
     def get_default_config(self):
-        return {"host": ""}
+        return {"host": "", "allow_preset_connection": None}
 
     def get_ui(self):
         if self.monitor:
             self.monitor.update(None)
         return PAGE
+
+    def allow_preset_connection(self, config):
+        allowed = config.get("allow_preset_connection")
+        if type(allowed) is bool:
+            return allowed
+        if self.preset_connection_allowed is None:
+            # Fail closed if the modal dialog lets another page message run.
+            self.preset_connection_allowed = False
+            choice = orca.host.ui.message(
+                "Allow this plugin to read the selected Snapmaker U1 preset's printer address "
+                "(print_host) and API key (printhost_apikey)?\n\n"
+                "If Orca's API has no address, it reads that selected preset's JSON file. "
+                "These settings are used only to connect to that printer.\n\n"
+                "Your choice applies to selected U1 presets and is saved in plugin Config "
+                "as allow_preset_connection. Choose No to set host manually instead.",
+                title="Snapmaker U1: printer connection access", buttons="yes_no", icon="question")
+            self.preset_connection_allowed = choice == "yes"
+            self.save_config(json.dumps(dict(config, allow_preset_connection=self.preset_connection_allowed)))
+        return self.preset_connection_allowed
 
     def selected_target(self):
         config = json.loads(self.get_config())
@@ -257,6 +277,9 @@ class U1Page(orca.pages.PagesPluginCapabilityBase):
         preset = bundle.current_printer_preset()
         if not is_u1_preset(preset):
             raise UnsupportedPrinter('Cannot determine a Snapmaker U1 address. Select a U1 preset or set "host" in plugin Config.')
+        if not self.allow_preset_connection(config):
+            raise ValueError('Preset connection access is disabled. Set "host" in plugin Config, '
+                             'or set "allow_preset_connection" to true to allow access.')
         address = setting(preset.config_value("print_host")) or setting(bundle.full_config_value("print_host"))
         key = setting(preset.config_value("printhost_apikey")) or setting(bundle.full_config_value("printhost_apikey"))
         if not address:

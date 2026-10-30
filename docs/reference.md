@@ -31,10 +31,14 @@ Test the embedded webview when upgrading Orca or using another platform.
 
 An explicit plugin host takes priority over the selected preset.
 Without it, the plugin reads the selected U1 printer preset's connection settings through Orca's API.
+Before reading the address (`print_host`) or API key (`printhost_apikey`), it asks for consent in a native dialog.
+The decision is saved as `allow_preset_connection` in plugin Config.
+Declining prevents both connection-setting reads and the JSON file fallback.
 If the API has no address, it checks only that selected preset's JSON file, when available.
 Orca's configured-device API deliberately omits IP addresses and credentials, and physical printer connections are not exposed through the preset-bundle API.
 An address configured only in that device connection still needs the [manual host configuration](configuration.md#printer-connection).
 The plugin does not read Orca's private app configuration or scan unrelated printer presets.
+The API key is used only for requests to the selected printer and stays out of the camera page and logs.
 
 ## Network permissions
 
@@ -42,6 +46,11 @@ Orca can ask for several network permissions when the tab first connects to a pr
 It remembers approved permissions for later requests.
 The plugin declares its background thread permission when it loads.
 Orca's public plugin API cannot group network permissions for a host discovered after loading.
+
+The preset connection confirmation is plugin-level consent, separate from Orca's audit permission prompts.
+Orca allows file reads inside its data directory without an additional prompt.
+Its `fs_read` declarations accept exact paths during registration, not wildcard paths or a preset selected later.
+The plugin therefore asks explicitly before accessing connection settings, even when Orca does not show a file permission prompt.
 
 ## API references
 

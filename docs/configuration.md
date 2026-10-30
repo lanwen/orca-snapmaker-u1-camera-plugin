@@ -4,7 +4,12 @@
 
 ## Printer connection
 
-Without an explicit host, the plugin uses the connection settings from the selected Snapmaker U1 preset.
+Without an explicit host, the plugin asks to read the selected Snapmaker U1 preset's address and API key.
+The confirmation also covers reading that selected preset's JSON file if Orca's API has no address.
+Choose Yes to use the preset connection, or No to configure a host manually.
+The plugin saves your choice as `allow_preset_connection` in Config.
+Set it to `true` to allow access or `false` to disable access.
+This choice applies to selected U1 presets and can be changed at any time.
 If the page asks for an address, open the plugin's Config tab and save:
 
 ```json
@@ -15,6 +20,7 @@ Use the port that serves Moonraker on your printer.
 The stock U1 works on port 80.
 An explicit port such as `:7125` is also accepted.
 A configured host overrides the selected preset until you clear it.
+With an explicit host, the plugin does not read the selected preset or ask for preset connection access.
 It keeps the camera and light controls available regardless of the selected preset.
 If the plugin cannot determine a valid address, the page shows a warning with configuration instructions.
 Orca saves this host in its local plugin settings.
