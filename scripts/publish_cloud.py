@@ -52,6 +52,9 @@ def publish():
     request = Request("https://api.orcaslicer.com/api/v1/plugin-publish/releases", data=body, headers={
         "Authorization": "Bearer " + token,
         "Content-Type": "multipart/form-data; boundary=" + boundary,
+        # Cloudflare rejects urllib's default user-agent before Orca can authenticate.
+        "User-Agent": f"orca-snapmaker-u1-camera-plugin-publisher/{version} "
+                      "(+https://github.com/lanwen/orca-snapmaker-u1-camera-plugin)",
     })
     try:
         with urlopen(request, timeout=120) as response:

@@ -85,6 +85,20 @@ class CloudPublicationTests(unittest.TestCase):
         cloud.gh.assert_not_called()
         cloud.urlopen.assert_not_called()
 
+    def test_upload_identifies_the_application_to_the_cloud_edge(self):
+        def respond(request, **kwargs):
+            if request.full_url.startswith("https://oidc.example/"):
+                return io.BytesIO(b'{"value":"token"}')
+            agent = request.get_header("User-agent") or ""
+            if not agent.startswith("orca-snapmaker-u1-camera-plugin-publisher/"):
+                raise HTTPError(request.full_url, 403, "Forbidden", {}, io.BytesIO(b"error code: 1010"))
+            response = io.BytesIO(b'{}')
+            response.status = 201
+            return response
+
+        cloud.urlopen.side_effect = respond
+        self.assertEqual(cloud.publish(), "0.3.2")
+
     def test_bad_checksum_or_missing_asset_never_requests_oidc(self):
         self.checksum = f"{'0' * 64}  {self.filename}\n"
         with self.assertRaisesRegex(ValueError, "does not match SHA256SUMS"):
