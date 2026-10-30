@@ -33,6 +33,7 @@ run = "python scripts/release.py info"
 
 [tasks."release:publish-cloud"]
 description = "Publish the verified GitHub release to Orca Cloud using GitHub Actions OIDC"
+depends = ["build"]
 tools = { github-cli = "2.102.0" }
 run = "python scripts/publish_cloud.py"
 
