@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.6
+
+- fix: honor revocation of remembered preset access (#21) ([064919e](https://github.com/lanwen/orca-snapmaker-u1-camera-plugin/commit/064919ea6e488b56acaaa5a9700a201694fc33d5))
+
 ## 0.3.5
 
 - docs: replace app icon with a transparent vector render (#19) ([ae1cedb](https://github.com/lanwen/orca-snapmaker-u1-camera-plugin/commit/ae1cedb859ec9e15ccf0a344f019faf1a26ab113))
