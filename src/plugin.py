@@ -236,7 +236,8 @@ class U1Page(orca.pages.PagesPluginCapabilityBase):
     def __init__(self):
         super().__init__()
         self.monitor = None
-        self.preset_connection_allowed = None
+        self.preset_connection_prompt_open = False
+        self.preset_connection_save_failed = False
 
     def get_name(self):
         return "Snapmaker U1"
@@ -253,20 +254,32 @@ class U1Page(orca.pages.PagesPluginCapabilityBase):
         allowed = config.get("allow_preset_connection")
         if type(allowed) is bool:
             return allowed
-        if self.preset_connection_allowed is None:
-            # Fail closed if the modal dialog lets another page message run.
-            self.preset_connection_allowed = False
+        if self.preset_connection_prompt_open or self.preset_connection_save_failed:
+            return False
+        # Fail closed if the modal dialog lets another page message run.
+        self.preset_connection_prompt_open = True
+        try:
             choice = orca.host.ui.message(
-                "Allow this plugin to read the selected Snapmaker U1 preset's printer address "
-                "(print_host) and API key (printhost_apikey)?\n\n"
-                "If Orca's API has no address, it reads that selected preset's JSON file. "
-                "These settings are used only to connect to that printer.\n\n"
-                "Your choice applies to selected U1 presets and is saved in plugin Config "
+                "Allow this plugin to read the selected Snapmaker U1 preset's printer address and API key?\n\n"
+                "The connection fields are print_host and printhost_apikey. "
+                "If Orca's API has no address, it reads only the selected preset's JSON file.\n\n"
+                "Your choice applies to all selected U1 presets and is saved in plugin Config "
                 "as allow_preset_connection. Choose No to set host manually instead.",
                 title="Snapmaker U1: printer connection access", buttons="yes_no", icon="question")
-            self.preset_connection_allowed = choice == "yes"
-            self.save_config(json.dumps(dict(config, allow_preset_connection=self.preset_connection_allowed)))
-        return self.preset_connection_allowed
+            config = json.loads(self.get_config())
+            if config.get("allow_preset_connection") is False:
+                return False
+            allowed = choice == "yes"
+            if not self.save_config(json.dumps(dict(config, allow_preset_connection=allowed))):
+                self.preset_connection_save_failed = True
+                raise ValueError('Cannot save preset permission. Set "host" manually or reload the plugin to retry.')
+            effective = json.loads(self.get_config()).get("allow_preset_connection")
+            if effective is not allowed:
+                self.preset_connection_save_failed = True
+                raise ValueError('Cannot save effective preset permission. Check Config or set "host" manually.')
+            return allowed
+        finally:
+            self.preset_connection_prompt_open = False
 
     def selected_target(self):
         config = json.loads(self.get_config())
@@ -275,11 +288,17 @@ class U1Page(orca.pages.PagesPluginCapabilityBase):
             return printer_url(config["host"]), ""
         bundle = orca.host.preset_bundle()
         preset = bundle.current_printer_preset()
+        selection = setting(preset.file), setting(preset.name)
         if not is_u1_preset(preset):
             raise UnsupportedPrinter('Cannot determine a Snapmaker U1 address. Select a U1 preset or set "host" in plugin Config.')
         if not self.allow_preset_connection(config):
             raise ValueError('Preset connection access is disabled. Set "host" in plugin Config, '
-                             'or set "allow_preset_connection" to true to allow access.')
+                             'or reset "allow_preset_connection" to null to ask again.')
+        # The modal consent dialog can dispatch selection events; refresh host handles.
+        bundle = orca.host.preset_bundle()
+        preset = bundle.current_printer_preset()
+        if selection != (setting(preset.file), setting(preset.name)) or not is_u1_preset(preset):
+            raise ValueError("Printer selection changed. Try again with the selected preset.")
         address = setting(preset.config_value("print_host")) or setting(bundle.full_config_value("print_host"))
         key = setting(preset.config_value("printhost_apikey")) or setting(bundle.full_config_value("printhost_apikey"))
         if not address:
