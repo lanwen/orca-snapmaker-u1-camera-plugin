@@ -167,25 +167,3 @@ class ReleaseReviewTests(ReleaseFixture):
         with self.assertRaisesRegex(ValueError, "marker"):
             self.prepare(self.first, "<!-- orca:suggested-notes:start -->Human edits")
         self.assertEqual((self.root / "CHANGELOG.md").read_text(), before)
-
-    def test_refresh_removes_legacy_attribution_without_replacing_manual_content(self):
-        public = "- See [usage](https://example.com/usage) and [#12](https://github.com/example/plugin/pull/12)."
-        prose = "Hand-edited [usage](https://example.com/usage) stays."
-        previous = self.reviewed(self.prepare(self.first)).replace(self.public, public)
-        legacy = ("<!-- orca:source-pr:12 -->\n- " + prose +
-                  " ([#12](https://github.com/example/plugin/pull/12))")
-        previous += ("\n<!-- orca:suggested-notes:start -->\n" + legacy +
-                     "\n\nA manually added [#15](https://github.com/example/plugin/pull/15)." +
-                     "\n<!-- orca:suggested-notes:end -->")
-        with patch.object(release, "api", return_value=[self.source()]):
-            refreshed = self.prepare(self.first, previous)
-            suggestions = release.tagged_section(refreshed, "suggested")
-            self.assertEqual(suggestions, "<!-- orca:source-pr:12 -->\n- " + prose +
-                             "\n\nA manually added [#15](https://github.com/example/plugin/pull/15).")
-            self.assertEqual(release.public_notes(refreshed), public)
-            with self.assertRaises(ValueError):
-                self.check(refreshed, self.first)
-            reviewed = self.reviewed(refreshed)
-            repeated = self.prepare(self.first, reviewed)
-        self.assertEqual(repeated, reviewed)
-        self.check(repeated, self.first)

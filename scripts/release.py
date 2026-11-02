@@ -59,12 +59,9 @@ def format_changes(commits):
 
 def source_pr_suggestions(commits, previous=""):
     """Append source PR summaries as data; keep existing suggestions and human edits."""
+    suggestions = previous
+    seen = set(re.findall(r"<!-- orca:source-pr:(\d+) -->", previous))
     repo = repository()
-    # Remove only the old generated attribution suffix, preserving edited suggestion text.
-    legacy_link = (r"(?m)(<!-- orca:source-pr:(\d+) -->\n- [^\n]*) "
-                   r"\(\[#\2\]\(https://github\.com/" + re.escape(repo) + r"/pull/\2\)\)$")
-    suggestions = re.sub(legacy_link, r"\1", previous)
-    seen = set(re.findall(r"<!-- orca:source-pr:(\d+) -->", suggestions))
     for sha, _, _ in commits:
         for pr in api(f"commits/{sha}/pulls?per_page=100"):
             number = str(pr["number"])
