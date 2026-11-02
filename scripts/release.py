@@ -278,6 +278,16 @@ def publish():
     return tag
 
 
+def write_outputs(**values):
+    """Keep step metadata separate from task-runner and subprocess logs."""
+    text = "".join(f"{key}={value}\n" for key, value in values.items())
+    if path := os.environ.get("GITHUB_OUTPUT"):
+        with open(path, "a", encoding="utf-8") as output:
+            output.write(text)
+    else:
+        print(text, end="")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=["info", "prepare-pr", "check-pr", "merge-snapshot", "publish"])
@@ -285,22 +295,19 @@ def main():
     if args.command == "info":
         version = read_version(ROOT)
         _, development = parse_version(version)
-        print(f"version={version}\nfinal={str(not development).lower()}")
+        write_outputs(version=version, final=str(not development).lower())
     elif args.command == "prepare-pr":
         mode = os.environ.get("RELEASE_MODE", "release")
         if mode not in ("release", "snapshot"):
             raise ValueError("RELEASE_MODE must be release or snapshot")
         previous_body = open_release_body() if mode == "release" and parse_version(read_version(ROOT))[1] else ""
         result = prepare_pr(mode, os.environ.get("RELEASE_VERSION"), previous_body)
-        print("changed=" + str(result is not None).lower())
-        for key, value in (result or {}).items():
-            print(f"{key}={value}")
+        write_outputs(changed=str(result is not None).lower(), **(result or {}))
     elif args.command == "check-pr":
         event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text(encoding="utf-8"))
         check_pr(event)
         if os.environ.get("GITHUB_OUTPUT"):
-            with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
-                output.write(f"snapshot_only={str(snapshot_only(event['pull_request'])).lower()}\n")
+            write_outputs(snapshot_only=str(snapshot_only(event["pull_request"])).lower())
     elif args.command == "merge-snapshot":
         merge_snapshot(int(os.environ["SNAPSHOT_PR"]), os.environ["SNAPSHOT_HEAD_SHA"], os.environ["SNAPSHOT_VERSION"])
     else:

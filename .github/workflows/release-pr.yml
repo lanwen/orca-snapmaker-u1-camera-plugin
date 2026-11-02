@@ -62,7 +62,7 @@ jobs:
         run: |
           gh label create release --color 0e8a16 --description "Release preparation" --force
           gh label create snapshot --color 8250df --description "Development version" --force
-          mise run release:prepare-pr >> "$GITHUB_OUTPUT"
+          mise run release:prepare-pr
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           GH_REPO: ${{ github.repository }}
