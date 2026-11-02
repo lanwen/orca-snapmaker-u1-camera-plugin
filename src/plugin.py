@@ -4,6 +4,7 @@ import base64
 from collections import deque
 import hashlib
 import json
+import math
 from pathlib import Path
 import re
 import threading
@@ -47,6 +48,48 @@ def saved_connection(preset):
         return "", ""
 
 
+def nonnegative(value):
+    return value if type(value) in (int, float) and math.isfinite(value) and value >= 0 else None
+
+
+def print_metrics(status):
+    stats = status.get("print_stats") or {}
+    state = stats.get("state", "Unknown")
+    progress = nonnegative((status.get("display_status") or {}).get("progress"))
+    if progress is None:
+        progress = nonnegative((status.get("virtual_sdcard") or {}).get("progress"))
+    progress = min(progress, 1) if progress is not None else None
+    if state == "complete":
+        progress = 1
+    duration = nonnegative(stats.get("print_duration"))
+    # Progress-based estimate; the firmware does not expose M73 remaining time.
+    remaining = (duration * (1 - progress) / progress
+                 if progress and duration and state in ("printing", "paused") else None)
+    if state == "complete":
+        remaining = 0
+    name = (status.get("toolhead") or {}).get("extruder")
+    match = re.fullmatch(r"extruder([1-3]?)", name) if isinstance(name, str) else None
+    index = int(match[1] or 0) if match else None
+    config = status.get("print_task_config") or {}
+
+    def filament(field):
+        values = config.get(field)
+        return values[index] if isinstance(values, list) and index is not None and index < len(values) else None
+
+    color = filament("filament_color_rgba")
+    color = "#" + color[:6] if isinstance(color, str) and re.fullmatch(r"[0-9a-fA-F]{8}", color) else None
+    material = filament("filament_type")
+    info = stats.get("info") or {}
+    return {"state": state, "progress": progress,
+            "current_layer": nonnegative(info.get("current_layer")),
+            "total_layer": nonnegative(info.get("total_layer")),
+            "elapsed": nonnegative(stats.get("total_duration")), "printing_duration": duration,
+            "remaining": remaining,
+            "tool": index, "material": material if isinstance(material, str) and material != "NONE" else None,
+            "color": color, "bed": status.get("heater_bed") or {},
+            "hotend": status.get(name) or {} if match else {}}
+
+
 class Printer:
     def __init__(self, address, api_key=""):
         self.http = HttpClient(address, api_key)
@@ -78,10 +121,15 @@ class Printer:
 
     def status(self):
         status = self.http.query_objects(ObjectQuery("webhooks"), ObjectQuery("print_stats"),
-                                         ObjectQuery("led cavity_led"))
+                                         ObjectQuery("led cavity_led"), ObjectQuery("display_status"),
+                                         ObjectQuery("virtual_sdcard", ("progress",)),
+                                         ObjectQuery("toolhead", ("extruder",)),
+                                         ObjectQuery("print_task_config", ("filament_type", "filament_color_rgba")),
+                                         *(ObjectQuery(name, ("temperature", "target")) for name in
+                                           ("heater_bed", "extruder", "extruder1", "extruder2", "extruder3")))
         led = status.get("led cavity_led", {}).get("color_data")
         return {"printer": status.get("print_stats", {}).get("state", "Unknown"),
-                "light": bool(led[0][3]) if led else None}
+                "light": bool(led[0][3]) if led else None, "stats": print_metrics(status)}
 
     def set_light(self, enabled):
         self.http.set_light(LightCommand(enabled))
@@ -193,7 +241,7 @@ class Monitor:
                         try:
                             self.emit(generation, client.status())
                         except Exception:
-                            self.emit(generation, {"printer": "Status unavailable", "light": None})
+                            self.emit(generation, {"printer": "Status unavailable", "light": None, "stats": None})
                         status_at = time.monotonic() + 3
                     if not self.current(generation):
                         continue

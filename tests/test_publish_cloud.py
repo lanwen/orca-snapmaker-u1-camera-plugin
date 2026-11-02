@@ -14,6 +14,7 @@ from urllib.error import HTTPError
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
 import publish_cloud as cloud
+from release_notes import format_notes
 
 
 class CloudPublicationTests(unittest.TestCase):
@@ -24,7 +25,9 @@ class CloudPublicationTests(unittest.TestCase):
         self.filename = "orca-snapmaker-u1-camera-plugin_any.py"
         self.artifact = b"# downloaded release artifact\n"
         self.checksum = f"{hashlib.sha256(self.artifact).hexdigest()}  {self.filename}\n"
-        self.release = {"draft": False, "prerelease": False, "body": "Release notes"}
+        self.release = {"draft": False, "prerelease": False,
+                        "body": format_notes("Release notes", "- fix(ci): internal [commit](https://example.com)") +
+                                "\nSource commit: `abc`.\n"}
         for name, value in {"ROOT": self.root, "read_version": Mock(return_value="0.3.2"),
                             "release_by_tag": Mock(return_value=self.release), "git": Mock(return_value="a" * 40),
                             "verify_commit": Mock(), "gh": Mock(side_effect=self.download), "urlopen": Mock()}.items():
@@ -131,3 +134,13 @@ class CloudPublicationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "valid.*OIDC token"):
             cloud.publish()
         self.assertEqual(cloud.urlopen.call_count, 1)
+
+    def test_missing_empty_or_oversized_public_notes_never_request_credentials(self):
+        for body in ["Legacy generated notes", format_notes("", "generated"),
+                     format_notes("x" * 4001, "generated")]:
+            with self.subTest(body=body[:30]):
+                self.release["body"] = body
+                with self.assertRaises(ValueError):
+                    cloud.publish()
+        cloud.gh.assert_not_called()
+        cloud.urlopen.assert_not_called()

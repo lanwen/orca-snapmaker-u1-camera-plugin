@@ -80,6 +80,33 @@ class ReleaseFixture(unittest.TestCase):
 
 
 class PreparationTests(ReleaseFixture):
+    def test_refresh_preserves_public_notes_and_rebuilds_generated_notes(self):
+        public = "- See print progress on the camera.\n\nEstimates can change."
+        previous = release.format_notes(public, "old generated text", public_first=False)
+        change = parse_change("feat(camera): add zoom")
+        with patch.object(release, "history", return_value=("0.2.0", [("a" * 40, "feat(camera): add zoom", change)])):
+            release.prepare_pr("release", previous_body=previous)
+        body = (self.root / "dist/automation-pr-body.md").read_text()
+        self.assertEqual(release.public_section(body), public)
+        self.assertIn("feat(camera): add zoom", body)
+        self.assertNotIn("old generated text", body)
+        self.assertLess(body.index("## Generated notes"), body.index("## Public notes"))
+
+    def test_open_release_body_does_not_read_fork_notes(self):
+        fork = {"head": {"repo": {"full_name": "someone/fork"}}, "body": "fork text"}
+        own = {"head": {"repo": {"full_name": "example/plugin"}}, "body": "reviewed text"}
+        with patch.object(release, "api", return_value=[fork, own]):
+            self.assertEqual(release.open_release_body(), "reviewed text")
+
+    def test_malformed_public_notes_stop_refresh_before_file_changes(self):
+        before = (self.root / "CHANGELOG.md").read_text()
+        change = parse_change("feat(camera): add zoom")
+        with patch.object(release, "history", return_value=("0.2.0", [("a" * 40, "feat(camera): add zoom", change)])):
+            with self.assertRaisesRegex(ValueError, "marker"):
+                release.prepare_pr("release", previous_body="<!-- orca:public-notes:start -->unfinished")
+        self.assertEqual((self.root / "CHANGELOG.md").read_text(), before)
+        self.assertEqual(read_version(self.root), "0.3.0.dev0")
+
     def test_release_and_next_snapshot_update_project_lock_and_changelog(self):
         change = parse_change("feat(camera): add zoom")
         with patch.object(release, "history", return_value=("0.2.0", [("a" * 40, "feat(camera): add zoom", change)])):
@@ -108,11 +135,16 @@ class PreparationTests(ReleaseFixture):
     def test_final_version_is_allowed_only_on_the_generated_release_pr(self):
         self.write_version("0.3.0")
         event = {"pull_request": {
-            "title": "chore(release): prepare 0.3.0", "body": "",
+            "title": "chore(release): prepare 0.3.0", "body": release.format_notes("Camera controls.", "generated"),
             "head": {"ref": "automation/release", "repo": {"full_name": "example/plugin"}},
             "base": {"repo": {"full_name": "example/plugin"}}, "labels": [{"name": "release"}],
         }}
         release.check_pr(event)
+        body = event["pull_request"]["body"]
+        event["pull_request"]["body"] = release.format_notes(release.PUBLIC_PLACEHOLDER, "generated")
+        with self.assertRaisesRegex(ValueError, "Write public release notes"):
+            release.check_pr(event)
+        event["pull_request"]["body"] = body
         event["pull_request"]["head"]["repo"]["full_name"] = "someone/fork"
         with self.assertRaisesRegex(ValueError, "Only the generated release PR"):
             release.check_pr(event)
@@ -264,10 +296,17 @@ class FakeGitHub:
         self.sha = "a" * 40
         self.assets = {}
         self.calls = []
+        self.pr = {"merged_at": "2026-11-02T12:00:00Z", "merge_commit_sha": self.sha,
+                   "title": "chore(release): prepare 0.3.0",
+                   "head": {"ref": "automation/release", "repo": {"full_name": "example/plugin"}},
+                   "base": {"ref": "main", "repo": {"full_name": "example/plugin"}},
+                   "body": release.format_notes("Camera controls are easier to use.", "internal history")}
 
     def __call__(self, *args):
         self.calls.append(args)
         if args[0] == "api":
+            if f"/commits/{self.sha}/pulls?" in args[1]:
+                return json.dumps([self.pr])
             if "/git/ref/tags/" in args[1] and self.tag_sha:
                 return json.dumps({"object": {"type": "commit", "sha": self.tag_sha}})
             if "/commits/" in args[1] and self.tag_sha:
@@ -283,7 +322,8 @@ class FakeGitHub:
                 raise RuntimeError("release not found")
             return json.dumps({"databaseId": 1})
         elif operation == "create":
-            self.release = {"draft": True, "tag_name": "untagged-draft", "target_commitish": args[args.index("--target") + 1]}
+            self.release = {"draft": True, "tag_name": "untagged-draft", "target_commitish": args[args.index("--target") + 1],
+                            "body": Path(args[args.index("--notes-file") + 1]).read_text()}
         elif operation == "upload":
             for filename in args[3:args.index("--repo")]:
                 path = Path(filename)
@@ -327,6 +367,36 @@ class PublicationTests(ReleaseFixture):
         release.publish()
         self.assertFalse(any(call[:2] in [("release", "upload"), ("release", "edit"), ("release", "create")]
                              for call in self.github.calls))
+
+    def test_release_captures_public_notes_first_and_reruns_ignore_pr_edits(self):
+        release.publish()
+        body = self.github.release["body"]
+        self.assertEqual(release.public_notes(body), "Camera controls are easier to use.")
+        self.assertLess(body.index("## Public notes"), body.index("## Generated notes"))
+        self.assertIn("- Camera controls.", body)
+        self.assertIn("Source commit:", body)
+        self.github.pr["body"] = release.format_notes("Edited after publication", "changed")
+        release.publish()
+        self.assertEqual(self.github.release["body"], body)
+
+    def test_unreviewed_public_notes_do_not_create_a_release(self):
+        self.github.pr["body"] = release.format_notes(release.PUBLIC_PLACEHOLDER, "generated")
+        with self.assertRaisesRegex(ValueError, "Write public release notes"):
+            release.publish()
+        self.assertIsNone(self.github.release)
+
+    def test_only_exact_same_repository_release_merge_is_used(self):
+        for field, value in [("merge_commit_sha", "b" * 40), ("title", "chore(release): prepare 0.4.0"),
+                             ("merged_at", None)]:
+            original = self.github.pr[field]
+            self.github.pr[field] = value
+            with self.subTest(field=field), self.assertRaisesRegex(ValueError, "exact release commit and version"):
+                release.publish()
+            self.github.pr[field] = original
+        self.github.pr["head"]["repo"]["full_name"] = "someone/fork"
+        with self.assertRaisesRegex(ValueError, "exact release commit and version"):
+            release.publish()
+        self.assertIsNone(self.github.release)
 
     def test_published_mismatched_assets_are_never_overwritten(self):
         release.publish()
@@ -394,7 +464,8 @@ class PublicationTests(ReleaseFixture):
 
     def test_partial_draft_can_resume_without_replacing_assets(self):
         artifact = builder.build(self.root / "dist")
-        self.github.release = {"draft": True, "target_commitish": self.github.sha}
+        self.github.release = {"draft": True, "target_commitish": self.github.sha,
+                               "body": release.format_notes("Camera controls.", "generated")}
         self.github.assets[artifact.name] = artifact.read_bytes()
         release.publish()
         upload = next(call for call in self.github.calls if call[:2] == ("release", "upload"))

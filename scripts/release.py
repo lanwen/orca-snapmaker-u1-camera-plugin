@@ -11,6 +11,7 @@ import time
 import tomllib
 
 from build import ROOT, build
+from release_notes import PUBLIC_PLACEHOLDER, format_notes, public_notes, public_section
 from versioning import next_snapshot, parse_change, parse_version, read_version, release_version, set_version
 
 
@@ -50,7 +51,7 @@ def history():
     return latest[1:] if latest else None, changes
 
 
-def prepare_pr(mode, released=None):
+def prepare_pr(mode, released=None, previous_body=""):
     current = read_version(ROOT)
     _, development = parse_version(current)
     if mode == "snapshot":
@@ -67,6 +68,7 @@ def prepare_pr(mode, released=None):
         version = release_version(current, latest, [change for _, _, change in commits])
         if version is None:
             return None
+        public = public_section(previous_body)
         notes = "\n".join(f"- {title} ([{sha[:7]}](https://github.com/{repository()}/commit/{sha}))"
                           for sha, title, _ in commits)
         changelog = ROOT / "CHANGELOG.md"
@@ -75,7 +77,9 @@ def prepare_pr(mode, released=None):
         if not existing.startswith(header):
             raise ValueError("CHANGELOG.md must start with '# Changelog'")
         changelog.write_text(header + f"\n## {version}\n\n" + notes + "\n\n" + existing[len(header):].lstrip(), encoding="utf-8")
-        body = f"Release `{version}`.\n\n{notes}\n\nMerging this PR publishes `v{version}` from its merge commit.\n"
+        body = (f"Release `{version}`.\n\n" +
+                format_notes(public if public is not None else PUBLIC_PLACEHOLDER, notes, public_first=False) +
+                f"\nMerging this PR publishes `v{version}` from its merge commit.\n")
         branch, title, label = "automation/release", f"chore(release): prepare {version}", "release"
     set_version(ROOT, version)
     body_file = ROOT / "dist/automation-pr-body.md"
@@ -96,6 +100,8 @@ def check_pr(event):
         raise ValueError("Only the generated release PR may carry a final pyproject.toml version")
     if is_release and (development or pr["title"] != f"chore(release): prepare {version}"):
         raise ValueError("Release PR title must match the final pyproject.toml version")
+    if is_release:
+        public_notes(pr.get("body") or "")
 
 
 def snapshot_only(pr):
@@ -136,6 +142,27 @@ def api(path, optional=False):
         if optional and "HTTP 404" in str(error):
             return None
         raise
+
+
+def open_release_body():
+    owner = repository().split("/")[0]
+    pulls = api(f"pulls?state=open&base=main&head={owner}:automation/release&per_page=100")
+    pulls = [pr for pr in pulls if pr["head"]["repo"] and pr["head"]["repo"]["full_name"] == repository()]
+    if len(pulls) > 1:
+        raise ValueError("More than one open release PR")
+    return (pulls[0].get("body") or "") if pulls else ""
+
+
+def merged_release_notes(sha, version):
+    pulls = api(f"commits/{sha}/pulls?per_page=100")
+    pulls = [pr for pr in pulls if pr.get("merged_at") and pr.get("merge_commit_sha") == sha
+             and pr["head"]["ref"] == "automation/release"
+             and pr["head"]["repo"] and pr["head"]["repo"]["full_name"] == repository()
+             and pr["base"]["ref"] == "main" and pr["base"]["repo"]["full_name"] == repository()
+             and pr["title"] == f"chore(release): prepare {version}"]
+    if len(pulls) != 1:
+        raise ValueError("Expected one merged release PR for the exact release commit and version")
+    return public_notes(pulls[0].get("body") or "")
 
 
 def merge_snapshot(number, sha, version):
@@ -230,12 +257,14 @@ def publish():
         section = re.search(r"(?ms)^## " + re.escape(version) + r"\n(.*?)(?=^## |\Z)", changelog)
         if section is None:
             raise ValueError("Missing changelog section for " + version)
+        public = merged_release_notes(sha, version)
         notes = ROOT / "dist/release-notes.md"
-        notes.write_text(section[1].strip() + f"\n\nSource commit: `{sha}`.\n", encoding="utf-8")
+        notes.write_text(format_notes(public, section[1].strip()) + f"\nSource commit: `{sha}`.\n", encoding="utf-8")
         gh("release", "create", tag, "--draft", "--target", sha, "--title", f"Snapmaker U1 {tag}",
            "--notes-file", str(notes), "--repo", repository())
         release = release_by_tag(tag)
     verify_commit(release, tag, sha)
+    public_notes(release.get("body") or "")
     missing = verify_assets(release, tag, assets)
     if release["draft"]:
         if missing:
@@ -261,7 +290,8 @@ def main():
         mode = os.environ.get("RELEASE_MODE", "release")
         if mode not in ("release", "snapshot"):
             raise ValueError("RELEASE_MODE must be release or snapshot")
-        result = prepare_pr(mode, os.environ.get("RELEASE_VERSION"))
+        previous_body = open_release_body() if mode == "release" and parse_version(read_version(ROOT))[1] else ""
+        result = prepare_pr(mode, os.environ.get("RELEASE_VERSION"), previous_body)
         print("changed=" + str(result is not None).lower())
         for key, value in (result or {}).items():
             print(f"{key}={value}")

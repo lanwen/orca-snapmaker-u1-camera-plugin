@@ -11,6 +11,7 @@ import uuid
 
 from build import ROOT
 from release import gh, git, release_by_tag, verify_commit
+from release_notes import public_notes
 from versioning import parse_version, read_version
 
 
@@ -25,6 +26,7 @@ def publish():
     if release["draft"] or release["prerelease"]:
         raise ValueError("Publish the stable GitHub release before uploading to Orca Cloud")
     verify_commit(release, tag, git("rev-parse", "HEAD"))
+    notes = public_notes(release.get("body") or "")
     filename = "orca-snapmaker-u1-camera-plugin_any.py"
     with tempfile.TemporaryDirectory() as directory:
         gh("release", "download", tag, "--dir", directory,
@@ -44,7 +46,7 @@ def publish():
         raise ValueError("GitHub did not return a valid Orca Cloud OIDC token")
     print("::add-mask::" + token, flush=True)
 
-    metadata = json.dumps({"version": version, "changelog": (release.get("body") or "")[:4000]})
+    metadata = json.dumps({"version": version, "changelog": notes})
     boundary = uuid.uuid4().hex
     body = (
         f'--{boundary}\r\nContent-Disposition: form-data; name="metadata"\r\n\r\n{metadata}\r\n'

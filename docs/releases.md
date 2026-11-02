@@ -68,6 +68,35 @@ It requires Git history and stable release tags in the local checkout.
 The publishing fallback is `mise run release` from a clean checkout of the final release commit with GitHub CLI authentication.
 It refuses development versions, mismatched tags, and changes to published assets.
 
+## Public release notes
+
+The release PR description contains two tagged sections.
+Automation rebuilds **Generated notes** from commits on each refresh and preserves **Public notes** from the open release PR.
+Edit only the text between these public-note markers:
+
+```markdown
+<!-- orca:public-notes:start -->
+- Check print progress without leaving the camera view.
+- See the selected filament and current printer temperatures.
+<!-- orca:public-notes:end -->
+```
+
+Keep the markers intact.
+Write short statements about changes users can see or use, without commit hashes or internal maintenance details.
+For a maintenance-only release, write a short, accurate maintenance note.
+The initial placeholder is not publishable.
+Release PR checks require nonempty public notes of at most 4,000 characters.
+Editing the description runs the checks again.
+Missing or malformed markers stop publication; text is never silently truncated.
+
+When the release PR merges, the publisher reads public notes from the PR associated with that exact release commit and version.
+It places **Public notes** above **Generated notes** in the GitHub release.
+Once the release draft is created, reruns use the saved release body; later PR-description edits do not replace it.
+Orca Cloud receives only the text inside the public-note markers, without section headings, generated notes, or source hashes.
+
+The release GitHub App token needs Pull requests read access to find the merged release PR.
+Local release preparation also needs GitHub CLI authentication to preserve notes from an existing open release PR.
+
 ## Orca Cloud publishing
 
 In Orca Cloud, open Shared Plugins → your plugin → Edit plugin → GitHub publishing.
@@ -81,7 +110,8 @@ GitHub checks out the release tag, so the OIDC identity and source version refer
 It runs `mise run release:publish-cloud`, which downloads the released plugin and `SHA256SUMS` from GitHub.
 It requests a short-lived GitHub OIDC token with audience `orcacloud`.
 It verifies the source commit and checks the downloaded plugin against `SHA256SUMS` before uploading those exact bytes.
-The version comes from `pyproject.toml`, and the changelog comes from the published GitHub release notes.
+The version comes from `pyproject.toml`, and the changelog comes only from the tagged public-note section of the published GitHub release.
+The publisher validates those notes before downloading assets or requesting Orca credentials.
 The publisher requires a release event and checks that `GITHUB_REF_NAME` matches the project version's tag.
 The earlier main-branch push identity was rejected with HTTP 401, so Cloud uploads no longer run in the push workflow.
 

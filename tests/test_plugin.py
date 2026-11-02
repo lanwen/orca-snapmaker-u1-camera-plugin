@@ -197,7 +197,40 @@ class ClientTests(unittest.TestCase):
         self.assertEqual(status["print_stats"]["state"], "standby")
         self.assertEqual(Endpoint.requests[-1], (
             "/printer/objects/query?print_stats=state,filename&led%20cavity_led%26other", "secret"))
-        self.assertEqual(plugin.Printer(self.address).status(), {"printer": "standby", "light": True})
+        result = plugin.Printer(self.address).status()
+        self.assertEqual(result["printer"], "standby")
+        self.assertTrue(result["light"])
+        self.assertIsNone(result["stats"]["progress"])
+
+    def test_print_metrics_follow_active_physical_tool(self):
+        status = {"print_stats": {"state": "printing", "total_duration": 4200,
+                                  "print_duration": 3600,
+                                  "info": {"current_layer": 100, "total_layer": 200}},
+                  "display_status": {"progress": .5}, "toolhead": {"extruder": "extruder2"},
+                  "print_task_config": {"filament_type": ["PLA", "PLA", "PETG", "ABS"],
+                                        "filament_color_rgba": ["FFFFFFFF", "FFFFFFFF", "12AB34FF"]},
+                  "extruder2": {"temperature": 235, "target": 240},
+                  "heater_bed": {"temperature": 70, "target": 75}}
+        result = plugin.print_metrics(status)
+        self.assertEqual((result["tool"], result["material"], result["color"]), (2, "PETG", "#12AB34"))
+        self.assertEqual((result["elapsed"], result["remaining"]), (4200, 3600))
+        self.assertEqual(result["hotend"]["temperature"], 235)
+        self.assertEqual(result["current_layer"], 100)
+        status["display_status"]["progress"] = 0
+        self.assertIsNone(plugin.print_metrics(status)["remaining"])
+        status["print_stats"]["state"] = "complete"
+        self.assertEqual(plugin.print_metrics(status)["progress"], 1)
+        self.assertEqual(plugin.print_metrics(status)["remaining"], 0)
+
+    def test_print_metrics_missing_or_invalid_values_remain_unknown(self):
+        result = plugin.print_metrics({"display_status": {"progress": float("nan")},
+                                       "virtual_sdcard": {"progress": .25},
+                                       "toolhead": {"extruder": "unknown"},
+                                       "print_stats": {"total_duration": -1}})
+        self.assertEqual(result["progress"], .25)
+        self.assertIsNone(result["elapsed"])
+        self.assertIsNone(result["tool"])
+        self.assertEqual(result["hotend"], {})
 
     def test_client_rejects_api_errors_and_escapes_websocket_tokens(self):
         client = plugin.HttpClient("https://printer.local:7125", "secret")

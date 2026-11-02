@@ -11,6 +11,10 @@ run = "uv sync --locked --python python"
 description = "Build the installable plugin and SHA256SUMS in dist/"
 run = "python scripts/build.py"
 
+[tasks."screenshots:prepare"]
+description = "Prepare four simulated Orca screenshot views"
+run = "python scripts/prepare_screenshots.py"
+
 [tasks.test]
 description = "Test the built plugin and camera page"
 depends = ["setup", "build"]

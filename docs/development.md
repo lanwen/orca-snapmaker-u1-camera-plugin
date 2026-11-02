@@ -34,3 +34,31 @@ Edit `src/` and `pyproject.toml`.
 Install only the generated file from `dist/`.
 
 See [release automation](releases.md) for versioning and publishing.
+
+## README screenshots
+
+Run `mise run screenshots:prepare`, then open `dist/screenshots/index.html` in a browser.
+The four standalone views include a simulated Orca window and the selected Snapmaker U1 tab.
+They use the production camera page with fixed sample data and make no printer requests.
+No Orca installation is needed.
+
+The default camera image and app chrome come from the existing README screenshot.
+To use another local camera frame, run `python scripts/prepare_screenshots.py --camera /path/to/frame.jpg`.
+
+Click the camera to focus the page.
+Press **1** for Printing, **2** for Preparing, **3** for Paused, or **4** for Complete.
+Press **H** to show or hide the stats background, or **?** to show or hide shortcut help.
+
+Use the same browser size for all four captures, for example 1440 × 1000.
+Hide help, move the pointer away, and capture only the page content so that the simulated Orca tabs remain visible.
+These images illustrate sample states; they are not evidence of live print jobs.
+
+To regenerate the four-state image used in the README, run:
+
+```sh
+python scripts/prepare_screenshots.py --export docs/images/snapmaker-u1-states.png
+```
+
+PNG export uses an installed Chrome or Chromium with an isolated temporary profile.
+The generated `dist/screenshots/showcase.html` shows Printing in one full camera view, followed by enlarged Preparing, Paused, and Complete strips.
+This keeps the tab visible while making the statistics readable at README width.
