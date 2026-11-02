@@ -58,6 +58,8 @@ class ReleaseFixture(unittest.TestCase):
         self.write_version("0.3.0.dev0")
         shutil.copytree(ROOT / "src", self.root / "src")
         shutil.copytree(ROOT / "dist/ui", self.root / "dist/ui")
+        (self.root / "docs/branding").mkdir(parents=True)
+        shutil.copyfile(ROOT / "docs/branding/u1-logo.svg", self.root / "docs/branding/u1-logo.svg")
         (self.root / "CHANGELOG.md").write_text("# Changelog\n", encoding="utf-8")
         for module in [release, builder]:
             context = patch.object(module, "ROOT", self.root)
