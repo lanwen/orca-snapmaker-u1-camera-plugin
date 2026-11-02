@@ -24,6 +24,20 @@ plugin = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(plugin)
 
 
+class PageIconTests(unittest.TestCase):
+    def test_native_tab_icon_is_available_before_loading_page_html(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.object(plugin, "__file__", str(Path(directory) / "camera.py")):
+                page = plugin.U1Page()
+                icon = Path(page.get_icon())
+                self.assertTrue(icon.is_absolute())
+                self.assertEqual(icon.suffix, ".svg")
+                self.assertEqual(icon.parent, Path(directory))
+                expected = (Path(__file__).parents[1] / "docs/branding/u1-logo.svg").read_text().replace("#249b7c", "#FEFEFE")
+                self.assertEqual(icon.read_text(), expected)
+                self.assertEqual(page.get_icon(), str(icon))
+
+
 class Endpoint(BaseHTTPRequestHandler):
     modified = "Thu, 01 Jan 1970 00:00:00 GMT"
     requests = []
