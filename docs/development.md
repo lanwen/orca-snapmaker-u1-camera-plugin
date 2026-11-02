@@ -30,7 +30,7 @@ mise run check
 
 `mise run setup` installs Python dependencies from `uv.lock` and frontend dependencies with `pnpm install --frozen-lockfile`.
 It also installs the repository's pre-commit hook through the local Git `core.hooksPath` setting.
-The hook runs Oxfmt checks and Oxlint before each commit, using the tools pinned by mise.
+The hook runs Oxfmt checks and Oxlint, including the security rules below, before each commit, using the tools pinned by mise.
 It checks the frontend working tree, including unstaged edits, and rejects the commit if either check fails.
 It does not format or stage files automatically.
 If formatting fails, run `mise exec -- pnpm format`, review and stage the result, then commit again.
@@ -58,6 +58,10 @@ Run `mise exec -- pnpm format` to format the frontend, or `mise exec -- pnpm for
 Run `mise exec -- pnpm lint` for Oxlint alone, or `mise exec -- pnpm check:types` for Svelte and TypeScript checks.
 Oxfmt covers Svelte, TypeScript, JavaScript, CSS, and the frontend HTML and JSON files.
 Oxlint checks JavaScript, TypeScript, and Svelte script blocks; `svelte-check` supplies template diagnostics.
+The lint command rejects dynamic code execution, JavaScript URLs, legacy prototype mutation, and direct HTML insertion through browser APIs.
+Selected `eslint-plugin-security` rules also check for unsafe regular expressions, bidirectional control characters, unsafe child-process calls, dynamic `require` calls, and unsafe Buffer and random-byte APIs.
+HTML insertion is deliberately prohibited in scripts: use Svelte markup for structure and text bindings or `textContent` for data.
+These are static source checks; they do not audit dependency vulnerabilities, scan secrets, analyze Python, or inspect Svelte template HTML injection.
 Formatting and lint commands target the frontend and its tests, leaving prototypes, generated files, and Python sources alone.
 The UI tests cover playback, light control, print statistics, frame acknowledgements, visibility, and printer switching.
 

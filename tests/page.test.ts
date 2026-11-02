@@ -42,8 +42,7 @@ const button = (action: 'play' | 'stop') =>
 const light = () => element('[role="switch"]') as HTMLButtonElement;
 const image = () => element('img[alt]') as HTMLImageElement;
 const progress = () => element('[role="progressbar"]');
-const numbers = (node: HTMLElement) =>
-  (node.textContent?.match(/\d+(?:\.\d+)?/g) ?? []).map(Number);
+const numbers = (node: HTMLElement) => (node.textContent?.match(/\d+\.\d+|\d+/g) ?? []).map(Number);
 const publish = (data: HostMessage) => flushSync(() => receive(data));
 const click = (node: HTMLElement) => flushSync(() => node.click());
 const advance = (milliseconds: number) => flushSync(() => vi.advanceTimersByTime(milliseconds));
