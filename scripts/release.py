@@ -76,7 +76,7 @@ def source_pr_suggestions(commits, previous=""):
             if not why or "<!--" in why or "-->" in why or len(why) > 4000:
                 continue
             why = " ".join(why.split())
-            item = f"<!-- orca:source-pr:{number} -->\n- {why} ([#{number}](https://github.com/{repo}/pull/{number}))"
+            item = f"<!-- orca:source-pr:{number} -->\n- {why}"
             suggestions = (suggestions + "\n\n" + item).strip()
     return suggestions
 

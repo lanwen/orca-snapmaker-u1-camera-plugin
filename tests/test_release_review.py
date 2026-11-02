@@ -104,7 +104,8 @@ class ReleaseReviewTests(ReleaseFixture):
         with patch.object(release, "api", return_value=[self.source()]):
             body = self.prepare(self.first)
         self.assertIn("Unreviewed suggestions", body)
-        self.assertIn("Playback recovers after an interruption.", body)
+        self.assertEqual(release.tagged_section(body, "suggested"),
+                         "<!-- orca:source-pr:12 -->\n- Playback recovers after an interruption.")
         self.assertEqual(release.public_section(body), release.PUBLIC_PLACEHOLDER)
         checked = body.replace(f"- [ ] {release.REVIEW_TEXT}", f"- [x] {release.REVIEW_TEXT}")
         with self.assertRaises(ValueError):
