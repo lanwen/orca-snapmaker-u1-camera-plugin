@@ -135,12 +135,15 @@ class PreparationTests(ReleaseFixture):
 
     def test_final_version_is_allowed_only_on_the_generated_release_pr(self):
         self.write_version("0.3.0")
+        commits = [("a" * 40, "fix: camera playback", parse_change("fix: camera playback"))]
+        reviewed = f"- [x] {release.REVIEW_TEXT}\n\n" + release.format_notes("Camera controls.", release.format_changes(commits))
         event = {"pull_request": {
-            "title": "chore(release): prepare 0.3.0", "body": release.format_notes("Camera controls.", "generated"),
+            "title": "chore(release): prepare 0.3.0", "body": reviewed,
             "head": {"ref": "automation/release", "repo": {"full_name": "example/plugin"}},
             "base": {"repo": {"full_name": "example/plugin"}}, "labels": [{"name": "release"}],
         }}
-        release.check_pr(event)
+        with patch.object(release, "history", return_value=("0.2.0", commits)):
+            release.check_pr(event)
         body = event["pull_request"]["body"]
         event["pull_request"]["body"] = release.format_notes(release.PUBLIC_PLACEHOLDER, "generated")
         with self.assertRaisesRegex(ValueError, "Write public release notes"):

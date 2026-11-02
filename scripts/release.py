@@ -11,7 +11,8 @@ import time
 import tomllib
 
 from build import ROOT, build
-from release_notes import PUBLIC_PLACEHOLDER, format_notes, public_notes, public_section
+from release_notes import (PUBLIC_PLACEHOLDER, REVIEW_TEXT, ReleaseNotesError, format_notes,
+                           generated_section, notes_reviewed, public_notes, public_section)
 from versioning import next_snapshot, parse_change, parse_version, read_version, release_version, set_version
 
 
@@ -51,6 +52,11 @@ def history():
     return latest[1:] if latest else None, changes
 
 
+def format_changes(commits):
+    return "\n".join(f"- {title} ([{sha[:7]}](https://github.com/{repository()}/commit/{sha}))"
+                     for sha, title, _ in commits)
+
+
 def prepare_pr(mode, released=None, previous_body=""):
     current = read_version(ROOT)
     _, development = parse_version(current)
@@ -69,8 +75,9 @@ def prepare_pr(mode, released=None, previous_body=""):
         if version is None:
             return None
         public = public_section(previous_body)
-        notes = "\n".join(f"- {title} ([{sha[:7]}](https://github.com/{repository()}/commit/{sha}))"
-                          for sha, title, _ in commits)
+        notes = format_changes(commits)
+        reviewed = notes_reviewed(previous_body) and generated_section(previous_body) == notes
+        review_task = f"- [{'x' if reviewed else ' '}] {REVIEW_TEXT}\n\n"
         changelog = ROOT / "CHANGELOG.md"
         existing = changelog.read_text(encoding="utf-8") if changelog.exists() else "# Changelog\n"
         header = "# Changelog\n"
@@ -78,7 +85,9 @@ def prepare_pr(mode, released=None, previous_body=""):
             raise ValueError("CHANGELOG.md must start with '# Changelog'")
         changelog.write_text(header + f"\n## {version}\n\n" + notes + "\n\n" + existing[len(header):].lstrip(), encoding="utf-8")
         body = (f"Release `{version}`.\n\n" +
-                format_notes(public if public is not None else PUBLIC_PLACEHOLDER, notes, public_first=False) +
+                "> [!IMPORTANT]\n> Before merging, fill in **Public notes** and confirm the review below.\n"
+                "> New release changes reset this checkbox without removing your notes.\n\n" +
+                review_task + format_notes(public if public is not None else PUBLIC_PLACEHOLDER, notes, public_first=False) +
                 f"\nMerging this PR publishes `v{version}` from its merge commit.\n")
         branch, title, label = "automation/release", f"chore(release): prepare {version}", "release"
     set_version(ROOT, version)
@@ -101,7 +110,12 @@ def check_pr(event):
     if is_release and (development or pr["title"] != f"chore(release): prepare {version}"):
         raise ValueError("Release PR title must match the final pyproject.toml version")
     if is_release:
-        public_notes(pr.get("body") or "")
+        body = pr.get("body") or ""
+        public_notes(body)
+        if generated_section(body) != format_changes(history()[1]):
+            raise ReleaseNotesError("The generated change list is out of date; wait for release automation to refresh this PR, then review the public notes")
+        if not notes_reviewed(body):
+            raise ReleaseNotesError("Confirm that the public notes cover the current generated changes by checking the review task in the PR description")
 
 
 def snapshot_only(pr):
@@ -278,6 +292,25 @@ def publish():
     return tag
 
 
+def report_release_notes_failure(pr, error):
+    instructions = ("Edit the PR description: fill in the Public notes section, keep its markers intact, "
+                    "and check the release-note review task after comparing the generated changes.")
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        message = f"{error}. {instructions}"
+        escaped = message.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+        print(f"::error title=Release notes need attention::{escaped}")
+    if path := os.environ.get("GITHUB_STEP_SUMMARY"):
+        url = pr.get("html_url")
+        destination = f"[PR description]({url})" if url else "PR description"
+        with open(path, "a", encoding="utf-8") as summary:
+            summary.write(f"## Release notes need attention\n\n{error}.\n\n"
+                          f"Edit the {destination}:\n\n"
+                          "1. Fill in **Public notes** between the existing markers.\n"
+                          "2. Compare them with **Generated notes** and update them if needed.\n"
+                          "3. Check the release-note review task.\n\n"
+                          "Editing the description reruns this check. New release changes require another review.\n")
+
+
 def write_outputs(**values):
     """Keep step metadata separate from task-runner and subprocess logs."""
     text = "".join(f"{key}={value}\n" for key, value in values.items())
@@ -305,7 +338,11 @@ def main():
         write_outputs(changed=str(result is not None).lower(), **(result or {}))
     elif args.command == "check-pr":
         event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text(encoding="utf-8"))
-        check_pr(event)
+        try:
+            check_pr(event)
+        except ReleaseNotesError as error:
+            report_release_notes_failure(event["pull_request"], error)
+            raise
         if os.environ.get("GITHUB_OUTPUT"):
             write_outputs(snapshot_only=str(snapshot_only(event["pull_request"])).lower())
     elif args.command == "merge-snapshot":

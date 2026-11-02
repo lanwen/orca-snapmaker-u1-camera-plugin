@@ -72,7 +72,8 @@ It refuses development versions, mismatched tags, and changes to published asset
 
 The release PR description contains two tagged sections.
 Automation rebuilds **Generated notes** from commits on each refresh and preserves **Public notes** from the open release PR.
-Edit only the text between these public-note markers:
+A visible checklist near the top explains what must be completed before merging.
+Write the public notes between these markers, and tick the review task near the top of the PR:
 
 ```markdown
 <!-- orca:public-notes:start -->
@@ -85,8 +86,14 @@ Keep the markers intact.
 Write short statements about changes users can see or use, without commit hashes or internal maintenance details.
 For a maintenance-only release, write a short, accurate maintenance note.
 The initial placeholder is not publishable.
-Release PR checks require nonempty public notes of at most 4,000 characters.
+Release PR checks require nonempty public notes of at most 4,000 characters and a checked release-note review task.
+Compare the public notes with the generated changes before checking that task.
+When more release changes arrive, automation preserves your text but resets the review task.
+The check also rejects an older generated change list, even before automation refreshes the description.
+An unchanged refresh preserves your completed review.
+You can confirm the review without changing the text when the new commits do not need a public-note update.
 Editing the description runs the checks again.
+Missing or unreviewed notes produce a named error annotation and a check summary with a link to the PR and editing instructions.
 Missing or malformed markers stop publication; text is never silently truncated.
 
 When the release PR merges, the publisher reads public notes from the PR associated with that exact release commit and version.
