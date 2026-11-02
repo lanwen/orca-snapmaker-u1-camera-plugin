@@ -6,7 +6,9 @@
 
 A dedicated Snapmaker U1 tab with a full-viewport camera, printer status, and a chamber light toggle.
 
-![Snapmaker U1 tab in OrcaSlicer showing the live camera feed, printer status, and chamber light toggle](docs/images/snapmaker-u1-camera.png)
+![Snapmaker U1 tab showing Printing, Preparing, Paused, and Complete states with camera and compact print statistics](docs/images/snapmaker-u1-states.png)
+
+*Simulated Orca views with fixed sample data.*
 
 ## Install
 

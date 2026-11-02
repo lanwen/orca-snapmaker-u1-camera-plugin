@@ -11,6 +11,7 @@ const document = {
   hidden: false,
   getElementById(id) {
     if (!elements.has(id)) elements.set(id, { hidden: true, disabled: true,
+      style: {},
       removeAttribute(name) { delete this[name]; },
       setAttribute(name, value) { this[name] = value; } });
     return elements.get(id);
@@ -28,6 +29,68 @@ assert.equal(sent.at(-1).active, true, 'Visible page requests status');
 assert.equal(sent.at(-1).playing, false, 'Playback starts only with Play');
 handler({ type: 'target', generation: 1, target: 'printer' });
 handler({ generation: 1, printer: 'standby', light: false });
+const metrics = {state:'printing', progress:.426, current_layer:128, total_layer:300,
+  elapsed:4200, remaining:6000, tool:2, material:'PETG', color:'#12ab34',
+  bed:{temperature:69.7, target:70}, hotend:{temperature:234.5, target:240}};
+handler({generation:1, stats:metrics});
+assert.equal(el('stats').hidden, false, 'Stats work without starting the camera');
+assert.equal(el('progress-value').textContent, '42%');
+assert.equal(el('layers-value').textContent, '128 / 300');
+assert.equal(el('elapsed-value').textContent, '1h 10m');
+assert.equal(el('remaining-value').textContent, '≈ 1h 40m');
+assert.equal(el('tool-value').textContent, 'T2');
+assert.equal(el('material-value').textContent, 'PETG');
+assert.equal(el('material-swatch').style.backgroundColor, '#12AB34');
+assert.equal(el('hotend-value').textContent, '235 / 240 °C');
+assert.equal(el('bed-value').textContent, '70 °C', 'Targets disappear within 2°C');
+assert.equal(el('progress-bar')['aria-valuenow'], '42');
+handler({generation:1, stats:{...metrics, state:'complete', progress:1, remaining:0}});
+assert.equal(el('stats-state').textContent, 'Complete');
+assert.equal(el('progress-value').textContent, '100%');
+for (const id of ['remaining-stat', 'finish-stat', 'tool-stat']) assert.equal(el(id).hidden, true);
+assert.equal(el('bed-value').textContent, '70 °C');
+assert.equal(el('hotend-value').textContent, '235 °C');
+handler({generation:1, stats:{...metrics, state:'paused'}});
+for (const id of ['remaining-stat', 'finish-stat']) assert.equal(el(id).hidden, true);
+assert.equal(el('tool-stat').hidden, false);
+assert.equal(el('hotend-value').textContent, '235 / 240 °C');
+assert.equal(el('stats-state').textContent, 'Paused');
+assert.equal(el('finish-value').textContent, '—', 'Pauses have no running finish estimate');
+handler({generation:1, stats:{...metrics, hotend:{temperature:238, target:240}}});
+assert.equal(el('hotend-value').textContent, '238 °C', 'A reached target does not add clutter');
+assert.equal(el('remaining-stat').hidden, false, 'Resuming restores the time estimate');
+handler({generation:1, stats:{...metrics, hotend:{temperature:230, target:240}}});
+assert.equal(el('hotend-value').textContent, '230 / 240 °C', 'A heater away from target keeps its target');
+handler({generation:1, stats:{...metrics, hotend:{temperature:90, target:0}}});
+assert.equal(el('hotend-value').textContent, '90 °C', 'An off heater shows only its current temperature');
+for (const state of ['cancelled', 'error']) {
+  handler({generation:1, stats:{...metrics, state}});
+  assert.equal(el('remaining-stat').hidden, true);
+  assert.equal(el('tool-stat').hidden, true);
+  assert.equal(el('hotend-value').textContent, '235 °C');
+}
+handler({generation:1, stats:{state:'standby', color:'url(untrusted)'}});
+for (const id of ['material-stat', 'journey-stat', 'layers-stat']) assert.equal(el(id).hidden, true);
+assert.equal(el('progress-value').textContent, '—');
+assert.equal(el('material-swatch').hidden, true);
+assert.equal(el('progress-bar')['aria-valuenow'], undefined);
+handler({generation:1, stats:null});
+assert.equal(el('stats-state').textContent, 'Status unavailable');
+assert.equal(el('stats-message').textContent, 'Waiting for status');
+assert.equal(el('hardware-stat').hidden, true, 'Failed status clears stale temperatures');
+assert.equal(el('journey-stat').hidden, true, 'Failed status clears stale timing');
+handler({generation:1, stats:{...metrics, printing_duration:0, current_layer:0}});
+assert.equal(el('stats-state').textContent, 'Preparing');
+assert.equal(el('stats-message').textContent, 'Heating up');
+assert.equal(el('remaining-stat').hidden, true);
+assert.equal(el('progress-value').hidden, true);
+handler({generation:1, stats:{...metrics, printing_duration:0, current_layer:1}});
+assert.equal(el('stats-state').textContent, 'Printing', 'A first layer prevents preparation inference');
+handler({generation:1, stats:{...metrics, printing_duration:60, current_layer:0}});
+assert.equal(el('stats-state').textContent, 'Printing', 'Heating mid-print is not preparation');
+handler({generation:1, stats:metrics});
+assert.equal(el('hardware-stat').hidden, false);
+assert.equal(el('journey-stat').hidden, false);
 el('light').onclick();
 assert.equal(sent.at(-1).type, 'light');
 assert.equal(sent.at(-1).enabled, true, 'Light toggle works before playing');
@@ -58,6 +121,9 @@ handler({ generation: 2, image: 'late' });
 assert.equal(el('image').src, undefined, 'Late frames cannot restart playback');
 el('play').onclick();
 handler({ type: 'target', generation: 3, target: 'other printer' });
+assert.equal(el('stats').hidden, true, 'Switching printers clears previous print metrics');
+handler({generation:2, stats:metrics});
+assert.equal(el('stats').hidden, true, 'Old generations cannot restore stats');
 handler({ generation: 2, image: 'wrong printer' });
 assert.equal(el('image').src, undefined, 'Old target frames are discarded');
 handler({ generation: 3, image: 'new printer' });
