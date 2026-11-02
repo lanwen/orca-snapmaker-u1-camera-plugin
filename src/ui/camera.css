@@ -74,41 +74,6 @@ button:focus-visible {
   outline: 3px solid #68ddbd;
   outline-offset: 5px;
 }
-#light {
-  pointer-events: auto;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 14px;
-  border: 1px solid #ffffff30;
-  border-radius: 999px;
-  background: #161c24b3;
-  backdrop-filter: blur(12px);
-  white-space: nowrap;
-}
-.track {
-  display: inline-flex;
-  align-items: center;
-  width: 38px;
-  height: 22px;
-  padding: 3px;
-  background: #ffffff35;
-  border-radius: 99px;
-  transition: background 0.15s;
-}
-.thumb {
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  background: white;
-  transition: transform 0.15s;
-}
-#light[aria-checked='true'] .track {
-  background: #249b7c;
-}
-#light[aria-checked='true'] .thumb {
-  transform: translateX(16px);
-}
 #play,
 #warning {
   position: absolute;
@@ -509,10 +474,6 @@ footer {
   }
   footer {
     padding: 36px 18px 18px;
-  }
-  #light {
-    gap: 8px;
-    padding: 8px 10px;
   }
   #target {
     max-width: 180px;

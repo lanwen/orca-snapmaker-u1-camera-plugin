@@ -263,6 +263,30 @@ test('light toggles are host-confirmed and work without starting playback', () =
   );
 });
 
+test('an unavailable light cannot send commands and keeps its last confirmed state', () => {
+  assert.equal(light().disabled, true);
+  const initialMessages = sent.length;
+  click(light());
+  assert.equal(sent.length, initialMessages);
+  selectPrinter();
+  publish({ generation: 1, light: true });
+  publish({ generation: 1, error: 'Printer is unreachable' });
+  assert.equal(light().disabled, true);
+  assert.equal(
+    light().getAttribute('aria-checked'),
+    'true',
+    'Loss of connectivity does not imply the lamp turned off',
+  );
+  const disconnectedMessages = sent.length;
+  click(light());
+  assert.equal(sent.length, disconnectedMessages);
+  publish({ generation: 1, light: false });
+  assert.equal(light().disabled, false);
+  assert.equal(light().getAttribute('aria-checked'), 'false');
+  click(light());
+  assert.deepEqual(lastMessage(), { type: 'light', enabled: true });
+});
+
 for (const outcome of ['load', 'error'] as const) {
   test(`frames are acknowledged after image ${outcome}, allowing the next frame`, () => {
     start();

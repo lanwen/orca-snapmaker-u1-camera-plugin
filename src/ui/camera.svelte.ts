@@ -46,9 +46,9 @@ export class Camera {
     this.tick();
   };
 
-  toggleLight = () => {
+  setLight = (enabled: boolean) => {
     if (this.active && !document.hidden && this.light !== null)
-      this.bridge.postMessage({ type: 'light', enabled: !this.light });
+      this.bridge.postMessage({ type: 'light', enabled });
   };
 
   tick = () => {

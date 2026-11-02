@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { Camera } from './camera.svelte';
   import PrintStats from './PrintStats.svelte';
+  import LightControl from './LightControl.svelte';
 
   let image: HTMLImageElement;
   let camera = $state<Camera>();
@@ -18,18 +19,11 @@
       <h1>Snapmaker U1 <span id="printer">{camera?.printer ?? 'Connecting'}</span></h1>
       <div id="target">{camera?.target ?? 'Selected printer'}</div>
     </div>
-    <button
-      id="light"
-      type="button"
-      role="switch"
-      aria-label="Chamber light"
-      aria-checked={camera?.light === true}
+    <LightControl
+      value={camera?.light ?? null}
       disabled={camera?.lightDisabled ?? true}
-      onclick={() => camera?.toggleLight()}
-    >
-      <span>Light</span><span class="track" aria-hidden="true"><span class="thumb"></span></span
-      ></button
-    >
+      onchange={(enabled) => camera?.setLight(enabled)}
+    />
   </header>
   <button
     id="play"
