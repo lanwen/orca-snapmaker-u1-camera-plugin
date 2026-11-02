@@ -59,4 +59,6 @@ Switching to another app while the tab remains visible keeps playback running.
 - [Release automation](docs/releases.md)
 - [Technical behavior and API references](docs/reference.md)
 
+The repository's [PR skill](.agents/skills/pr/SKILL.md) is adapted from [humanlayer/skills](https://github.com/humanlayer/skills).
+
 This project uses the [MIT license](LICENSE).
