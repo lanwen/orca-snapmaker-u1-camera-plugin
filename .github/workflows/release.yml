@@ -26,7 +26,7 @@ jobs:
       - uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d # v5
       - run: mise run check
       - id: version
-        run: mise run release:info >> "$GITHUB_OUTPUT"
+        run: mise run release:info
 
   publish:
     needs: validate
