@@ -33,7 +33,8 @@ class PageIconTests(unittest.TestCase):
                 self.assertTrue(icon.is_absolute())
                 self.assertEqual(icon.suffix, ".svg")
                 self.assertEqual(icon.parent, Path(directory))
-                self.assertEqual(icon.read_text(), (Path(__file__).parents[1] / "docs/branding/u1-logo.svg").read_text())
+                expected = (Path(__file__).parents[1] / "docs/branding/u1-logo.svg").read_text().replace("#249b7c", "#FEFEFE")
+                self.assertEqual(icon.read_text(), expected)
                 self.assertEqual(page.get_icon(), str(icon))
 
 

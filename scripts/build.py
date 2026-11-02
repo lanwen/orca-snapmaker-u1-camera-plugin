@@ -26,6 +26,8 @@ def build(output_dir=ROOT / "dist", release_tag=None):
     if source.count(ICON_MARKER) != 1:
         raise ValueError("Plugin source must contain exactly one SVG placeholder")
     icon = (ROOT / "docs/branding/u1-logo.svg").read_text(encoding="utf-8")
+    # Match Orca's tab label color in both selected and unselected states.
+    icon = icon.replace("#249b7c", "#FEFEFE")
     source = source.replace(ICON_MARKER, "ICON = " + repr(icon))
     if source.count(HTTP_IMPORT) != 1:
         raise ValueError("Plugin source must contain exactly one HTTP client import")
