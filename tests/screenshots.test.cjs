@@ -23,29 +23,62 @@ const settle = () => new Promise((resolve) => setImmediate(resolve));
     });
     try {
       await settle();
-      const get = (id) => dom.window.document.getElementById(id);
-      assert.equal(get('stats').dataset.state, state);
-      assert.equal(get('play').hidden, true, 'Screenshot starts playback automatically');
-      assert.ok(get('image').src.startsWith('data:image/svg+xml;base64,'));
-      assert.equal(get('material-value').textContent, 'PLA');
-      assert.equal(get('tool-value').textContent, 'T3');
-      if (state === 'complete') {
-        assert.equal(get('progress-value').textContent, '100%');
-        assert.equal(get('layers-value').textContent, '86 / 86');
-        assert.equal(get('tool-stat').hidden, true);
-      }
-      if (state === 'preparing') {
-        assert.equal(get('stats-message').textContent, 'Heating up');
-        assert.equal(get('hotend-value').textContent, '157 / 210 °C');
-      }
-      if (state === 'paused') assert.equal(get('remaining-stat').hidden, true);
-      for (const [next, expected] of ['printing', 'preparing', 'paused', 'complete'].entries()) {
+      const get = (id) => {
+        const node = dom.window.document.getElementById(id);
+        assert.ok(node, `Expected rendered element: ${id}`);
+        return node;
+      };
+      const visible = (node) => !node.closest('[hidden]');
+      const assertPreview = (phase) => {
+        assert.equal(visible(get('stats')), true, 'A screenshot includes print statistics');
+        assert.equal(visible(get('play')), false, 'The preview starts playback automatically');
+        assert.equal(visible(get('stop')), true);
+        assert.equal(
+          new URL(get('image').src).protocol,
+          'data:',
+          'The preview image is self-contained',
+        );
+        assert.equal(visible(get('hotend-value')), true);
+        assert.equal(
+          visible(get('remaining-value')),
+          phase === 'printing',
+          'Only running prints show an ETA',
+        );
+        assert.equal(
+          visible(get('progress-bar')),
+          phase !== 'preparing',
+          'Preparation does not imply print progress',
+        );
+        assert.equal(visible(get('stats-message')), phase === 'preparing');
+        assert.equal(visible(get('tool-value')), phase !== 'complete');
+        if (phase === 'complete') {
+          const bar = get('progress-bar');
+          assert.equal(
+            bar.getAttribute('aria-valuenow'),
+            bar.getAttribute('aria-valuemax'),
+            'A completed job reaches full progress',
+          );
+          const [current, total] = get('layers-value').textContent.match(/\d+/g).map(Number);
+          assert.equal(current, total, 'A completed job has no layers left');
+        }
+      };
+      assertPreview(state);
+      for (const [next, phase] of ['printing', 'preparing', 'paused', 'complete'].entries()) {
         dom.window.document.body.dispatchEvent(
           new dom.window.KeyboardEvent('keydown', { key: String(next + 1), bubbles: true }),
         );
         await settle();
-        assert.equal(get('stats').dataset.state, expected);
+        assertPreview(phase);
       }
+      const toggle = dom.window.document.querySelector('[role="switch"]');
+      const previous = toggle.getAttribute('aria-checked');
+      toggle.click();
+      await settle();
+      assert.notEqual(
+        toggle.getAttribute('aria-checked'),
+        previous,
+        'The offline bridge supports light interaction',
+      );
       assert.deepEqual(errors, [], 'Compiled production page runs without errors');
     } finally {
       dom.window.close();

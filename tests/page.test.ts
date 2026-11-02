@@ -1,23 +1,17 @@
 import assert from 'node:assert/strict';
-import { afterEach, test, vi } from 'vitest';
+import { afterEach, beforeEach, test, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import App from '../src/ui/App.svelte';
 import type { HostMessage, OrcaBridge } from '../src/ui/types';
 
 let app: ReturnType<typeof mount>;
-afterEach(async () => {
-  await unmount(app);
-  assert.equal(vi.getTimerCount(), 0, 'Unmount clears the activity timer');
-  vi.useRealTimers();
-  vi.restoreAllMocks();
-  document.body.replaceChildren();
-});
+let receive: (data: HostMessage) => void;
+let sent: Parameters<OrcaBridge['postMessage']>[0][];
 
-test('camera lifecycle, light, print states, pacing, and printer switching', () => {
+beforeEach(() => {
   vi.useFakeTimers();
   vi.spyOn(document, 'hidden', 'get').mockReturnValue(false);
-  let receive: (data: HostMessage) => void;
-  const sent: Parameters<OrcaBridge['postMessage']>[0][] = [];
+  sent = [];
   window.orca = {
     onMessage: (callback) => {
       receive = callback;
@@ -26,218 +20,406 @@ test('camera lifecycle, light, print states, pacing, and printer switching', () 
   };
   app = mount(App, { target: document.body });
   flushSync();
-  const handler = (data: HostMessage) => flushSync(() => receive(data));
-  const timer = () => flushSync(() => vi.advanceTimersByTime(1000));
-  const el = (id: string) => document.getElementById(id)! as HTMLButtonElement & HTMLImageElement;
-  const click = (id: string) => flushSync(() => el(id).click());
+});
 
-  assert.equal(sent.at(-1)!.active, true, 'Visible page requests status');
-  assert.equal(sent.at(-1)!.playing, false, 'Playback starts only with Play');
-  handler({ type: 'target', generation: 1, target: 'printer' });
-  handler({ generation: 1, printer: 'standby', light: false });
-  const metrics = {
-    state: 'printing',
-    progress: 0.426,
-    current_layer: 128,
-    total_layer: 300,
-    elapsed: 4200,
-    remaining: 6000,
-    tool: 2,
-    material: 'PETG',
-    color: '#12ab34',
-    bed: { temperature: 69.7, target: 70 },
-    hotend: { temperature: 234.5, target: 240 },
-  };
-  handler({ generation: 1, stats: metrics });
-  assert.equal(el('stats').hidden, false, 'Stats work without starting the camera');
-  assert.equal(el('progress-value').textContent, '42%');
-  assert.equal(el('layers-value').textContent, '128 / 300');
-  assert.equal(el('elapsed-value').textContent, '1h 10m');
-  assert.equal(el('remaining-value').textContent, '≈ 1h 40m');
-  assert.equal(el('tool-value').textContent, 'T2');
-  assert.equal(el('material-value').textContent, 'PETG');
-  assert.equal(el('material-swatch').style.backgroundColor, 'rgb(18, 171, 52)');
-  assert.equal(el('hotend-value').textContent, '235 / 240 °C');
-  assert.equal(el('bed-value').textContent, '70 °C', 'Targets disappear within 2°C');
-  assert.equal(el('progress-bar').getAttribute('aria-valuenow'), '42');
-  handler({ generation: 1, stats: { ...metrics, state: 'complete', progress: 1, remaining: 0 } });
-  assert.equal(el('stats-state').textContent, 'Complete');
-  assert.equal(el('progress-value').textContent, '100%');
-  for (const id of ['remaining-stat', 'finish-stat', 'tool-stat'])
-    assert.equal(el(id).hidden, true);
-  assert.equal(el('bed-value').textContent, '70 °C');
-  assert.equal(el('hotend-value').textContent, '235 °C');
-  handler({ generation: 1, stats: { ...metrics, state: 'paused' } });
-  for (const id of ['remaining-stat', 'finish-stat']) assert.equal(el(id).hidden, true);
-  assert.equal(el('tool-stat').hidden, false);
-  assert.equal(el('hotend-value').textContent, '235 / 240 °C');
-  assert.equal(el('stats-state').textContent, 'Paused');
-  assert.equal(el('finish-value').textContent, '—', 'Pauses have no running finish estimate');
-  handler({ generation: 1, stats: { ...metrics, hotend: { temperature: 238, target: 240 } } });
-  assert.equal(el('hotend-value').textContent, '238 °C', 'A reached target does not add clutter');
-  assert.equal(el('remaining-stat').hidden, false, 'Resuming restores the time estimate');
-  handler({ generation: 1, stats: { ...metrics, hotend: { temperature: 230, target: 240 } } });
-  assert.equal(
-    el('hotend-value').textContent,
-    '230 / 240 °C',
-    'A heater away from target keeps its target',
-  );
-  handler({ generation: 1, stats: { ...metrics, hotend: { temperature: 90, target: 0 } } });
-  assert.equal(
-    el('hotend-value').textContent,
-    '90 °C',
-    'An off heater shows only its current temperature',
-  );
-  for (const state of ['cancelled', 'error']) {
-    handler({ generation: 1, stats: { ...metrics, state } });
-    assert.equal(el('remaining-stat').hidden, true);
-    assert.equal(el('tool-stat').hidden, true);
-    assert.equal(el('hotend-value').textContent, '235 °C');
-  }
-  handler({ generation: 1, stats: { state: 'standby', color: 'url(untrusted)' } });
-  for (const id of ['material-stat', 'journey-stat', 'layers-stat'])
-    assert.equal(el(id).hidden, true);
-  assert.equal(el('progress-value').textContent, '—');
-  assert.equal(el('material-swatch').hidden, true);
-  assert.equal(el('progress-bar').getAttribute('aria-valuenow'), null);
-  handler({ generation: 1, stats: null });
-  assert.equal(el('stats-state').textContent, 'Status unavailable');
-  assert.equal(el('stats-message').textContent, 'Waiting for status');
-  assert.equal(el('hardware-stat').hidden, true, 'Failed status clears stale temperatures');
-  assert.equal(el('journey-stat').hidden, true, 'Failed status clears stale timing');
-  handler({ generation: 1, stats: { ...metrics, printing_duration: 0, current_layer: 0 } });
-  assert.equal(el('stats-state').textContent, 'Preparing');
-  assert.equal(el('stats-message').textContent, 'Heating up');
-  assert.equal(el('remaining-stat').hidden, true);
-  assert.equal(el('progress-value').hidden, true);
-  handler({ generation: 1, stats: { ...metrics, printing_duration: 0, current_layer: 1 } });
-  assert.equal(
-    el('stats-state').textContent,
-    'Printing',
-    'A first layer prevents preparation inference',
-  );
-  handler({ generation: 1, stats: { ...metrics, printing_duration: 60, current_layer: 0 } });
-  assert.equal(el('stats-state').textContent, 'Printing', 'Heating mid-print is not preparation');
-  handler({ generation: 1, stats: metrics });
-  assert.equal(el('hardware-stat').hidden, false);
-  assert.equal(el('journey-stat').hidden, false);
-  click('light');
-  assert.equal(sent.at(-1)!.type, 'light');
-  assert.equal(sent.at(-1)!.enabled, true, 'Light toggle works before playing');
-  handler({ generation: 1, light: true });
-  assert.equal(el('light').getAttribute('aria-checked'), 'true');
-  handler({ generation: 1, failed: true, camera: 'Light request failed' });
-  assert.equal(
-    el('camera').textContent,
-    'Light request failed',
-    'Light errors remain visible while stopped',
-  );
-  click('play');
-  assert.equal(sent.at(-1)!.playing, true);
-  assert.equal(el('play').hidden, true);
-  assert.equal(el('stop').hidden, false);
-  handler({ type: 'target', generation: 2, target: 'printer' });
-  handler({ generation: 2, image: 'fresh', camera: 'Live' });
-  assert.notEqual(sent.at(-1)!.type, 'frame', 'Wait until the image has loaded');
-  flushSync(() => el('image').dispatchEvent(new Event('load')));
-  assert.equal(el('image').hidden, false);
-  assert.equal(sent.at(-1)!.type, 'frame');
-  assert.equal(sent.at(-1)!.generation, 2);
-  // Simulate app focus changes. Playback depends on page visibility only.
-  window.dispatchEvent(new Event('blur'));
-  timer();
-  assert.equal(sent.at(-1)!.playing, true, 'Unfocusing the app does not stop playback');
-  click('stop');
-  assert.equal(sent.at(-1)!.playing, false, 'Stop ends playback');
-  assert.equal(el('image').hidden, true);
-  assert.equal(el('play').hidden, false);
-  handler({ generation: 2, image: 'late' });
-  assert.equal(el('image').getAttribute('src'), null, 'Late frames cannot restart playback');
-  click('play');
-  handler({ type: 'target', generation: 3, target: 'other printer' });
-  assert.equal(el('stats').hidden, true, 'Switching printers clears previous print metrics');
-  handler({ generation: 2, stats: metrics });
-  assert.equal(el('stats').hidden, true, 'Old generations cannot restore stats');
-  handler({ generation: 2, image: 'wrong printer' });
-  assert.equal(el('image').getAttribute('src'), null, 'Old target frames are discarded');
-  handler({ generation: 3, image: 'new printer' });
-  assert.equal(el('image').getAttribute('src'), 'new printer');
-  vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
+afterEach(async () => {
+  await unmount(app);
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+  document.body.replaceChildren();
+});
+
+// These helpers interact with the rendered page and host protocol, never Camera internals.
+const element = (selector: string) => {
+  const result = document.querySelector<HTMLElement>(selector);
+  assert.ok(result, `Expected rendered element: ${selector}`);
+  return result;
+};
+const field = (id: string) => element(`#${id}`);
+const visible = (node: HTMLElement) => !node.closest('[hidden]');
+const button = (action: 'play' | 'stop') =>
+  element(`button[aria-label*="${action}" i]`) as HTMLButtonElement;
+const light = () => element('[role="switch"]') as HTMLButtonElement;
+const image = () => element('img[alt]') as HTMLImageElement;
+const progress = () => element('[role="progressbar"]');
+const numbers = (node: HTMLElement) =>
+  (node.textContent?.match(/\d+(?:\.\d+)?/g) ?? []).map(Number);
+const publish = (data: HostMessage) => flushSync(() => receive(data));
+const click = (node: HTMLElement) => flushSync(() => node.click());
+const advance = (milliseconds: number) => flushSync(() => vi.advanceTimersByTime(milliseconds));
+const settleFrame = (outcome: 'load' | 'error' = 'load') =>
+  flushSync(() => image().dispatchEvent(new Event(outcome)));
+const setVisible = (shown: boolean) => {
+  vi.spyOn(document, 'hidden', 'get').mockReturnValue(!shown);
   flushSync(() => document.dispatchEvent(new Event('visibilitychange')));
-  assert.equal(sent.at(-1)!.active, false, 'Leaving the page stops all monitoring');
-  assert.equal(el('image').hidden, true);
-  const count = sent.length;
-  flushSync(() => el('image').dispatchEvent(new Event('load')));
-  timer();
-  assert.equal(sent.length, count, 'Hidden page sends no frame acknowledgements or keepalive');
-  vi.spyOn(document, 'hidden', 'get').mockReturnValue(false);
-  flushSync(() => document.dispatchEvent(new Event('visibilitychange')));
-  assert.equal(sent.at(-1)!.active, true);
-  assert.equal(sent.at(-1)!.playing, false, 'Returning presents Play instead of restarting');
-  handler({ type: 'target', generation: 4, target: 'printer' });
-  click('play');
-  handler({ type: 'selection_changed' });
-  assert.equal(sent.at(-1)!.playing, false, 'Changing printers stops playback immediately');
-  handler({ error: 'Select a Snapmaker U1 printer in Prepare.', supported: false });
-  assert.equal(el('play').disabled, true);
-  assert.equal(el('play').hidden, true, 'Wrong printer hides the Play overlay');
-  assert.equal(el('warning').hidden, false, 'Wrong printer shows a warning instead');
-  assert.equal(el('light').disabled, true);
-  const beforePlay = sent.length;
-  click('play');
-  assert.equal(sent.length, beforePlay, 'Other printer selections cannot start the camera');
-  vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
-  flushSync(() => document.dispatchEvent(new Event('visibilitychange')));
-  vi.spyOn(document, 'hidden', 'get').mockReturnValue(false);
-  flushSync(() => document.dispatchEvent(new Event('visibilitychange')));
-  assert.equal(el('play').hidden, true, 'Returning to an unsupported printer keeps Play hidden');
-  assert.equal(el('warning').hidden, false);
-  handler({
-    error: 'Set the selected printer address, or set "host" in plugin Config.',
-    supported: true,
+};
+const selectPrinter = (generation = 1, target = 'Workshop printer') =>
+  publish({ type: 'target', generation, target });
+const lastMessage = () => {
+  assert.ok(sent.length);
+  return sent.at(-1)!;
+};
+const frames = () => sent.filter((message) => message.type === 'frame');
+const metrics = {
+  state: 'printing',
+  progress: 0.426,
+  current_layer: 128,
+  total_layer: 300,
+  elapsed: 4200,
+  remaining: 6000,
+  tool: 2,
+  material: 'PETG',
+  color: '#12ab34',
+  bed: { temperature: 69.7, target: 70 },
+  hotend: { temperature: 234.5, target: 240 },
+};
+const start = () => {
+  selectPrinter();
+  click(button('play'));
+};
+
+test('opening the page monitors status but requires an explicit Play to fetch camera frames', () => {
+  assert.deepEqual(lastMessage(), { type: 'activity', active: true, playing: false });
+  assert.equal(button('play').disabled, true);
+  selectPrinter();
+  assert.equal(button('play').disabled, false);
+  assert.equal(visible(button('play')), true);
+  assert.equal(visible(button('stop')), false);
+  click(button('play'));
+  assert.deepEqual(lastMessage(), { type: 'activity', active: true, playing: true });
+  assert.equal(visible(button('play')), false);
+  assert.equal(visible(button('stop')), true);
+});
+
+test('print statistics display incoming measurements while the camera is stopped', () => {
+  selectPrinter();
+  publish({ generation: 1, stats: metrics });
+  assert.equal(visible(progress()), true);
+  assert.equal(
+    Number(progress().getAttribute('aria-valuenow')),
+    42,
+    'Progress rounds down to a whole percent',
+  );
+  assert.deepEqual(numbers(field('layers-value')), [128, 300]);
+  assert.match(field('elapsed-value').textContent!, /1\s*(?:h|hour)/i);
+  assert.match(field('elapsed-value').textContent!, /10\s*(?:m|min)/i);
+  assert.deepEqual(numbers(field('remaining-value')), [1, 40]);
+  assert.equal(
+    field('material-value').textContent,
+    metrics.material,
+    'Reported material reaches the user',
+  );
+  assert.deepEqual(numbers(field('tool-value')), [metrics.tool]);
+  assert.deepEqual(numbers(field('bed-value')), [70]);
+  assert.deepEqual(numbers(field('hotend-value')), [235, 240]);
+  assert.equal(visible(field('material-swatch')), true);
+  const swatch = field('material-swatch').style.backgroundColor;
+  publish({ generation: 1, stats: { ...metrics, color: '#ffffff' } });
+  assert.notEqual(
+    field('material-swatch').style.backgroundColor,
+    swatch,
+    'The swatch follows the reported material color',
+  );
+  assert.equal(lastMessage().playing, false);
+});
+
+test('pausing hides moving estimates and resuming restores them', () => {
+  selectPrinter();
+  publish({ generation: 1, stats: metrics });
+  const activeLabel = field('stats-state').textContent;
+  assert.equal(visible(field('remaining-value')), true);
+  assert.equal(visible(field('finish-value')), true);
+  publish({ generation: 1, stats: { ...metrics, state: 'paused' } });
+  assert.notEqual(
+    field('stats-state').textContent,
+    activeLabel,
+    'The user can distinguish a paused job',
+  );
+  assert.equal(visible(field('remaining-value')), false);
+  assert.equal(visible(field('finish-value')), false);
+  assert.equal(visible(progress()), true, 'Pausing retains completed progress');
+  assert.equal(visible(field('tool-value')), true);
+  publish({ generation: 1, stats: metrics });
+  assert.equal(visible(field('remaining-value')), true);
+  assert.equal(visible(field('finish-value')), true);
+});
+
+for (const state of ['complete', 'cancelled', 'error']) {
+  test(`${state} jobs retain measurements but hide running estimates, tool, and heater targets`, () => {
+    selectPrinter();
+    publish({
+      generation: 1,
+      stats: { ...metrics, state, progress: state === 'complete' ? 1 : metrics.progress },
+    });
+    assert.equal(visible(field('remaining-value')), false);
+    assert.equal(visible(field('finish-value')), false);
+    assert.equal(visible(field('tool-value')), false);
+    assert.deepEqual(numbers(field('hotend-value')), [235]);
+    assert.equal(visible(progress()), true);
+    if (state === 'complete') assert.equal(Number(progress().getAttribute('aria-valuenow')), 100);
   });
-  assert.equal(el('warning').hidden, false, 'A missing address shows a warning for any preset');
-  assert.equal(el('target').textContent, 'Printer address unavailable');
-  assert.equal(
-    el('warning-label').textContent,
-    'Set the selected printer address, or set "host" in plugin Config.',
-  );
-  assert.equal(el('play').hidden, true);
-  assert.equal(el('play').disabled, true, 'Play waits for a configured printer address');
-  handler({ type: 'target', generation: 5, target: 'U1 printer' });
-  assert.equal(el('play').disabled, false, 'Selecting U1 makes Play available again');
-  assert.equal(el('play-label').textContent, 'Play camera');
-  assert.equal(el('play').hidden, false);
-  assert.equal(el('warning').hidden, true, 'Selecting U1 clears the warning');
-  click('play');
-  assert.equal(sent.at(-1)!.playing, true, 'A resolved explicit host enables playback');
-  handler({ generation: 5, light: false });
-  assert.equal(el('light').disabled, false, 'A resolved explicit host enables the light');
-  handler({ error: 'Set host in plugin Config.' });
-  assert.equal(
-    el('warning').hidden,
-    true,
-    'Connection errors do not label a U1 as the wrong printer',
-  );
+}
 
-  handler({ type: 'target', generation: 6, target: 'printer' });
-  handler({ generation: 6, stats: metrics });
-  click('play');
-  handler({ generation: 6, image: 'broken' });
-  flushSync(() => el('image').dispatchEvent(new Event('error')));
+test('heater targets appear only while an active heater is away from its target', () => {
+  selectPrinter();
+  for (const [temperature, target, displayed] of [
+    [230, 240, [230, 240]],
+    [238, 240, [238]],
+    [90, 0, [90]],
+  ] as const) {
+    publish({ generation: 1, stats: { ...metrics, hotend: { temperature, target } } });
+    assert.deepEqual(numbers(field('hotend-value')), displayed);
+  }
+});
+
+test('preparation hides speculative progress and ETA until extrusion or the first layer', () => {
+  selectPrinter();
+  publish({ generation: 1, stats: { ...metrics, printing_duration: 0, current_layer: 0 } });
+  assert.equal(visible(field('stats-message')), true);
+  assert.equal(visible(progress()), false);
+  assert.equal(visible(field('remaining-value')), false);
+  assert.equal(visible(field('hotend-value')), true);
+  for (const started of [
+    { printing_duration: 0, current_layer: 1 },
+    { printing_duration: 60, current_layer: 0 },
+  ]) {
+    publish({ generation: 1, stats: { ...metrics, ...started } });
+    assert.equal(
+      visible(progress()),
+      true,
+      'Either extrusion or a first layer establishes a running print',
+    );
+    assert.equal(visible(field('stats-message')), false);
+  }
+});
+
+test('idle and missing status never present old job details as current', () => {
+  selectPrinter();
+  publish({ generation: 1, stats: metrics });
+  publish({ generation: 1, stats: { state: 'standby', color: 'url(untrusted)' } });
+  assert.equal(visible(field('material-value')), false);
+  assert.equal(visible(field('layers-value')), false);
+  assert.equal(visible(progress()), false);
+  assert.equal(visible(field('material-swatch')), false);
   assert.equal(
-    sent.at(-1)!.type,
-    'frame',
-    'A failed image is acknowledged so the feed can recover',
+    progress().hasAttribute('aria-valuenow'),
+    false,
+    'Missing progress is not announced as zero',
   );
-  assert.equal(el('camera').textContent, 'Could not display camera image');
-  handler({ generation: 6, image: 'recovered' });
-  flushSync(() => el('image').dispatchEvent(new Event('load')));
-  assert.equal(el('image').hidden, false);
-  flushSync(() => vi.advanceTimersByTime(7000));
-  assert.equal(el('image').hidden, true, 'A stale frame is cleared');
-  assert.equal(el('camera').textContent, 'Waiting for camera — no recent image');
-  assert.equal(el('stats-state').textContent, 'Printing');
-  flushSync(() => vi.advanceTimersByTime(4000));
-  assert.equal(el('stats-state').textContent, 'Status unavailable', 'Old statistics expire');
+  publish({ generation: 1, stats: null });
+  assert.equal(visible(field('hotend-value')), false);
+  assert.equal(visible(field('elapsed-value')), false);
+  assert.equal(visible(field('stats-message')), true);
+  assert.ok(field('stats-message').textContent?.trim(), 'Missing status has an explanation');
+  publish({ generation: 1, stats: metrics });
+  assert.equal(visible(field('hotend-value')), true);
+  assert.equal(visible(field('elapsed-value')), true);
+  advance(11000);
+  assert.equal(visible(field('hotend-value')), false, 'Status expires even without playback');
+  assert.equal(visible(field('elapsed-value')), false);
+});
+
+test('unknown or invalid measurements stay unknown rather than becoming NaN or zero progress', () => {
+  selectPrinter();
+  publish({
+    generation: 1,
+    stats: {
+      state: 'printing',
+      progress: NaN,
+      current_layer: -1,
+      tool: 9,
+      color: 'url(untrusted)',
+    },
+  });
+  assert.equal(progress().hasAttribute('aria-valuenow'), false);
+  for (const id of ['layers-value', 'tool-value', 'hotend-value', 'remaining-value']) {
+    assert.deepEqual(numbers(field(id)), [], `${id} does not invent a measurement`);
+    assert.doesNotMatch(field(id).textContent!, /NaN|undefined|null/);
+  }
+  assert.equal(visible(field('material-swatch')), false);
+  publish({ generation: 1, stats: { ...metrics, progress: 1.5 } });
+  assert.equal(
+    Number(progress().getAttribute('aria-valuenow')),
+    100,
+    'Progress cannot exceed completion',
+  );
+});
+
+test('light toggles are host-confirmed and work without starting playback', () => {
+  selectPrinter();
+  publish({ generation: 1, light: false });
+  click(light());
+  assert.deepEqual(lastMessage(), { type: 'light', enabled: true });
+  assert.equal(light().getAttribute('aria-checked'), 'false', 'A request is not confirmation');
+  publish({ generation: 1, light: true });
+  assert.equal(light().getAttribute('aria-checked'), 'true');
+  click(light());
+  assert.deepEqual(lastMessage(), { type: 'light', enabled: false });
+  const failure = 'The printer rejected the light command';
+  publish({ generation: 1, failed: true, camera: failure });
+  assert.equal(field('camera').textContent, failure, 'Host failures remain visible while stopped');
+  assert.equal(
+    sent.some((message) => message.type === 'activity' && message.playing),
+    false,
+  );
+});
+
+for (const outcome of ['load', 'error'] as const) {
+  test(`frames are acknowledged after image ${outcome}, allowing the next frame`, () => {
+    start();
+    publish({ generation: 1, image: 'frame-one' });
+    assert.equal(frames().length, 0);
+    settleFrame(outcome);
+    assert.deepEqual(frames(), [{ type: 'frame', generation: 1 }]);
+    assert.equal(visible(image()), outcome === 'load');
+    if (outcome === 'error')
+      assert.ok(field('camera').textContent?.trim(), 'A failed image has an explanation');
+    publish({ generation: 1, image: 'frame-two' });
+    settleFrame();
+    assert.equal(visible(image()), true, 'The feed recovers with the next frame');
+    assert.equal(frames().length, 2);
+  });
+}
+
+test('Stop removes the current frame and late images cannot restart playback', () => {
+  start();
+  publish({ generation: 1, image: 'frame' });
+  settleFrame();
+  click(button('stop'));
+  assert.equal(lastMessage().playing, false);
+  assert.equal(visible(image()), false);
+  assert.equal(visible(button('play')), true);
+  publish({ generation: 1, image: 'late' });
+  assert.equal(image().hasAttribute('src'), false);
+  const acknowledged = frames().length;
+  settleFrame();
+  assert.equal(frames().length, acknowledged);
+});
+
+test('changing generation rejects old frames and status without losing playback intent', () => {
+  start();
+  publish({ generation: 1, stats: metrics, light: true, image: 'old frame' });
+  const oldLoad = image().onload!;
+  selectPrinter(2, 'Other printer');
+  publish({
+    generation: 1,
+    stats: metrics,
+    light: false,
+    image: 'late frame',
+    error: 'Stale failure',
+  });
+  assert.equal(visible(field('stats')), false);
+  assert.equal(image().hasAttribute('src'), false);
+  assert.equal(light().disabled, true);
+  assert.notEqual(field('camera').textContent, 'Stale failure');
+  flushSync(() => oldLoad.call(image(), new Event('load')));
+  assert.equal(frames().length, 0, 'An old load callback cannot acknowledge the new generation');
+  publish({ generation: 2, image: 'new frame' });
+  assert.equal(
+    image().getAttribute('src'),
+    'new frame',
+    'A target announcement preserves playback intent',
+  );
+  settleFrame();
+  assert.deepEqual(lastMessage(), { type: 'frame', generation: 2 });
+});
+
+test('a playback generation announcement for the same printer preserves its statistics and light', () => {
+  selectPrinter();
+  publish({ generation: 1, stats: metrics, light: true });
+  click(button('play'));
+  selectPrinter(2);
+  assert.equal(visible(progress()), true);
+  assert.equal(light().disabled, false);
+  assert.equal(light().getAttribute('aria-checked'), 'true');
+});
+
+test('visibility stops monitoring once, ignores late loads, and returning requires Play again', () => {
+  start();
+  publish({ generation: 1, image: 'frame' });
+  setVisible(false);
+  assert.deepEqual(lastMessage(), { type: 'activity', active: false });
+  const inactiveCount = sent.length;
+  settleFrame();
+  advance(5000);
+  click(light());
+  assert.equal(
+    sent.length,
+    inactiveCount,
+    'Hidden pages do not acknowledge frames, send commands, or keep monitoring',
+  );
+  assert.equal(visible(image()), false);
+  setVisible(true);
+  assert.deepEqual(lastMessage(), { type: 'activity', active: true, playing: false });
+  assert.equal(visible(button('play')), true);
+});
+
+test('window focus does not control playback, but a stale image is no longer presented as live', () => {
+  start();
+  publish({ generation: 1, image: 'frame' });
+  settleFrame();
+  window.dispatchEvent(new Event('blur'));
+  advance(1000);
+  assert.equal(lastMessage().playing, true);
+  assert.equal(visible(image()), true);
+  advance(6000);
+  assert.equal(visible(image()), false);
+  assert.ok(field('camera').textContent?.trim(), 'A stalled feed has an explanation');
+});
+
+test('selection changes stop playback, explain unavailable targets, and allow later recovery', () => {
+  start();
+  publish({ type: 'selection_changed' });
+  assert.equal(lastMessage().playing, false);
+  assert.equal(button('play').disabled, true);
+  for (const supported of [false, true]) {
+    const reason = supported
+      ? 'A configured address is required'
+      : 'This preset cannot supply a camera';
+    publish({ error: reason, supported });
+    assert.equal(visible(button('play')), false);
+    assert.equal(light().disabled, true);
+    const warning = [...document.querySelectorAll<HTMLElement>('[role="status"]')].find(
+      (node) => visible(node) && node.textContent?.includes(reason),
+    );
+    assert.ok(warning, 'The host-provided reason is visible');
+    const messageCount = sent.length;
+    click(button('play'));
+    assert.equal(sent.length, messageCount);
+    setVisible(false);
+    setVisible(true);
+    assert.equal(visible(button('play')), false, 'Returning does not bypass target resolution');
+  }
+  selectPrinter(2);
+  assert.equal(button('play').disabled, false);
+  assert.equal(visible(button('play')), true);
+  click(button('play'));
+  assert.equal(lastMessage().playing, true);
+  publish({ generation: 2, light: false });
+  assert.equal(light().disabled, false);
+  publish({ error: 'Temporary connection failure' });
+  assert.equal(
+    visible(button('stop')),
+    true,
+    'A transport error does not reclassify the selected preset',
+  );
+  assert.equal(visible(field('warning')), false);
+});
+
+test('unmount ends monitoring and later browser events or host messages cannot restart it', async () => {
+  start();
+  publish({ generation: 1, image: 'frame' });
+  const pendingLoad = image().onload!;
+  const pendingImage = image();
+  await unmount(app);
+  assert.deepEqual(lastMessage(), { type: 'activity', active: false });
+  const messageCount = sent.length;
+  advance(5000);
+  flushSync(() => {
+    window.dispatchEvent(new Event('pageshow'));
+    document.dispatchEvent(new Event('visibilitychange'));
+    pendingLoad.call(pendingImage, new Event('load'));
+  });
+  publish({ type: 'target', generation: 2, target: 'After unmount' });
+  assert.equal(sent.length, messageCount);
 });
