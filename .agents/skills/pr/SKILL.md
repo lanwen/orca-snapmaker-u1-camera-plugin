@@ -5,7 +5,7 @@ description: Create or update a pull request with a concise description and a vi
 
 # Describe a Pull Request
 
-Adapted from the global `visual-pr` skill for this repository.
+Adapted from [humanlayer/skills](https://github.com/humanlayer/skills) for this repository.
 Use [.github/pull_request_template.md](../../../.github/pull_request_template.md) as the single source for the PR description format and Why markers.
 
 ## Workflow
