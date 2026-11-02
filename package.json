@@ -5,12 +5,13 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "build:ui": "vite build",
-    "check": "pnpm format:check && pnpm lint && pnpm check:types",
+    "check": "pnpm check:commit && pnpm check:types",
     "test": "vitest run",
     "format": "oxfmt src/ui tests index.html src/camera.html package.json tsconfig.json vite.config.ts svelte.config.js .oxfmtrc.json .oxlintrc.json",
     "format:check": "pnpm format --check",
     "lint": "oxlint --deny-warnings src/ui tests vite.config.ts svelte.config.js",
-    "check:types": "svelte-check --tsconfig ./tsconfig.json"
+    "check:types": "svelte-check --tsconfig ./tsconfig.json",
+    "check:commit": "pnpm format:check && pnpm lint"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^7.3.1",

@@ -6,7 +6,7 @@ pnpm = "12.16.1"
 
 [tasks.setup]
 description = "Install locked development dependencies"
-run = ["uv sync --locked --python python", "pnpm install --frozen-lockfile"]
+run = ["uv sync --locked --python python", "pnpm install --frozen-lockfile", "git config --local core.hooksPath .githooks"]
 
 [tasks.build]
 description = "Build the installable plugin and SHA256SUMS in dist/"

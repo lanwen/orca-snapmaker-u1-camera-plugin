@@ -29,6 +29,12 @@ mise run check
 ```
 
 `mise run setup` installs Python dependencies from `uv.lock` and frontend dependencies with `pnpm install --frozen-lockfile`.
+It also installs the repository's pre-commit hook through the local Git `core.hooksPath` setting.
+The hook runs Oxfmt checks and Oxlint before each commit, using the tools pinned by mise.
+It checks the frontend working tree, including unstaged edits, and rejects the commit if either check fails.
+It does not format or stage files automatically.
+If formatting fails, run `mise exec -- pnpm format`, review and stage the result, then commit again.
+You can run the same checks directly with `mise exec -- pnpm check:commit`.
 `mise run build` compiles the Svelte UI into `dist/ui/camera.html`, embeds that page into the generated Python plugin, and adds Orca's metadata from `pyproject.toml`.
 The compiled page includes all JavaScript and CSS, uses the existing content security policy, and needs no network access for assets.
 Node and pnpm are development tools; Orca users still install one Python file.
