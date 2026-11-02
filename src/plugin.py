@@ -278,6 +278,7 @@ class Monitor:
 
 
 PAGE = "__CAMERA_HTML__"
+ICON = "__CAMERA_SVG__"
 
 
 class U1Page(orca.pages.PagesPluginCapabilityBase):
@@ -289,6 +290,12 @@ class U1Page(orca.pages.PagesPluginCapabilityBase):
 
     def get_name(self):
         return "Snapmaker U1"
+
+    def get_icon(self):
+        # Orca's native tab needs a file path, not an HTML favicon or data URL.
+        path = Path(__file__).with_suffix(".svg")
+        path.write_text(ICON, encoding="utf-8")
+        return str(path)
 
     def get_default_config(self):
         return {"host": "", "allow_preset_connection": None}
