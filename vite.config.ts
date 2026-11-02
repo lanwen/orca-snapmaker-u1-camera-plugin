@@ -21,7 +21,13 @@ export default defineConfig({
         )
           throw new Error('The camera must build to one script and one stylesheet.');
         const template = readFileSync('src/camera.html', 'utf8');
+        const icon = readFileSync('docs/branding/u1-logo.svg').toString('base64');
         const page = template
+          .replace(
+            '<!-- CAMERA_ICON -->',
+            () =>
+              `<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,${icon}" />`,
+          )
           .replace('<!-- CAMERA_STYLE -->', () => `<style>${style.source}</style>`)
           .replace(
             '<!-- CAMERA_SCRIPT -->',
