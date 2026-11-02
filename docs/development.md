@@ -52,6 +52,8 @@ mise exec -- pnpm dev
 ```
 
 Vite reloads the page when you edit a component.
+Keep component-specific styles in that component's scoped `<style>` block.
+`src/ui/global.css` contains document defaults, the shared hidden-element rule, and shared button styles.
 The preview bridge does not connect to Orca or a printer.
 Use `mise exec -- pnpm run check` for formatting, lint, and type checks, and `mise exec -- pnpm test` for UI tests.
 Run `mise exec -- pnpm format` to format the frontend, or `mise exec -- pnpm format:check` to check it without changing files.

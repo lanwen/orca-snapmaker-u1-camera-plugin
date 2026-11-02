@@ -58,3 +58,164 @@
     >
   </footer>
 </main>
+
+<style>
+  .viewer {
+    position: fixed;
+    inset: var(--viewer-top, 0px) 0 0;
+    isolation: isolate;
+    background: #0b0e12;
+  }
+  #image {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    display: block;
+  }
+  header {
+    position: absolute;
+    inset: 0 0 auto;
+    padding: 26px 30px 50px;
+    display: flex;
+    align-items: start;
+    justify-content: space-between;
+    gap: 24px;
+    background: linear-gradient(#0009, transparent);
+    z-index: 3;
+    pointer-events: none;
+  }
+  h1 {
+    font-size: 19px;
+    font-weight: 600;
+    margin: 0 0 5px;
+    letter-spacing: -0.3px;
+  }
+  #target {
+    font-size: 12px;
+    color: #ffffffa0;
+    overflow-wrap: anywhere;
+  }
+  #printer {
+    margin-left: 10px;
+    font-size: 12px;
+    font-weight: 400;
+    color: #ffffffb0;
+  }
+  #play,
+  #warning {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 18px;
+    background: radial-gradient(ellipse at center, #26313c80, transparent 70%);
+    z-index: 2;
+  }
+  #warning {
+    color: #f3c568;
+    padding: 30px;
+    text-align: center;
+    pointer-events: none;
+  }
+  #warning svg {
+    width: 64px;
+    height: 64px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.5;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .play-circle {
+    width: 88px;
+    height: 88px;
+    border: 1px solid #ffffff4d;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    background: #ffffff10;
+    transition:
+      background 0.15s,
+      transform 0.15s;
+  }
+  #play:hover .play-circle {
+    background: #ffffff20;
+    transform: scale(1.04);
+  }
+  #play svg {
+    width: 30px;
+    height: 30px;
+    margin-left: 5px;
+    fill: currentColor;
+  }
+  .play-label {
+    font-size: 15px;
+    color: #e0e5ec;
+    max-width: 480px;
+    padding: 0 24px;
+  }
+  #empty {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    color: #ffffff80;
+    pointer-events: none;
+  }
+  footer {
+    position: absolute;
+    inset: auto 0 0;
+    padding: 36px 30px 24px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: end;
+    gap: 12px 20px;
+    background: linear-gradient(transparent, #0009);
+    z-index: 3;
+    pointer-events: none;
+  }
+  #camera {
+    font-size: 12px;
+    color: #d7dee7;
+    line-height: 1.5;
+  }
+  #stop {
+    pointer-events: auto;
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding: 10px 16px;
+    border: 1px solid #ffffff40;
+    border-radius: 999px;
+    background: #17202bd9;
+    opacity: 0;
+    transition: opacity 0.15s;
+  }
+  #stop svg {
+    width: 12px;
+    height: 12px;
+    fill: currentColor;
+  }
+  .viewer:hover #stop,
+  .viewer:focus-within #stop {
+    opacity: 1;
+  }
+  @media (hover: none) {
+    #stop {
+      opacity: 1;
+    }
+  }
+  @media (max-width: 550px) {
+    header {
+      padding: 18px;
+    }
+    footer {
+      padding: 36px 18px 18px;
+    }
+    #target {
+      max-width: 180px;
+    }
+  }
+</style>

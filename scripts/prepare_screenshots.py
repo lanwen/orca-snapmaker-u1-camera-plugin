@@ -120,7 +120,7 @@ def prepare(output_dir=ROOT / "dist/screenshots", camera=None):
               '<image href="data:image/png;base64,' + photo + '" width="1714" height="1439"/></svg>')
     shell_style = """<style>
 .orca-chrome { position:fixed; inset:0 0 auto; width:100%; height:auto; display:block; z-index:5; }
-.viewer { inset:calc(100vw * .05231144) 0 0; }
+body { --viewer-top:calc(100vw * .05231144); }
 </style>"""
     page = page.replace("</head>", shell_style + "</head>")
     page = page.replace("<body>", "<body>" + chrome)
