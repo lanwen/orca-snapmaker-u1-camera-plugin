@@ -34,7 +34,13 @@ export interface HostMessage {
 
 export interface OrcaBridge {
   onMessage(callback: (message: HostMessage) => void): void;
-  postMessage(message: {type: string; active?: boolean; playing?: boolean; enabled?: boolean; generation?: number}): void;
+  postMessage(message: {
+    type: string;
+    active?: boolean;
+    playing?: boolean;
+    enabled?: boolean;
+    generation?: number;
+  }): void;
 }
 
 declare global {

@@ -18,8 +18,13 @@ test('camera lifecycle, light, print states, pacing, and printer switching', () 
   vi.spyOn(document, 'hidden', 'get').mockReturnValue(false);
   let receive: (data: HostMessage) => void;
   const sent: Parameters<OrcaBridge['postMessage']>[0][] = [];
-  window.orca = {onMessage: callback => { receive = callback; }, postMessage: data => sent.push(data)};
-  app = mount(App, {target: document.body});
+  window.orca = {
+    onMessage: (callback) => {
+      receive = callback;
+    },
+    postMessage: (data) => sent.push(data),
+  };
+  app = mount(App, { target: document.body });
   flushSync();
   const handler = (data: HostMessage) => flushSync(() => receive(data));
   const timer = () => flushSync(() => vi.advanceTimersByTime(1000));
@@ -30,10 +35,20 @@ test('camera lifecycle, light, print states, pacing, and printer switching', () 
   assert.equal(sent.at(-1)!.playing, false, 'Playback starts only with Play');
   handler({ type: 'target', generation: 1, target: 'printer' });
   handler({ generation: 1, printer: 'standby', light: false });
-  const metrics = {state:'printing', progress:.426, current_layer:128, total_layer:300,
-    elapsed:4200, remaining:6000, tool:2, material:'PETG', color:'#12ab34',
-    bed:{temperature:69.7, target:70}, hotend:{temperature:234.5, target:240}};
-  handler({generation:1, stats:metrics});
+  const metrics = {
+    state: 'printing',
+    progress: 0.426,
+    current_layer: 128,
+    total_layer: 300,
+    elapsed: 4200,
+    remaining: 6000,
+    tool: 2,
+    material: 'PETG',
+    color: '#12ab34',
+    bed: { temperature: 69.7, target: 70 },
+    hotend: { temperature: 234.5, target: 240 },
+  };
+  handler({ generation: 1, stats: metrics });
   assert.equal(el('stats').hidden, false, 'Stats work without starting the camera');
   assert.equal(el('progress-value').textContent, '42%');
   assert.equal(el('layers-value').textContent, '128 / 300');
@@ -45,51 +60,65 @@ test('camera lifecycle, light, print states, pacing, and printer switching', () 
   assert.equal(el('hotend-value').textContent, '235 / 240 °C');
   assert.equal(el('bed-value').textContent, '70 °C', 'Targets disappear within 2°C');
   assert.equal(el('progress-bar').getAttribute('aria-valuenow'), '42');
-  handler({generation:1, stats:{...metrics, state:'complete', progress:1, remaining:0}});
+  handler({ generation: 1, stats: { ...metrics, state: 'complete', progress: 1, remaining: 0 } });
   assert.equal(el('stats-state').textContent, 'Complete');
   assert.equal(el('progress-value').textContent, '100%');
-  for (const id of ['remaining-stat', 'finish-stat', 'tool-stat']) assert.equal(el(id).hidden, true);
+  for (const id of ['remaining-stat', 'finish-stat', 'tool-stat'])
+    assert.equal(el(id).hidden, true);
   assert.equal(el('bed-value').textContent, '70 °C');
   assert.equal(el('hotend-value').textContent, '235 °C');
-  handler({generation:1, stats:{...metrics, state:'paused'}});
+  handler({ generation: 1, stats: { ...metrics, state: 'paused' } });
   for (const id of ['remaining-stat', 'finish-stat']) assert.equal(el(id).hidden, true);
   assert.equal(el('tool-stat').hidden, false);
   assert.equal(el('hotend-value').textContent, '235 / 240 °C');
   assert.equal(el('stats-state').textContent, 'Paused');
   assert.equal(el('finish-value').textContent, '—', 'Pauses have no running finish estimate');
-  handler({generation:1, stats:{...metrics, hotend:{temperature:238, target:240}}});
+  handler({ generation: 1, stats: { ...metrics, hotend: { temperature: 238, target: 240 } } });
   assert.equal(el('hotend-value').textContent, '238 °C', 'A reached target does not add clutter');
   assert.equal(el('remaining-stat').hidden, false, 'Resuming restores the time estimate');
-  handler({generation:1, stats:{...metrics, hotend:{temperature:230, target:240}}});
-  assert.equal(el('hotend-value').textContent, '230 / 240 °C', 'A heater away from target keeps its target');
-  handler({generation:1, stats:{...metrics, hotend:{temperature:90, target:0}}});
-  assert.equal(el('hotend-value').textContent, '90 °C', 'An off heater shows only its current temperature');
+  handler({ generation: 1, stats: { ...metrics, hotend: { temperature: 230, target: 240 } } });
+  assert.equal(
+    el('hotend-value').textContent,
+    '230 / 240 °C',
+    'A heater away from target keeps its target',
+  );
+  handler({ generation: 1, stats: { ...metrics, hotend: { temperature: 90, target: 0 } } });
+  assert.equal(
+    el('hotend-value').textContent,
+    '90 °C',
+    'An off heater shows only its current temperature',
+  );
   for (const state of ['cancelled', 'error']) {
-    handler({generation:1, stats:{...metrics, state}});
+    handler({ generation: 1, stats: { ...metrics, state } });
     assert.equal(el('remaining-stat').hidden, true);
     assert.equal(el('tool-stat').hidden, true);
     assert.equal(el('hotend-value').textContent, '235 °C');
   }
-  handler({generation:1, stats:{state:'standby', color:'url(untrusted)'}});
-  for (const id of ['material-stat', 'journey-stat', 'layers-stat']) assert.equal(el(id).hidden, true);
+  handler({ generation: 1, stats: { state: 'standby', color: 'url(untrusted)' } });
+  for (const id of ['material-stat', 'journey-stat', 'layers-stat'])
+    assert.equal(el(id).hidden, true);
   assert.equal(el('progress-value').textContent, '—');
   assert.equal(el('material-swatch').hidden, true);
   assert.equal(el('progress-bar').getAttribute('aria-valuenow'), null);
-  handler({generation:1, stats:null});
+  handler({ generation: 1, stats: null });
   assert.equal(el('stats-state').textContent, 'Status unavailable');
   assert.equal(el('stats-message').textContent, 'Waiting for status');
   assert.equal(el('hardware-stat').hidden, true, 'Failed status clears stale temperatures');
   assert.equal(el('journey-stat').hidden, true, 'Failed status clears stale timing');
-  handler({generation:1, stats:{...metrics, printing_duration:0, current_layer:0}});
+  handler({ generation: 1, stats: { ...metrics, printing_duration: 0, current_layer: 0 } });
   assert.equal(el('stats-state').textContent, 'Preparing');
   assert.equal(el('stats-message').textContent, 'Heating up');
   assert.equal(el('remaining-stat').hidden, true);
   assert.equal(el('progress-value').hidden, true);
-  handler({generation:1, stats:{...metrics, printing_duration:0, current_layer:1}});
-  assert.equal(el('stats-state').textContent, 'Printing', 'A first layer prevents preparation inference');
-  handler({generation:1, stats:{...metrics, printing_duration:60, current_layer:0}});
+  handler({ generation: 1, stats: { ...metrics, printing_duration: 0, current_layer: 1 } });
+  assert.equal(
+    el('stats-state').textContent,
+    'Printing',
+    'A first layer prevents preparation inference',
+  );
+  handler({ generation: 1, stats: { ...metrics, printing_duration: 60, current_layer: 0 } });
   assert.equal(el('stats-state').textContent, 'Printing', 'Heating mid-print is not preparation');
-  handler({generation:1, stats:metrics});
+  handler({ generation: 1, stats: metrics });
   assert.equal(el('hardware-stat').hidden, false);
   assert.equal(el('journey-stat').hidden, false);
   click('light');
@@ -98,7 +127,11 @@ test('camera lifecycle, light, print states, pacing, and printer switching', () 
   handler({ generation: 1, light: true });
   assert.equal(el('light').getAttribute('aria-checked'), 'true');
   handler({ generation: 1, failed: true, camera: 'Light request failed' });
-  assert.equal(el('camera').textContent, 'Light request failed', 'Light errors remain visible while stopped');
+  assert.equal(
+    el('camera').textContent,
+    'Light request failed',
+    'Light errors remain visible while stopped',
+  );
   click('play');
   assert.equal(sent.at(-1)!.playing, true);
   assert.equal(el('play').hidden, true);
@@ -123,7 +156,7 @@ test('camera lifecycle, light, print states, pacing, and printer switching', () 
   click('play');
   handler({ type: 'target', generation: 3, target: 'other printer' });
   assert.equal(el('stats').hidden, true, 'Switching printers clears previous print metrics');
-  handler({generation:2, stats:metrics});
+  handler({ generation: 2, stats: metrics });
   assert.equal(el('stats').hidden, true, 'Old generations cannot restore stats');
   handler({ generation: 2, image: 'wrong printer' });
   assert.equal(el('image').getAttribute('src'), null, 'Old target frames are discarded');
@@ -159,10 +192,16 @@ test('camera lifecycle, light, print states, pacing, and printer switching', () 
   flushSync(() => document.dispatchEvent(new Event('visibilitychange')));
   assert.equal(el('play').hidden, true, 'Returning to an unsupported printer keeps Play hidden');
   assert.equal(el('warning').hidden, false);
-  handler({ error: 'Set the selected printer address, or set "host" in plugin Config.', supported: true });
+  handler({
+    error: 'Set the selected printer address, or set "host" in plugin Config.',
+    supported: true,
+  });
   assert.equal(el('warning').hidden, false, 'A missing address shows a warning for any preset');
   assert.equal(el('target').textContent, 'Printer address unavailable');
-  assert.equal(el('warning-label').textContent, 'Set the selected printer address, or set "host" in plugin Config.');
+  assert.equal(
+    el('warning-label').textContent,
+    'Set the selected printer address, or set "host" in plugin Config.',
+  );
   assert.equal(el('play').hidden, true);
   assert.equal(el('play').disabled, true, 'Play waits for a configured printer address');
   handler({ type: 'target', generation: 5, target: 'U1 printer' });
@@ -175,16 +214,24 @@ test('camera lifecycle, light, print states, pacing, and printer switching', () 
   handler({ generation: 5, light: false });
   assert.equal(el('light').disabled, false, 'A resolved explicit host enables the light');
   handler({ error: 'Set host in plugin Config.' });
-  assert.equal(el('warning').hidden, true, 'Connection errors do not label a U1 as the wrong printer');
+  assert.equal(
+    el('warning').hidden,
+    true,
+    'Connection errors do not label a U1 as the wrong printer',
+  );
 
-  handler({type: 'target', generation: 6, target: 'printer'});
-  handler({generation: 6, stats: metrics});
+  handler({ type: 'target', generation: 6, target: 'printer' });
+  handler({ generation: 6, stats: metrics });
   click('play');
-  handler({generation: 6, image: 'broken'});
+  handler({ generation: 6, image: 'broken' });
   flushSync(() => el('image').dispatchEvent(new Event('error')));
-  assert.equal(sent.at(-1)!.type, 'frame', 'A failed image is acknowledged so the feed can recover');
+  assert.equal(
+    sent.at(-1)!.type,
+    'frame',
+    'A failed image is acknowledged so the feed can recover',
+  );
   assert.equal(el('camera').textContent, 'Could not display camera image');
-  handler({generation: 6, image: 'recovered'});
+  handler({ generation: 6, image: 'recovered' });
   flushSync(() => el('image').dispatchEvent(new Event('load')));
   assert.equal(el('image').hidden, false);
   flushSync(() => vi.advanceTimersByTime(7000));
@@ -193,5 +240,4 @@ test('camera lifecycle, light, print states, pacing, and printer switching', () 
   assert.equal(el('stats-state').textContent, 'Printing');
   flushSync(() => vi.advanceTimersByTime(4000));
   assert.equal(el('stats-state').textContent, 'Status unavailable', 'Old statistics expire');
-
 });

@@ -12,15 +12,55 @@
 </script>
 
 <main class="viewer" aria-label="Snapmaker U1 camera">
-<img bind:this={image} id="image" alt="Snapmaker U1 camera" hidden={!camera?.imageVisible}>
-<header><div><h1>Snapmaker U1 <span id="printer">{camera?.printer ?? 'Connecting'}</span></h1><div id="target">{camera?.target ?? 'Selected printer'}</div></div>
-<button id="light" type="button" role="switch" aria-label="Chamber light" aria-checked={camera?.light === true} disabled={camera?.lightDisabled ?? true} onclick={() => camera?.toggleLight()}>
-<span>Light</span><span class="track" aria-hidden="true"><span class="thumb"></span></span></button></header>
-<button id="play" type="button" aria-label="Play camera" disabled={!camera?.supported} hidden={camera?.playing || camera?.targetUnavailable} onclick={() => camera?.play()}><span class="play-circle"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3v18l16-9z"/></svg></span><span id="play-label" class="play-label">Play camera</span></button>
-<div id="warning" role="status" hidden={!camera?.targetUnavailable}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 2 21h20zM12 9v5m0 3v.01"/></svg><span id="warning-label">{camera?.warning}</span></div>
-<div id="empty" hidden={!camera?.playing || camera?.imageVisible}>Connecting to camera…</div>
-<footer>
-<PrintStats stats={camera?.stats ?? null} receivedAt={camera?.statsAt ?? 0} />
-<div id="camera" role="status">{camera?.status ?? ''}</div><button id="stop" type="button" hidden={!camera?.playing} aria-label="Stop camera" onclick={() => { camera?.stop(); camera?.tick(); }}><svg viewBox="0 0 12 12" aria-hidden="true"><rect width="12" height="12" rx="2"/></svg>Stop</button>
-</footer>
+  <img bind:this={image} id="image" alt="Snapmaker U1 camera" hidden={!camera?.imageVisible} />
+  <header>
+    <div>
+      <h1>Snapmaker U1 <span id="printer">{camera?.printer ?? 'Connecting'}</span></h1>
+      <div id="target">{camera?.target ?? 'Selected printer'}</div>
+    </div>
+    <button
+      id="light"
+      type="button"
+      role="switch"
+      aria-label="Chamber light"
+      aria-checked={camera?.light === true}
+      disabled={camera?.lightDisabled ?? true}
+      onclick={() => camera?.toggleLight()}
+    >
+      <span>Light</span><span class="track" aria-hidden="true"><span class="thumb"></span></span
+      ></button
+    >
+  </header>
+  <button
+    id="play"
+    type="button"
+    aria-label="Play camera"
+    disabled={!camera?.supported}
+    hidden={camera?.playing || camera?.targetUnavailable}
+    onclick={() => camera?.play()}
+    ><span class="play-circle"
+      ><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3v18l16-9z" /></svg></span
+    ><span id="play-label" class="play-label">Play camera</span></button
+  >
+  <div id="warning" role="status" hidden={!camera?.targetUnavailable}>
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 2 21h20zM12 9v5m0 3v.01" /></svg
+    ><span id="warning-label">{camera?.warning}</span>
+  </div>
+  <div id="empty" hidden={!camera?.playing || camera?.imageVisible}>Connecting to camera…</div>
+  <footer>
+    <PrintStats stats={camera?.stats ?? null} receivedAt={camera?.statsAt ?? 0} />
+    <div id="camera" role="status">{camera?.status ?? ''}</div>
+    <button
+      id="stop"
+      type="button"
+      hidden={!camera?.playing}
+      aria-label="Stop camera"
+      onclick={() => {
+        camera?.stop();
+        camera?.tick();
+      }}
+      ><svg viewBox="0 0 12 12" aria-hidden="true"><rect width="12" height="12" rx="2" /></svg
+      >Stop</button
+    >
+  </footer>
 </main>

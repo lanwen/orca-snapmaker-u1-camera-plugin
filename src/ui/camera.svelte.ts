@@ -17,10 +17,13 @@ export class Camera {
   private generation = -1;
   private lastFrame = 0;
 
-  constructor(private bridge: OrcaBridge, private image: HTMLImageElement) {}
+  constructor(
+    private bridge: OrcaBridge,
+    private image: HTMLImageElement,
+  ) {}
 
   private setStats(stats: PrintStats | null = null, unavailable = false) {
-    this.stats = stats ?? (unavailable ? {state: 'unavailable'} : null);
+    this.stats = stats ?? (unavailable ? { state: 'unavailable' } : null);
     this.statsAt = this.stats && this.stats.state !== 'unavailable' ? Date.now() : 0;
   }
 
@@ -45,7 +48,7 @@ export class Camera {
 
   toggleLight = () => {
     if (this.active && !document.hidden && this.light !== null)
-      this.bridge.postMessage({type: 'light', enabled: !this.light});
+      this.bridge.postMessage({ type: 'light', enabled: !this.light });
   };
 
   tick = () => {
@@ -59,14 +62,14 @@ export class Camera {
       this.clearImage();
       this.status = 'Waiting for camera — no recent image';
     }
-    this.bridge.postMessage({type: 'activity', active: true, playing: this.playing});
+    this.bridge.postMessage({ type: 'activity', active: true, playing: this.playing });
   };
 
   private hide = () => {
     this.stop();
     this.active = false;
     this.lightDisabled = true;
-    this.bridge.postMessage({type: 'activity', active: false});
+    this.bridge.postMessage({ type: 'activity', active: false });
   };
 
   private receive = (data: HostMessage) => {
@@ -125,7 +128,7 @@ export class Camera {
       const frameGeneration = data.generation;
       const acknowledge = () => {
         if (this.active && this.playing && this.generation === frameGeneration)
-          this.bridge.postMessage({type: 'frame', generation: frameGeneration});
+          this.bridge.postMessage({ type: 'frame', generation: frameGeneration });
       };
       // Assign the source only after handlers, so cached frames are acknowledged too.
       this.image.onload = () => {
@@ -146,7 +149,9 @@ export class Camera {
 
   start() {
     this.bridge.onMessage(this.receive);
-    const error = (event: ErrorEvent) => { this.status = 'Player error: ' + event.message; };
+    const error = (event: ErrorEvent) => {
+      this.status = 'Player error: ' + event.message;
+    };
     document.addEventListener('visibilitychange', this.tick);
     window.addEventListener('pageshow', this.tick);
     window.addEventListener('pagehide', this.hide);

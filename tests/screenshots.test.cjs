@@ -2,21 +2,28 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const { JSDOM, VirtualConsole } = require('jsdom');
 const directory = process.argv[2];
-const settle = () => new Promise(resolve => setImmediate(resolve));
+const settle = () => new Promise((resolve) => setImmediate(resolve));
 
 (async () => {
   for (const state of ['printing', 'preparing', 'paused', 'complete']) {
     const page = fs.readFileSync(`${directory}/${state}.html`, 'utf8');
     const errors = [];
     const console = new VirtualConsole();
-    console.on('jsdomError', error => errors.push(error));
-    const dom = new JSDOM(page, {runScripts: 'dangerously', virtualConsole: console,
+    console.on('jsdomError', (error) => errors.push(error));
+    const dom = new JSDOM(page, {
+      runScripts: 'dangerously',
+      virtualConsole: console,
       beforeParse(window) {
-        window.orca = {postMessage() {throw new Error('Screenshot contacted the host');}};
-      }});
+        window.orca = {
+          postMessage() {
+            throw new Error('Screenshot contacted the host');
+          },
+        };
+      },
+    });
     try {
       await settle();
-      const get = id => dom.window.document.getElementById(id);
+      const get = (id) => dom.window.document.getElementById(id);
       assert.equal(get('stats').dataset.state, state);
       assert.equal(get('play').hidden, true, 'Screenshot starts playback automatically');
       assert.ok(get('image').src.startsWith('data:image/svg+xml;base64,'));
@@ -33,7 +40,9 @@ const settle = () => new Promise(resolve => setImmediate(resolve));
       }
       if (state === 'paused') assert.equal(get('remaining-stat').hidden, true);
       for (const [next, expected] of ['printing', 'preparing', 'paused', 'complete'].entries()) {
-        dom.window.document.body.dispatchEvent(new dom.window.KeyboardEvent('keydown', {key: String(next + 1), bubbles: true}));
+        dom.window.document.body.dispatchEvent(
+          new dom.window.KeyboardEvent('keydown', { key: String(next + 1), bubbles: true }),
+        );
         await settle();
         assert.equal(get('stats').dataset.state, expected);
       }
@@ -42,5 +51,10 @@ const settle = () => new Promise(resolve => setImmediate(resolve));
       dom.window.close();
     }
   }
-  console.log('Four compiled screenshot states render and keyboard switching makes no host requests.');
-})().catch(error => {console.error(error); process.exitCode = 1;});
+  console.log(
+    'Four compiled screenshot states render and keyboard switching makes no host requests.',
+  );
+})().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});

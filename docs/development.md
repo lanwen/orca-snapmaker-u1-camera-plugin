@@ -35,7 +35,7 @@ Node and pnpm are development tools; Orca users still install one Python file.
 The filename ends in `_any.py` for Orca Cloud's universal platform convention.
 It also writes `dist/SHA256SUMS`.
 `mise run test` builds first and tests the actual generated plugin and Svelte UI.
-`mise run check` runs the Python tests, Svelte and TypeScript checks, UI behavior tests, and Git whitespace checks.
+`mise run check` runs the Python tests, Oxfmt formatting checks, Oxlint lint checks, Svelte and TypeScript checks, UI behavior tests, and Git whitespace checks.
 Edit `src/` and `pyproject.toml`.
 Install only the generated file from `dist/`.
 
@@ -47,7 +47,12 @@ mise exec -- pnpm dev
 
 Vite reloads the page when you edit a component.
 The preview bridge does not connect to Orca or a printer.
-Use `mise exec -- pnpm run check` for type checks and `mise exec -- pnpm test` for UI tests.
+Use `mise exec -- pnpm run check` for formatting, lint, and type checks, and `mise exec -- pnpm test` for UI tests.
+Run `mise exec -- pnpm format` to format the frontend, or `mise exec -- pnpm format:check` to check it without changing files.
+Run `mise exec -- pnpm lint` for Oxlint alone, or `mise exec -- pnpm check:types` for Svelte and TypeScript checks.
+Oxfmt covers Svelte, TypeScript, JavaScript, CSS, and the frontend HTML and JSON files.
+Oxlint checks JavaScript, TypeScript, and Svelte script blocks; `svelte-check` supplies template diagnostics.
+Formatting and lint commands target the frontend and its tests, leaving prototypes, generated files, and Python sources alone.
 The UI tests cover playback, light control, print statistics, frame acknowledgements, visibility, and printer switching.
 
 See [release automation](releases.md) for versioning and publishing.
