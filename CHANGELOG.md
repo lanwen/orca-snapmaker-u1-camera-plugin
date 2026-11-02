@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.0
+
+- fix: keep release suggestions free of PR attribution links (#33) ([3e0eed4](https://github.com/lanwen/orca-snapmaker-u1-camera-plugin/commit/3e0eed48d5a0ade9da12ca08c64cd83fefceba33))
+- feat: show the U1 logo in Orca's native tab (#31) ([809e022](https://github.com/lanwen/orca-snapmaker-u1-camera-plugin/commit/809e022ecdf054bf35c4f407ea42014581116ecb))
+- feat: suggest release notes from source PR summaries (#32) ([c6c6aac](https://github.com/lanwen/orca-snapmaker-u1-camera-plugin/commit/c6c6aac99296c97fc1de759f7f4b98e0524d529b))
+- fix: make release-note review visible and require fresh confirmation (#30) ([1b94ad5](https://github.com/lanwen/orca-snapmaker-u1-camera-plugin/commit/1b94ad53270809dd36de76e2f77be066d02b0fd0))
+- fix: keep setup logs out of GitHub release outputs (#28) ([2b32fad](https://github.com/lanwen/orca-snapmaker-u1-camera-plugin/commit/2b32fad1143aa99ed1227b1e93414d786cb64f17))
+- refactor: migrate camera UI to Svelte with pnpm (#27) ([963c234](https://github.com/lanwen/orca-snapmaker-u1-camera-plugin/commit/963c2347a885871f389eb79e67d059713eabc018))
+
 ## 0.4.0
 
 - feat: add camera stats and public release notes (#24) ([669857b](https://github.com/lanwen/orca-snapmaker-u1-camera-plugin/commit/669857b3b062f16424efd16a31b28e7141acb1c1))
