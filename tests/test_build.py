@@ -26,7 +26,7 @@ class BuildTests(unittest.TestCase):
             page = next(node.value for node in ast.parse(built).body
                         if isinstance(node, ast.Assign) and any(isinstance(target, ast.Name) and target.id == "PAGE"
                                                                for target in node.targets))
-            self.assertEqual(ast.literal_eval(page), (ROOT / "src/camera.html").read_text())
+            self.assertEqual(ast.literal_eval(page), (ROOT / "dist/ui/camera.html").read_text())
             block = re.search(r"(?ms)^# /// script\n(.*?)^# ///$", built).group(1)
             metadata = tomllib.loads("\n".join(line.removeprefix("#").removeprefix(" ") for line in block.splitlines()))
             self.assertEqual(metadata["tool"]["orcaslicer"]["plugin"]["version"], project["version"])

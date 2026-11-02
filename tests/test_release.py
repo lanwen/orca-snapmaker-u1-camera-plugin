@@ -57,6 +57,7 @@ class ReleaseFixture(unittest.TestCase):
             shutil.copyfile(ROOT / name, self.root / name)
         self.write_version("0.3.0.dev0")
         shutil.copytree(ROOT / "src", self.root / "src")
+        shutil.copytree(ROOT / "dist/ui", self.root / "dist/ui")
         (self.root / "CHANGELOG.md").write_text("# Changelog\n", encoding="utf-8")
         for module in [release, builder]:
             context = patch.object(module, "ROOT", self.root)

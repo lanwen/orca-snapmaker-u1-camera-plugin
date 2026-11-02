@@ -3,6 +3,7 @@
 import argparse
 import hashlib
 import json
+import subprocess
 from pathlib import Path
 import tomllib
 
@@ -25,7 +26,7 @@ def build(output_dir=ROOT / "dist", release_tag=None):
         raise ValueError("Plugin source must contain exactly one HTTP client import")
     transport = (ROOT / "src/http_client.py").read_text(encoding="utf-8")
     source = source.replace(HTTP_IMPORT, transport)
-    page = (ROOT / "src/camera.html").read_text(encoding="utf-8")
+    page = (ROOT / "dist/ui/camera.html").read_text(encoding="utf-8")
     metadata = [
         '# /// script',
         '# requires-python = ' + json.dumps(project["requires-python"]),
@@ -58,4 +59,5 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--release-tag", help="Require this tag to match the project version")
     args = parser.parse_args()
+    subprocess.run(["pnpm", "run", "build:ui"], cwd=ROOT, check=True)
     print(build(release_tag=args.release_tag))

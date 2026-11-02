@@ -1,0 +1,50 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "env": {
+    "browser": true,
+    "node": true,
+    "svelte": true
+  },
+  "categories": {
+    "correctness": "error"
+  },
+  "jsPlugins": ["eslint-plugin-security"],
+  "rules": {
+    "no-eval": "error",
+    "no-implied-eval": "error",
+    "no-new-func": "error",
+    "no-script-url": "error",
+    "no-proto": "error",
+    "no-restricted-properties": [
+      "error",
+      {
+        "property": "innerHTML",
+        "message": "Use Svelte text bindings or textContent instead of parsing HTML."
+      },
+      {
+        "property": "outerHTML",
+        "message": "Use Svelte markup instead of parsing HTML."
+      },
+      {
+        "property": "insertAdjacentHTML",
+        "message": "Use Svelte markup instead of parsing HTML."
+      },
+      {
+        "object": "document",
+        "property": "write",
+        "message": "Use Svelte markup instead of parsing HTML."
+      },
+      {
+        "object": "document",
+        "property": "writeln",
+        "message": "Use Svelte markup instead of parsing HTML."
+      }
+    ],
+    "security/detect-unsafe-regex": "error",
+    "security/detect-bidi-characters": "error",
+    "security/detect-child-process": "error",
+    "security/detect-non-literal-require": "error",
+    "security/detect-new-buffer": "error",
+    "security/detect-pseudoRandomBytes": "error"
+  }
+}

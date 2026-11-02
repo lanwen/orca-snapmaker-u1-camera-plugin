@@ -4,7 +4,6 @@ import argparse
 import base64
 import json
 from pathlib import Path
-import re
 import shutil
 import subprocess
 import tempfile
@@ -36,12 +35,7 @@ def image_uri(camera=None):
 
 
 def screenshot_page(camera=None):
-    page = (ROOT / "src/camera.html").read_text()
-    # Use a fixed clock and offline transport; keep previews running in background tabs.
-    page = re.sub(r"<script>(.*?)</script>", lambda match: "<script>" +
-                  re.sub(r"\bDate\b", "ScreenshotDate", match[1]).replace("orca.", "screenshotBridge.")
-                  .replace("document.hidden", "false") +
-                  "</script>", page, flags=re.DOTALL)
+    page = (ROOT / "dist/ui/camera.html").read_text()
     fixtures = {
         "printing": {"state": "printing", "progress": .42, "current_layer": 36,
                      "total_layer": 86, "elapsed": 2160, "printing_duration": 2100,
@@ -65,29 +59,36 @@ def screenshot_page(camera=None):
     bootstrap = r'''
 <script>
 // Screenshot-only transport. No messages or commands reach the real printer.
-class ScreenshotDate extends window.Date {
+const NativeDate = window.Date;
+window.Date = class extends NativeDate {
   constructor(...args) { super(...(args.length ? args : ['2026-11-02T12:00:00Z'])); }
-  static now() { return new window.Date('2026-11-02T12:00:00Z').getTime(); }
-}
+  static now() { return new NativeDate('2026-11-02T12:00:00Z').getTime(); }
+};
+Object.defineProperty(document, 'hidden', {get: () => false});
 const screenshotFixtures = __FIXTURES__;
 const screenshotStates = Object.keys(screenshotFixtures);
 const screenshotImage = __IMAGE__;
-let screenshotState = __SCREENSHOT_STATE__, screenshotHandler, screenshotLight = true;
+let screenshotState = __SCREENSHOT_STATE__, screenshotHandler, screenshotLight = true, screenshotStarted = false;
 function publishScreenshot() {
   screenshotHandler({type:'target', generation:1, target:'Workshop · Snapmaker U1'});
   screenshotHandler({generation:1, printer:screenshotState === 'preparing' ? 'Preparing' : screenshotState,
     light:screenshotLight, stats:screenshotFixtures[screenshotState],
     image:screenshotImage, camera:'Live · 4.4 FPS'});
 }
-const screenshotBridge = {
+window.orca = {
   onMessage(callback) { screenshotHandler = callback; },
   postMessage(message) {
-    if (message.type === 'activity' && message.active) publishScreenshot();
+    if (message.type === 'activity' && message.active) {
+      publishScreenshot();
+      if (!screenshotStarted) {
+        screenshotStarted = true;
+        queueMicrotask(() => document.getElementById('play').click());
+      }
+    }
     if (message.type === 'light') { screenshotLight = message.enabled; publishScreenshot(); }
   }
 };
 window.addEventListener('DOMContentLoaded', () => {
-  document.getElementById('play').click();
   document.addEventListener('keydown', event => {
     if (event.ctrlKey || event.metaKey || event.altKey || event.target.closest('input,textarea,[contenteditable]')) return;
     if (/^[1-4]$/.test(event.key)) {
@@ -119,7 +120,7 @@ def prepare(output_dir=ROOT / "dist/screenshots", camera=None):
               '<image href="data:image/png;base64,' + photo + '" width="1714" height="1439"/></svg>')
     shell_style = """<style>
 .orca-chrome { position:fixed; inset:0 0 auto; width:100%; height:auto; display:block; z-index:5; }
-.viewer { inset:calc(100vw * .05231144) 0 0; }
+body { --viewer-top:calc(100vw * .05231144); }
 </style>"""
     page = page.replace("</head>", shell_style + "</head>")
     page = page.replace("<body>", "<body>" + chrome)

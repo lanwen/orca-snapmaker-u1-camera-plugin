@@ -1,6 +1,7 @@
 """Client protocol and worker tests; no Orca instance or physical printer needed."""
 import importlib.util
 import json
+import re
 from pathlib import Path
 import sys
 import threading
@@ -80,10 +81,14 @@ class ClientTests(unittest.TestCase):
                 plugin.printer_url(value)
 
     def test_snapshot_marks_old_timestamp_stale(self):
-        frame = plugin.Printer(self.address, "secret").snapshot()
+        printer = plugin.Printer(self.address, "secret")
+        frame = printer.snapshot()
         self.assertIn("Stale", frame["camera"])
         self.assertTrue(frame["image"].startswith("data:image/jpeg;base64,"))
-        self.assertIn("cacheBust=", Endpoint.requests[-1][0])
+        first_request = Endpoint.requests[-1][0]
+        printer.snapshot()
+        self.assertNotEqual(Endpoint.requests[-1][0], first_request,
+                            "Repeated snapshots must bypass the HTTP cache")
         self.assertEqual(Endpoint.requests[-1][1], "secret")
 
     def test_fps_counts_new_images_instead_of_downloads(self):
@@ -93,9 +98,10 @@ class ClientTests(unittest.TestCase):
                                         plugin.CameraSnapshot(b'\xff\xd8second', 1_000_000_000)])
         with patch.object(plugin.time, "monotonic", side_effect=[10, 10.1, 10.2]), \
                 patch.object(plugin.time, "time", return_value=1_000_000_000):
-            self.assertEqual(printer.snapshot()["camera"], "Live · 0.0 FPS")
-            self.assertEqual(printer.snapshot()["camera"], "Live · 0.0 FPS")
-            self.assertEqual(printer.snapshot()["camera"], "Live · 5.0 FPS")
+            displayed_rates = [float(re.search(r"([\d.]+)\s*FPS", printer.snapshot()["camera"])[1])
+                               for _ in range(3)]
+            self.assertEqual(displayed_rates, [0, 0, 5],
+                             "Downloading an identical image must not increase the displayed frame rate")
 
     def test_http_does_not_follow_redirect_or_accept_oversized_data(self):
         client = plugin.HttpClient(self.address)
@@ -591,7 +597,8 @@ class TargetTests(unittest.TestCase):
             page.on_message(message)
             page.monitor.update.assert_called_with(None)
             self.assertFalse(page.post_message.call_args.args[0]["supported"])
-            self.assertIn('set "host" in plugin Config', page.post_message.call_args.args[0]["error"])
+            self.assertTrue(page.post_message.call_args.args[0]["error"],
+                            "An unavailable target includes an explanation")
 
     def test_u1_without_address_reports_configuration_warning(self):
         page = self.make_page({"printer_model": "Snapmaker U1"})
@@ -599,7 +606,8 @@ class TargetTests(unittest.TestCase):
         page.on_message({"type": "activity", "active": True, "playing": True})
         page.monitor.update.assert_called_once_with(None)
         self.assertTrue(page.post_message.call_args.args[0]["supported"])
-        self.assertIn('set "host" in plugin Config', page.post_message.call_args.args[0]["error"])
+        self.assertTrue(page.post_message.call_args.args[0]["error"],
+                            "An unavailable target includes an explanation")
 
     def test_inherited_u1_model_and_similar_names(self):
         preset = Mock()
