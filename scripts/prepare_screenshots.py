@@ -148,10 +148,10 @@ Press <b>H</b> to toggle the stats background, or <b>?</b> for help.</p>
     entry.write_text(index)
     tiles = "".join('<section><h2>' + state.title() + '</h2><div class="crop"><iframe title="' +
                     state.title() + ' statistics" src="' + state + '.html"></iframe></div></section>'
-                    for state in STATES)
+                    for state in STATES[1:])
     (output / "showcase.html").write_text('''<!doctype html><html lang="en"><head><meta charset="utf-8">
 <title>Snapmaker U1 · Camera and print states</title><style>
-* { box-sizing:border-box; } html,body { margin:0; width:960px; height:1740px; overflow:hidden; }
+* { box-sizing:border-box; } html,body { margin:0; width:960px; height:1448px; overflow:hidden; }
 body { padding:24px; background:#10151b; color:#edf3f9; font:18px system-ui; display:flex; flex-direction:column; gap:18px; }
 section { display:flex; flex-direction:column; gap:10px; flex:none; }
 h2 { margin:0; font-size:20px; line-height:24px; font-weight:550; }
@@ -177,7 +177,7 @@ def export_showcase(directory, destination):
         result = subprocess.run([
             browser, "--headless", "--no-first-run", "--no-default-browser-check",
             "--disable-background-networking", "--disable-sync", "--hide-scrollbars",
-            "--user-data-dir=" + profile, "--window-size=960,1740", "--force-device-scale-factor=1",
+            "--user-data-dir=" + profile, "--window-size=960,1448", "--force-device-scale-factor=1",
             "--virtual-time-budget=4000", "--screenshot=" + str(destination),
             (Path(directory).resolve() / "showcase.html").as_uri(),
         ], capture_output=True, text=True, timeout=45)
