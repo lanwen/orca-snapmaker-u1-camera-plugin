@@ -2,23 +2,26 @@
 python = "3.12.14"
 node = "24.22.1"
 uv = "0.12.18"
+pnpm = "12.16.1"
 
 [tasks.setup]
 description = "Install locked development dependencies"
-run = "uv sync --locked --python python"
+run = ["uv sync --locked --python python", "pnpm install --frozen-lockfile"]
 
 [tasks.build]
 description = "Build the installable plugin and SHA256SUMS in dist/"
+depends = ["setup"]
 run = "python scripts/build.py"
 
 [tasks."screenshots:prepare"]
 description = "Prepare four simulated Orca screenshot views"
+depends = ["build"]
 run = "python scripts/prepare_screenshots.py"
 
 [tasks.test]
 description = "Test the built plugin and camera page"
 depends = ["setup", "build"]
-run = ["uv run --no-sync python -m unittest discover -s tests -v", "node tests/page.test.cjs"]
+run = ["uv run --no-sync python -m unittest discover -s tests -v", "pnpm run check", "pnpm test"]
 
 [tasks.check]
 description = "Run all checks"

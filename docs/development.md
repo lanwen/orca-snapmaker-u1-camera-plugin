@@ -7,7 +7,11 @@ Source files are kept separately from the installable plugin:
 ```text
 src/plugin.py         Camera logic, worker, and Orca capability
 src/http_client.py    Typed Moonraker requests, HTTP/WebSocket transport, and authentication
-src/camera.html       Camera page, styles, and browser code
+src/camera.html       Self-contained HTML shell and content security policy
+src/ui/               Svelte components, TypeScript Orca bridge, and camera styles
+package.json          Frontend scripts and development dependencies
+pnpm-lock.yaml        Locked frontend dependencies
+vite.config.ts        Self-contained camera page build and UI test configuration
 pyproject.toml        Plugin metadata and Python dependencies
 scripts/build.py      Single-file plugin builder
 scripts/release.py    Release PR preparation and immutable publication
@@ -24,14 +28,27 @@ mise install
 mise run check
 ```
 
-`mise run setup` creates the isolated Python environment from `uv.lock`.
-`mise run build` embeds `src/camera.html` into the generated Python plugin and adds Orca's metadata from `pyproject.toml`.
+`mise run setup` installs Python dependencies from `uv.lock` and frontend dependencies with `pnpm install --frozen-lockfile`.
+`mise run build` compiles the Svelte UI into `dist/ui/camera.html`, embeds that page into the generated Python plugin, and adds Orca's metadata from `pyproject.toml`.
+The compiled page includes all JavaScript and CSS, uses the existing content security policy, and needs no network access for assets.
+Node and pnpm are development tools; Orca users still install one Python file.
 The filename ends in `_any.py` for Orca Cloud's universal platform convention.
 It also writes `dist/SHA256SUMS`.
-`mise run test` builds first and tests the actual generated plugin, plus the source HTML page.
-`mise run check` runs those tests and checks the Git diff for whitespace errors.
+`mise run test` builds first and tests the actual generated plugin and Svelte UI.
+`mise run check` runs the Python tests, Svelte and TypeScript checks, UI behavior tests, and Git whitespace checks.
 Edit `src/` and `pyproject.toml`.
 Install only the generated file from `dist/`.
+
+For a live UI preview with offline sample data, run:
+
+```sh
+mise exec -- pnpm dev
+```
+
+Vite reloads the page when you edit a component.
+The preview bridge does not connect to Orca or a printer.
+Use `mise exec -- pnpm run check` for type checks and `mise exec -- pnpm test` for UI tests.
+The UI tests cover playback, light control, print statistics, frame acknowledgements, visibility, and printer switching.
 
 See [release automation](releases.md) for versioning and publishing.
 
@@ -58,6 +75,9 @@ To regenerate the four-state image used in the README, run:
 ```sh
 python scripts/prepare_screenshots.py --export docs/images/snapmaker-u1-states.png
 ```
+
+Build first with `mise run build` when calling `prepare_screenshots.py` directly.
+The screenshot tool loads the compiled production UI with an offline Orca bridge.
 
 PNG export uses an installed Chrome or Chromium with an isolated temporary profile.
 The generated `dist/screenshots/showcase.html` shows Printing in one full camera view, followed by enlarged Preparing, Paused, and Complete strips.
