@@ -73,7 +73,7 @@ It refuses development versions, mismatched tags, and changes to published asset
 The release PR description separates tagged public notes, generated notes, and optional source PR suggestions.
 Automation rebuilds **Generated notes** from commits on each refresh and preserves **Public notes** from the open release PR.
 Merged source PRs can supply a human-facing changelog sentence between the Why markers in the [PR template](../.github/pull_request_template.md).
-Automation appends these sentences under **Unreviewed suggestions**, with links to their source PRs.
+Automation appends these sentences as plain text under **Unreviewed suggestions**, without PR attribution links.
 It preserves existing suggestion edits and uses source PR comments to avoid duplicates on refresh.
 Keep these comments when editing suggestions.
 Legacy PRs without Why markers and unfinished templates simply have no suggestion.
