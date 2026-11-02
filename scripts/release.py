@@ -12,7 +12,7 @@ import tomllib
 
 from build import ROOT, build
 from release_notes import (PUBLIC_PLACEHOLDER, REVIEW_TEXT, ReleaseNotesError, format_notes,
-                           generated_section, notes_reviewed, public_notes, public_section)
+                           generated_section, notes_reviewed, public_notes, public_section, tagged_section)
 from versioning import next_snapshot, parse_change, parse_version, read_version, release_version, set_version
 
 
@@ -57,6 +57,30 @@ def format_changes(commits):
                      for sha, title, _ in commits)
 
 
+def source_pr_suggestions(commits, previous=""):
+    """Append source PR summaries as data; keep existing suggestions and human edits."""
+    suggestions = previous
+    seen = set(re.findall(r"<!-- orca:source-pr:(\d+) -->", previous))
+    repo = repository()
+    for sha, _, _ in commits:
+        for pr in api(f"commits/{sha}/pulls?per_page=100"):
+            number = str(pr["number"])
+            if (number in seen or not pr.get("merged_at") or pr["base"]["ref"] != "main"
+                    or pr["base"]["repo"]["full_name"] != repo):
+                continue
+            seen.add(number)
+            try:
+                why = tagged_section(pr.get("body") or "", "why")
+            except ReleaseNotesError:
+                continue  # An unfinished source template must not stop the whole release.
+            if not why or "<!--" in why or "-->" in why or len(why) > 4000:
+                continue
+            why = " ".join(why.split())
+            item = f"<!-- orca:source-pr:{number} -->\n- {why} ([#{number}](https://github.com/{repo}/pull/{number}))"
+            suggestions = (suggestions + "\n\n" + item).strip()
+    return suggestions
+
+
 def prepare_pr(mode, released=None, previous_body=""):
     current = read_version(ROOT)
     _, development = parse_version(current)
@@ -76,7 +100,15 @@ def prepare_pr(mode, released=None, previous_body=""):
             return None
         public = public_section(previous_body)
         notes = format_changes(commits)
-        reviewed = notes_reviewed(previous_body) and generated_section(previous_body) == notes
+        previous_suggestions = tagged_section(previous_body, "suggested") or ""
+        suggestions = source_pr_suggestions(commits, previous_suggestions)
+        reviewed = (notes_reviewed(previous_body) and generated_section(previous_body) == notes
+                    and suggestions == previous_suggestions)
+        suggestion_block = ("\n## Unreviewed suggestions\n\n"
+                            "Copy or edit relevant items into **Public notes**, then confirm the review above.\n"
+                            "These suggestions are not published. Keep source PR comments when editing to avoid duplicates.\n\n"
+                            "<!-- orca:suggested-notes:start -->\n" + suggestions +
+                            "\n<!-- orca:suggested-notes:end -->\n") if suggestions else ""
         review_task = f"- [{'x' if reviewed else ' '}] {REVIEW_TEXT}\n\n"
         changelog = ROOT / "CHANGELOG.md"
         existing = changelog.read_text(encoding="utf-8") if changelog.exists() else "# Changelog\n"
@@ -86,8 +118,8 @@ def prepare_pr(mode, released=None, previous_body=""):
         changelog.write_text(header + f"\n## {version}\n\n" + notes + "\n\n" + existing[len(header):].lstrip(), encoding="utf-8")
         body = (f"Release `{version}`.\n\n" +
                 "> [!IMPORTANT]\n> Before merging, fill in **Public notes** and confirm the review below.\n"
-                "> New release changes reset this checkbox without removing your notes.\n\n" +
-                review_task + format_notes(public if public is not None else PUBLIC_PLACEHOLDER, notes, public_first=False) +
+                "> New release changes or suggestions reset this checkbox without removing your notes.\n\n" +
+                review_task + format_notes(public if public is not None else PUBLIC_PLACEHOLDER, notes, public_first=False) + suggestion_block +
                 f"\nMerging this PR publishes `v{version}` from its merge commit.\n")
         branch, title, label = "automation/release", f"chore(release): prepare {version}", "release"
     set_version(ROOT, version)

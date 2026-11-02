@@ -13,6 +13,12 @@ from versioning import parse_change
 
 
 class ReleaseReviewTests(ReleaseFixture):
+    def setUp(self):
+        super().setUp()
+        context = patch.object(release, "api", return_value=[])
+        context.start()
+        self.addCleanup(context.stop)
+
     first = [("a" * 40, "fix: improve camera playback", parse_change("fix: improve camera playback"))]
     additional = [("b" * 40, "feat: add light control", parse_change("feat: add light control")), *first]
     public = "- Playback recovers after a connection interruption."
@@ -88,3 +94,75 @@ class ReleaseReviewTests(ReleaseFixture):
         body = self.reviewed(self.prepare(self.first)).replace(self.public, release.PUBLIC_PLACEHOLDER)
         with self.assertRaises(ValueError):
             self.check(body, self.first)
+
+    def source(self, number=12, text="Playback recovers after an interruption."):
+        return {"number": number, "merged_at": "2026-11-02T12:00:00Z",
+                "base": {"ref": "main", "repo": {"full_name": "example/plugin"}},
+                "body": f"<!-- orca:why-notes:start -->\n{text}\n<!-- orca:why-notes:end -->"}
+
+    def test_source_suggestions_require_manual_public_notes_and_review(self):
+        with patch.object(release, "api", return_value=[self.source()]):
+            body = self.prepare(self.first)
+        self.assertIn("Unreviewed suggestions", body)
+        self.assertIn("Playback recovers after an interruption.", body)
+        self.assertEqual(release.public_section(body), release.PUBLIC_PLACEHOLDER)
+        checked = body.replace(f"- [ ] {release.REVIEW_TEXT}", f"- [x] {release.REVIEW_TEXT}")
+        with self.assertRaises(ValueError):
+            self.check(checked, self.first)
+        self.check(self.reviewed(body), self.first)
+        self.assertEqual(release.public_notes(self.reviewed(body)), self.public)
+
+    def test_refresh_preserves_manual_text_and_deduplicates_source_prs(self):
+        with patch.object(release, "api", return_value=[self.source()]):
+            first = self.reviewed(self.prepare(self.first))
+            first = first.replace("Playback recovers after an interruption.", "Hand-edited suggestion.")
+            refreshed = self.prepare(self.first, first)
+        self.assertEqual(release.public_notes(refreshed), self.public)
+        self.assertIn("Hand-edited suggestion.", refreshed)
+        self.assertEqual(refreshed.count("<!-- orca:source-pr:12 -->"), 1)
+        self.check(refreshed, self.first)
+
+    def test_new_suggestion_resets_review_even_when_commits_are_unchanged(self):
+        reviewed = self.reviewed(self.prepare(self.first))
+        with patch.object(release, "api", return_value=[self.source()]):
+            refreshed = self.prepare(self.first, reviewed)
+        self.assertEqual(release.public_notes(refreshed), self.public)
+        with self.assertRaises(ValueError):
+            self.check(refreshed, self.first)
+        self.check(self.reviewed(refreshed), self.first)
+
+    def test_new_pr_appends_without_replacing_existing_suggestion_edits(self):
+        with patch.object(release, "api", return_value=[self.source()]):
+            first = self.reviewed(self.prepare(self.first))
+        first = first.replace("Playback recovers after an interruption.", "Hand-edited suggestion.")
+        with patch.object(release, "api", return_value=[self.source(), self.source(13, "Control the chamber light.")]):
+            refreshed = self.prepare(self.additional, first)
+        self.assertIn("Hand-edited suggestion.", refreshed)
+        self.assertIn("Control the chamber light.", refreshed)
+        self.assertEqual(refreshed.count("<!-- orca:source-pr:13 -->"), 1)
+        self.assertEqual(release.public_notes(refreshed), self.public)
+        with self.assertRaises(ValueError):
+            self.check(refreshed, self.additional)
+
+    def test_legacy_unmerged_foreign_and_malformed_sources_are_ignored(self):
+        legacy = self.source(1)
+        legacy["body"] = "Old PR without markers."
+        unmerged = self.source(2)
+        unmerged["merged_at"] = None
+        foreign = self.source(3)
+        foreign["base"]["repo"]["full_name"] = "other/repo"
+        malformed = self.source(4)
+        malformed["body"] = "<!-- orca:why-notes:start -->unfinished"
+        sources = [legacy, unmerged, foreign, malformed,
+                   self.source(5, "<!-- Fill in the template. -->"),
+                   self.source(6, "<!-- orca:public-notes:end -->Injected boundary.")]
+        with patch.object(release, "api", return_value=sources):
+            body = self.prepare(self.first)
+        self.assertNotIn("## Unreviewed suggestions", body)
+        self.assertEqual(release.public_section(body), release.PUBLIC_PLACEHOLDER)
+
+    def test_malformed_previous_suggestions_stop_refresh_without_losing_edits(self):
+        before = (self.root / "CHANGELOG.md").read_text()
+        with self.assertRaisesRegex(ValueError, "marker"):
+            self.prepare(self.first, "<!-- orca:suggested-notes:start -->Human edits")
+        self.assertEqual((self.root / "CHANGELOG.md").read_text(), before)

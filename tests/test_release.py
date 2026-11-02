@@ -81,6 +81,12 @@ class ReleaseFixture(unittest.TestCase):
 
 
 class PreparationTests(ReleaseFixture):
+    def setUp(self):
+        super().setUp()
+        context = patch.object(release, "api", return_value=[])
+        context.start()
+        self.addCleanup(context.stop)
+
     def test_refresh_preserves_public_notes_and_rebuilds_generated_notes(self):
         public = "- See print progress on the camera.\n\nEstimates can change."
         previous = release.format_notes(public, "old generated text", public_first=False)

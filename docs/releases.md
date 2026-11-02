@@ -70,8 +70,15 @@ It refuses development versions, mismatched tags, and changes to published asset
 
 ## Public release notes
 
-The release PR description contains two tagged sections.
+The release PR description separates tagged public notes, generated notes, and optional source PR suggestions.
 Automation rebuilds **Generated notes** from commits on each refresh and preserves **Public notes** from the open release PR.
+Merged source PRs can supply a human-facing changelog sentence between the Why markers in the [PR template](../.github/pull_request_template.md).
+Automation appends these sentences under **Unreviewed suggestions**, with links to their source PRs.
+It preserves existing suggestion edits and uses source PR comments to avoid duplicates on refresh.
+Keep these comments when editing suggestions.
+Legacy PRs without Why markers and unfinished templates simply have no suggestion.
+Copy or edit relevant suggestions into **Public notes**; suggestions are never published automatically.
+A new suggestion resets the review task even when the generated change list is unchanged.
 A visible checklist near the top explains what must be completed before merging.
 Write the public notes between these markers, and tick the review task near the top of the PR:
 
@@ -102,7 +109,7 @@ Once the release draft is created, reruns use the saved release body; later PR-d
 Orca Cloud receives only the text inside the public-note markers, without section headings, generated notes, or source hashes.
 
 The release GitHub App token needs Pull requests read access to find the merged release PR.
-Local release preparation also needs GitHub CLI authentication to preserve notes from an existing open release PR.
+Local release preparation also needs GitHub CLI authentication to preserve notes from an existing open release PR and read merged source PR descriptions.
 
 ## Orca Cloud publishing
 
