@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.0
+
+- feat: add camera stats and public release notes (#24) ([669857b](https://github.com/lanwen/orca-snapmaker-u1-camera-plugin/commit/669857b3b062f16424efd16a31b28e7141acb1c1))
+
 ## 0.3.6
 
 - fix: honor revocation of remembered preset access (#21) ([064919e](https://github.com/lanwen/orca-snapmaker-u1-camera-plugin/commit/064919ea6e488b56acaaa5a9700a201694fc33d5))
