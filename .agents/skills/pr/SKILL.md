@@ -28,13 +28,15 @@ Use [.github/pull_request_template.md](../../../.github/pull_request_template.md
 4. Write the description using the GitHub template.
    Read [references/show-me.md](references/show-me.md) for visual-outline conventions.
    Use the smallest structural view that helps the reviewer understand the implementation.
+   For visual changes, showcase the result in **Change outline** with screenshots of the actual changes or clearly labeled generated mockups.
    Prefer `diff` blocks for changes to an existing shape and complete blocks for a mostly new shape.
    Keep the body within the template and write as one human talking to another, using simple, concise language.
 
 5. Publish the description.
    Create a temporary file outside the repository with `mktemp`, write the description to it, and arrange cleanup on success and failure.
    Use `gh pr create --body-file` for a new PR or `gh pr edit {number} --body-file {temporary-file}` for an existing PR.
-   Confirm the saved description, then remove the temporary file.
+   Attach visual showcases to the description with `gh pr create --attach './image.png#Description'` or `gh pr edit {number} --attach './image.png#Description'`, alongside the body file when publishing it.
+   Confirm the saved description and attachments, then remove the temporary file.
    Save a copy in the repository only when the user requests one.
 
 6. Read [references/describe_pr_final_answer.md](references/describe_pr_final_answer.md) and report the PR URL and a concise list of changed files using that template.
