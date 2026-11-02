@@ -60,4 +60,5 @@ python scripts/prepare_screenshots.py --export docs/images/snapmaker-u1-states.p
 ```
 
 PNG export uses an installed Chrome or Chromium with an isolated temporary profile.
-The generated `dist/screenshots/showcase.html` is the same four-state composition, ready to inspect in a browser.
+The generated `dist/screenshots/showcase.html` shows one full camera view and enlarged crops of the four state strips.
+This keeps the tab visible while making the statistics readable at README width.

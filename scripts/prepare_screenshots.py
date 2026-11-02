@@ -146,16 +146,20 @@ Press <b>H</b> to toggle the stats background, or <b>?</b> for help.</p>
 </body></html>""".replace("__LINKS__", links)
     entry = output / "index.html"
     entry.write_text(index)
-    tiles = "".join('<section><h2>' + state.title() + '</h2><iframe title="' + state.title() +
-                    '" src="' + state + '.html"></iframe></section>' for state in STATES)
+    tiles = "".join('<section><h2>' + state.title() + '</h2><div class="crop"><iframe title="' +
+                    state.title() + ' statistics" src="' + state + '.html"></iframe></div></section>'
+                    for state in STATES)
     (output / "showcase.html").write_text('''<!doctype html><html lang="en"><head><meta charset="utf-8">
-<title>Snapmaker U1 · Four print states</title><style>
-* { box-sizing:border-box; } html,body { margin:0; width:2240px; height:1600px; overflow:hidden; }
-body { padding:28px; background:#10151b; color:#edf3f9; font:18px system-ui; display:grid; grid-template-columns:1fr 1fr; gap:24px; }
-section { display:flex; flex-direction:column; gap:10px; min-height:0; }
-h2 { margin:0; font-size:23px; font-weight:550; }
-iframe { width:100%; flex:1; min-height:0; border:1px solid #ffffff20; border-radius:12px; background:#0b0e12; }
-</style></head><body>''' + tiles + '</body></html>')
+<title>Snapmaker U1 · Camera and print states</title><style>
+* { box-sizing:border-box; } html,body { margin:0; width:960px; height:1740px; overflow:hidden; }
+body { padding:24px; background:#10151b; color:#edf3f9; font:18px system-ui; display:flex; flex-direction:column; gap:18px; }
+section { display:flex; flex-direction:column; gap:10px; flex:none; }
+h2 { margin:0; font-size:20px; line-height:24px; font-weight:550; }
+iframe { display:block; border:0; background:#0b0e12; }
+.hero iframe { width:100%; height:480px; border:1px solid #ffffff20; border-radius:12px; }
+.crop { position:relative; height:240px; overflow:hidden; border:1px solid #ffffff20; border-radius:12px; }
+.crop iframe { position:absolute; width:900px; height:650px; left:-18px; bottom:-10px; transform:scale(1.25); transform-origin:bottom left; }
+</style></head><body><section class="hero"><h2>Camera view</h2><iframe title="Simulated Orca camera tab" src="printing.html"></iframe></section>''' + tiles + '</body></html>')
     return entry
 
 
@@ -173,7 +177,7 @@ def export_showcase(directory, destination):
         result = subprocess.run([
             browser, "--headless", "--no-first-run", "--no-default-browser-check",
             "--disable-background-networking", "--disable-sync", "--hide-scrollbars",
-            "--user-data-dir=" + profile, "--window-size=2240,1600", "--force-device-scale-factor=1",
+            "--user-data-dir=" + profile, "--window-size=960,1740", "--force-device-scale-factor=1",
             "--virtual-time-budget=4000", "--screenshot=" + str(destination),
             (Path(directory).resolve() / "showcase.html").as_uri(),
         ], capture_output=True, text=True, timeout=45)
