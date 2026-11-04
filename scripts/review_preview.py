@@ -145,8 +145,7 @@ def review(directory, output, states, widths, gifs=False):
             rows = []
             for state in states:
                 client.evaluate("""(async () => {
-                  const p = document.querySelector('#preview-state');
-                  p.value = %s; p.dispatchEvent(new Event('change', {bubbles:true}));
+                  document.querySelector('[data-preview-state=' + CSS.escape(%s) + ']').click();
                   await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
                 })()""" % json.dumps(state))
                 row = client.evaluate("""(() => {

@@ -25,18 +25,51 @@
       pad(seconds % 60)
     );
   }
-  function temperature(value: Heater = {}, showTarget = true) {
-    const degrees = (item: unknown) => (number(item) ? Math.round(item) : '—');
-    if (!number(value.temperature))
-      return showTarget && number(value.target) && value.target > 0
-        ? 'Target ' + degrees(value.target) + ' °C'
-        : '';
-    const target =
-      showTarget &&
+  function coolingTracker() {
+    let samples: { at: number; temperature: number }[] = [];
+    return (value: Heater = {}, at: number) => {
+      if (value.target !== 0 || !number(value.temperature)) {
+        samples = [];
+        return false;
+      }
+      const previous = samples.at(-1);
+      // Missing status breaks the observation window; silence is not stability.
+      if (previous && (at - previous.at > 10000 || at < previous.at)) samples = [];
+      samples.push({ at, temperature: value.temperature });
+      while (samples.length > 1 && samples[1].at <= at - 60000) samples.shift();
+      const temperatures = samples.map((sample) => sample.temperature);
+      return (
+        at - samples[0].at >= 60000 && Math.max(...temperatures) - Math.min(...temperatures) <= 1
+      );
+    };
+  }
+  const trackBedCooling = coolingTracker();
+  const trackHotendCooling = coolingTracker();
+  let settled = $state.raw({ bed: false, hotend: false });
+  $effect(() => {
+    settled = {
+      bed: trackBedCooling(stats?.bed, receivedAt),
+      hotend: trackHotendCooling(stats?.hotend, receivedAt),
+    };
+  });
+  function temperature(value: Heater = {}, settled = false) {
+    const current = number(value.temperature) ? Math.round(value.temperature) : null;
+    const target = number(value.target) ? Math.round(value.target) : null;
+    const direction =
+      !(value.target === 0 && settled) &&
+      number(value.temperature) &&
       number(value.target) &&
-      value.target > 0 &&
-      (!number(value.temperature) || Math.abs(value.temperature - value.target) > 2);
-    return degrees(value.temperature) + (target ? ' / ' + degrees(value.target) : '') + ' °C';
+      Math.abs(value.temperature - value.target) > 2
+        ? value.target > value.temperature
+          ? 'heating'
+          : 'cooling'
+        : null;
+    return {
+      current,
+      target,
+      direction,
+      visible: current !== null || (target !== null && target > 0),
+    };
   }
   const states: Record<string, string> = {
     printing: 'Printing', // Active print, with progress and estimates.
@@ -49,8 +82,8 @@
     unavailable: 'Status unavailable', // Status missing or older than ten seconds.
   };
   const preparing = $derived(stats?.state === 'printing' && stats.phase === 'preparing');
-  const state = $derived(preparing ? 'preparing' : (stats?.state ?? 'unavailable'));
-  const printing = $derived(state === 'printing');
+  const printState = $derived(preparing ? 'preparing' : (stats?.state ?? 'unavailable'));
+  const printing = $derived(printState === 'printing');
   const activePrint = $derived(stats?.state === 'printing' || stats?.state === 'paused');
   const showEstimate = $derived(
     printing && stats?.phase === 'printing' && number(stats?.remaining),
@@ -62,9 +95,9 @@
     preparing && number(stats?.planned_total) && stats.planned_total > 0,
   );
   const showFinish = $derived(showEstimate || preparationFinish);
-  const standby = $derived(state === 'standby');
-  const missing = $derived(state === 'unavailable');
-  const terminal = $derived(['complete', 'cancelled', 'error'].includes(state));
+  const standby = $derived(printState === 'standby');
+  const missing = $derived(printState === 'unavailable');
+  const terminal = $derived(['complete', 'cancelled', 'error'].includes(printState));
   const heating = $derived(
     [stats?.bed, stats?.hotend].some(
       (value) =>
@@ -96,10 +129,10 @@
     !terminal && !standby && Number.isInteger(stats?.tool) && number(stats?.tool) && stats.tool < 4,
   );
   const showMaterial = $derived(
-    !standby && state !== 'error' && Boolean(showTool || stats?.material || color),
+    !standby && printState !== 'error' && Boolean(showTool || stats?.material || color),
   );
-  const bedTemperature = $derived(temperature(stats?.bed, !terminal && !standby));
-  const hotendTemperature = $derived(temperature(stats?.hotend, !terminal && !standby));
+  const bedTemperature = $derived(temperature(stats?.bed, settled.bed));
+  const hotendTemperature = $derived(temperature(stats?.hotend, settled.hotend));
   const finish = $derived(
     preparationFinish && number(stats?.planned_total)
       ? new Date(receivedAt + stats.planned_total * 1000)
@@ -117,12 +150,34 @@
   );
 </script>
 
+{#snippet heaterTemperature(value: ReturnType<typeof temperature>)}
+  {#if value.current !== null}
+    {#if value.direction}<span class="temperature-arrow {value.direction}" aria-hidden="true"
+        >{value.direction === 'heating' ? '↑' : '↓'}</span
+      >{/if}{value.current} °C<span class="temperature-target"
+      >{#if value.direction === 'heating'}<sup
+          class="heating"
+          aria-label={'Target ' + value.target + ' °C'}>{value.target} °C</sup
+        >{:else if value.direction === 'cooling'}<sub
+          class="cooling"
+          aria-label={'Target ' + value.target + ' °C'}>{value.target} °C</sub
+        >{/if}</span
+    >
+  {:else if value.visible}Target {value.target} °C{/if}
+{/snippet}
+
 <!-- svelte-ignore a11y_no_noninteractive_tabindex (Keyboard users can reveal the statistics surface.) -->
-<section id="stats" aria-labelledby="stats-title" tabindex="0" hidden={!stats} data-state={state}>
+<section
+  id="stats"
+  aria-labelledby="stats-title"
+  tabindex="0"
+  hidden={!stats}
+  data-state={printState}
+>
   <h2 id="stats-title">Print statistics</h2>
   <div class="stats-gauge">
-    <span id="stats-state" hidden={!states[state]}
-      >{printing && stats?.phase === 'finishing' ? 'Finishing' : (states[state] ?? '')}</span
+    <span id="stats-state" hidden={!states[printState]}
+      >{printing && stats?.phase === 'finishing' ? 'Finishing' : (states[printState] ?? '')}</span
     >
     <div class="stats-primary">
       <span id="stats-message" hidden={!message}>{message}</span>
@@ -208,7 +263,7 @@
   <div
     id="hardware-stat"
     class="stats-details"
-    hidden={missing || (!showMaterial && !bedTemperature && !hotendTemperature)}
+    hidden={missing || (!showMaterial && !bedTemperature.visible && !hotendTemperature.visible)}
   >
     <div id="material-stat" class="material" hidden={!showMaterial}>
       <span id="tool-stat" hidden={!showTool}
@@ -225,13 +280,13 @@
       ></span>
     </div>
     <dl class="temperatures">
-      <div hidden={!bedTemperature}>
+      <div hidden={!bedTemperature.visible}>
         <dt id="bed-label">Bed</dt>
-        <dd id="bed-value">{bedTemperature}</dd>
+        <dd id="bed-value">{@render heaterTemperature(bedTemperature)}</dd>
       </div>
-      <div hidden={!hotendTemperature}>
+      <div hidden={!hotendTemperature.visible}>
         <dt id="hotend-label">Hotend</dt>
-        <dd id="hotend-value">{hotendTemperature}</dd>
+        <dd id="hotend-value">{@render heaterTemperature(hotendTemperature)}</dd>
       </div>
     </dl>
   </div>
@@ -556,6 +611,25 @@
   }
   #stats .temperatures dd {
     white-space: nowrap;
+  }
+  .heating {
+    color: #ffbb77;
+  }
+  .cooling {
+    color: #7abaff;
+  }
+  .temperature-arrow {
+    margin-right: 3px;
+  }
+  .temperature-target {
+    display: inline-block;
+    width: 5ch;
+    margin-left: 5px;
+  }
+  .temperatures sup,
+  .temperatures sub {
+    font-size: 0.75em;
+    line-height: 0;
   }
   #stats[data-state='standby'] {
     width: 320px;
