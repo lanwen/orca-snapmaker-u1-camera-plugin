@@ -64,7 +64,7 @@ class HttpClient:
                                  "method": "camera.start_monitor",
                                  "params": {"domain": "lan", "interval": 0}}))
         deadline = time.monotonic() + 2
-        for _ in range(100):
+        while True:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 break
