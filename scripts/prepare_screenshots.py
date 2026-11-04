@@ -43,7 +43,7 @@ def screenshot_page(camera=None):
                      "bed": {"temperature": 59, "target": 60},
                      "hotend": {"temperature": 209, "target": 210}},
     }
-    # Layer zero can include positive extrusion time; preparation has no ETA.
+    # Layer zero can include extrusion; show a plan-based after-time and activity bar.
     fixtures["preparing"] = dict(fixtures["printing"], progress=0, current_layer=0,
                                   phase="preparing", planned_total=2081,
                                   elapsed=96, printing_duration=30, remaining=None,

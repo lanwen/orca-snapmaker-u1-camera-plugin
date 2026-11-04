@@ -41,7 +41,8 @@ Hover over the player to reveal Stop.
 Keyboard focus and touch also reveal the control.
 The light toggle works with playback started or stopped.
 
-During preparation, statistics show the slicer’s original print plan plus preparation, whose finish time is unknown.
+During preparation, statistics show the slicer’s original print plan and an approximate “after” finish time, with a moving gradient to indicate activity.
+Elapsed time uses a stopwatch format with seconds from the latest printer update.
 Supported OrcaSlicer jobs show approximate time left and finish time once model printing is confirmed at normal speed.
 When the inputs cannot support a finish estimate, the original plan stays labelled separately.
 

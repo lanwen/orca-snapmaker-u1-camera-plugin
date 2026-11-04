@@ -38,6 +38,8 @@ Layer zero means `preparing`, even after purge gives a positive printing duratio
 A positive integer model layer means `printing`; absent, invalid, or contradictory markers mean `unknown`.
 Confirmed M73 progress of 100% during an active job means `finishing`, with unknown ETA.
 Preparation has unknown remaining duration; no learned startup constant is applied.
+With a known plan, the preparation finish label is “after” the latest status time plus that plan.
+This is an approximate plan-based baseline, not a measured completion time.
 
 Finish estimates currently support metadata identifying `OrcaSlicer`, including the 2.5.0-dev producer, using its normal-mode time plan.
 Other producers, including unverified SnapmakerOrca variants, show only the original plan.
@@ -47,6 +49,8 @@ Under the standard [U1 display fallback](https://github.com/Snapmaker/u1-klipper
 Only raw state `printing`, model phase `printing`, and a finite speed factor within 0.000001 of one permit `planned_total * (1 - display_progress)`.
 Paused jobs, speed overrides, missing inputs, and ambiguous source evidence have no finish forecast.
 The UI rounds plan and remaining durations up to minutes and anchors finish time to the received snapshot without animating a countdown.
+Elapsed time shows whole printer-reported seconds as `mm:ss` or `h:mm:ss`, refreshed with status rather than extrapolated locally.
+The preparation bar uses a moving gradient without a percentage or accessibility value; reduced-motion mode keeps the gradient still.
 
 Metadata refreshes at most every 30 seconds, including successful entries, to observe updated metadata.
 Filename or file-size changes, inactive-to-active transitions, and backwards clock or file-position movement clear cached metadata and fetch immediately.

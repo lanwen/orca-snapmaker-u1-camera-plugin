@@ -13,6 +13,18 @@
         ? '<1m'
         : (minutes >= 60 ? Math.floor(minutes / 60) + 'h ' : '') + (minutes % 60) + 'm';
   }
+  function elapsedClock(value: unknown) {
+    if (!number(value)) return '—';
+    const seconds = Math.floor(value);
+    const minutes = Math.floor(seconds / 60);
+    const pad = (part: number) => String(part).padStart(2, '0');
+    return (
+      (minutes >= 60 ? Math.floor(minutes / 60) + ':' : '') +
+      pad(minutes % 60) +
+      ':' +
+      pad(seconds % 60)
+    );
+  }
   function temperature(value: Heater = {}, showTarget = true) {
     const degrees = (item: unknown) => (number(item) ? Math.round(item) : '—');
     const target =
@@ -41,6 +53,10 @@
   const showPlan = $derived(
     (printing || preparing) && !showEstimate && number(stats?.planned_total),
   );
+  const preparationFinish = $derived(
+    preparing && number(stats?.planned_total) && stats.planned_total > 0,
+  );
+  const showFinish = $derived(showEstimate || preparationFinish);
   const standby = $derived(state === 'standby');
   const missing = $derived(state === 'unavailable');
   const terminal = $derived(['complete', 'cancelled', 'error'].includes(state));
@@ -75,7 +91,11 @@
       : null,
   );
   const finish = $derived(
-    showEstimate && number(stats?.remaining) ? new Date(receivedAt + stats.remaining * 1000) : null,
+    preparationFinish && number(stats?.planned_total)
+      ? new Date(receivedAt + stats.planned_total * 1000)
+      : showEstimate && number(stats?.remaining)
+        ? new Date(receivedAt + stats.remaining * 1000)
+        : null,
   );
   const finishTime = $derived(
     finish && Number.isFinite(finish.getTime())
@@ -116,31 +136,40 @@
       >
       <span hidden={preparing}>Slicer plan at normal speed</span>
     </div>
-    <div id="finish-unknown" hidden={!(printing || preparing) || showEstimate}>
-      {preparing ? 'Finish unknown during preparation' : 'Finish unknown'}
-    </div>
+    <div id="finish-unknown" hidden={!(printing || preparing) || showFinish}>Finish unknown</div>
     <div
-      hidden={preparing}
       id="progress-bar"
+      data-indeterminate={preparing || undefined}
       role="progressbar"
-      aria-label="Print progress"
+      aria-label={preparing ? 'Preparing print' : 'Print progress'}
       aria-valuemin="0"
       aria-valuemax="100"
-      aria-valuenow={progress === null ? undefined : Math.floor(progress)}
-      aria-valuetext={progress === null
-        ? 'Progress unavailable'
-        : Math.floor(progress) + '% complete'}
+      aria-valuenow={preparing || progress === null ? undefined : Math.floor(progress)}
+      aria-valuetext={preparing
+        ? 'Preparation in progress'
+        : progress === null
+          ? 'Progress unavailable'
+          : Math.floor(progress) + '% complete'}
     >
-      <span id="progress-fill" style:width={(progress ?? 0) + '%'}></span>
+      <span id="progress-fill" style:width={(preparing ? 100 : (progress ?? 0)) + '%'}></span>
     </div>
     <dl class="stats-times">
       <div>
         <dt>Elapsed</dt>
-        <dd id="elapsed-value">{duration(stats?.elapsed)}</dd>
+        <dd id="elapsed-value" title="Printer-reported elapsed time, to the second">
+          {elapsedClock(stats?.elapsed)}
+        </dd>
       </div>
-      <div id="finish-stat" hidden={!showEstimate}>
+      <div id="finish-stat" hidden={!showFinish}>
         <dt>Est. finish</dt>
-        <dd id="finish-value">{finishTime}</dd>
+        <dd
+          id="finish-value"
+          title={preparationFinish
+            ? 'Slicer plan from this update; preparation adds time.'
+            : undefined}
+        >
+          {preparationFinish ? 'after ' : ''}{finishTime}
+        </dd>
       </div>
     </dl>
   </div>
@@ -304,6 +333,29 @@
     height: 100%;
     border-radius: inherit;
     background: #7abaff;
+  }
+  #progress-bar[data-indeterminate] #progress-fill {
+    position: relative;
+    background: #a0cbff38;
+  }
+  #progress-bar[data-indeterminate] #progress-fill::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, transparent, #a0cbff, transparent);
+    transform: translateX(-100%);
+    animation: preparation-shimmer 2.4s ease-in-out infinite;
+  }
+  @keyframes preparation-shimmer {
+    to {
+      transform: translateX(100%);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    #progress-bar[data-indeterminate] #progress-fill::after {
+      animation: none;
+      transform: none;
+    }
   }
   #stats[data-state='complete'] #progress-fill {
     background: #72dec2;

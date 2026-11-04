@@ -44,17 +44,20 @@ const settle = () => new Promise((resolve) => setImmediate(resolve));
           phase === 'printing',
           'Only running prints show an ETA',
         );
-        assert.equal(
-          visible(get('progress-bar')),
-          phase !== 'preparing',
-          'Preparation does not imply print progress',
-        );
+        assert.equal(visible(get('progress-bar')), true);
         assert.equal(visible(get('stats-message')), phase === 'preparing');
         assert.equal(visible(get('plan-value')), phase === 'preparing');
         if (phase === 'preparing') {
           assert.match(get('plan-value').textContent, /35m print plan \+ preparation/);
-          assert.equal(visible(get('finish-value')), false);
-          assert.match(get('finish-unknown').textContent, /Finish unknown during preparation/);
+          assert.equal(visible(get('finish-value')), true);
+          assert.match(get('finish-value').textContent, /^after /);
+          assert.equal(visible(get('finish-unknown')), false);
+          assert.equal(get('progress-bar').hasAttribute('aria-valuenow'), false);
+          assert.equal(
+            get('progress-bar').getAttribute('aria-valuetext'),
+            'Preparation in progress',
+          );
+          assert.equal(get('elapsed-value').textContent, '01:36');
         }
         assert.equal(visible(get('tool-value')), phase !== 'complete');
         if (phase === 'complete') {

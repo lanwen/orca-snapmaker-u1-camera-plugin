@@ -102,8 +102,7 @@ test('print statistics display incoming measurements while the camera is stopped
     'Progress rounds down to a whole percent',
   );
   assert.deepEqual(numbers(field('layers-value')), [128, 300]);
-  assert.match(field('elapsed-value').textContent!, /1\s*(?:h|hour)/i);
-  assert.match(field('elapsed-value').textContent!, /10\s*(?:m|min)/i);
+  assert.equal(field('elapsed-value').textContent, '1:10:00');
   assert.deepEqual(numbers(field('remaining-value')), [1, 40]);
   assert.equal(
     field('material-value').textContent,
@@ -122,6 +121,62 @@ test('print statistics display incoming measurements while the camera is stopped
     'The swatch follows the reported material color',
   );
   assert.equal(lastMessage().playing, false);
+});
+
+test('elapsed time shows whole reported seconds without inventing a ticking clock', () => {
+  selectPrinter();
+  for (const [elapsed, clock] of [
+    [0, '00:00'],
+    [59.9, '00:59'],
+    [60, '01:00'],
+    [3599, '59:59'],
+    [3600, '1:00:00'],
+    [4207.9, '1:10:07'],
+    [NaN, '—'],
+  ] as const) {
+    publish({ generation: 1, stats: { ...metrics, elapsed } });
+    assert.equal(field('elapsed-value').textContent, clock);
+    advance(1000);
+    assert.equal(field('elapsed-value').textContent, clock);
+  }
+});
+
+test('preparation gives a dated after-time from the current slicer plan and no false percentage', () => {
+  vi.setSystemTime(new Date(2026, 10, 4, 23, 50, 0));
+  selectPrinter();
+  publish({
+    generation: 1,
+    stats: { ...metrics, phase: 'preparing', current_layer: 0, remaining: null },
+  });
+  const baseline = new Date(Date.now() + metrics.planned_total * 1000);
+  const expected =
+    'after ' +
+    baseline.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) +
+    ', ' +
+    baseline.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+  assert.equal(field('finish-value').textContent, expected);
+  assert.equal(progress().hasAttribute('aria-valuenow'), false);
+  publish({
+    generation: 1,
+    stats: {
+      ...metrics,
+      phase: 'preparing',
+      current_layer: 0,
+      remaining: null,
+      planned_total: null,
+    },
+  });
+  assert.equal(
+    visible(field('finish-value')),
+    false,
+    'Missing plans cannot create a finish baseline',
+  );
+  publish({
+    generation: 1,
+    stats: { ...metrics, state: 'paused', phase: 'preparing', remaining: null },
+  });
+  assert.equal(visible(field('finish-value')), false, 'A pause has no finish forecast');
+  assert.equal(progress().getAttribute('aria-valuenow'), '42');
 });
 
 test('pausing hides moving estimates and resuming restores them', () => {
@@ -186,13 +241,16 @@ test('layer-zero purge keeps preparation and its plan separate from remaining ti
     },
   });
   assert.equal(field('stats-state').textContent, 'Preparing');
-  assert.equal(visible(progress()), false);
+  assert.equal(visible(progress()), true);
+  assert.equal(progress().hasAttribute('aria-valuenow'), false);
+  assert.equal(progress().getAttribute('aria-valuetext'), 'Preparation in progress');
   assert.equal(visible(field('remaining-value')), false);
   assert.equal(visible(field('plan-value')), true);
   assert.match(field('plan-value').textContent!, /35m print plan \+ preparation/);
   assert.equal(visible(field('elapsed-value')), true);
-  assert.equal(visible(field('finish-value')), false);
-  assert.equal(field('finish-unknown').textContent?.trim(), 'Finish unknown during preparation');
+  assert.equal(visible(field('finish-value')), true);
+  assert.match(field('finish-value').textContent!, /^after /);
+  assert.equal(visible(field('finish-unknown')), false);
   publish({ generation: 1, stats: { ...metrics, remaining: 1331.84 } });
   assert.equal(visible(progress()), true);
   assert.deepEqual(numbers(field('remaining-value')), [23]);
