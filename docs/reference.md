@@ -15,6 +15,8 @@
 - A 3.5-second activity lease stops abandoned monitoring if the webview loses its connection to the plugin.
 - Old image timestamps produce a visible stale-image warning.
   Without timestamps, an unchanged image is labelled as having unconfirmed freshness.
+- A failed snapshot request, including HTTP 404, keeps the last frame visible with an error or waiting message.
+  Stop and printer selection changes still clear the frame.
 - The only light command is `SET_LED LED=cavity_led WHITE=0|1 SYNC=0`.
   Light status is read back from `led cavity_led`.
   The toggle also works before Play and after Stop, without starting camera monitoring.

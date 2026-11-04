@@ -59,8 +59,9 @@ export class Camera {
     }
     this.active = true;
     if (this.playing && Date.now() - this.lastFrame > 6000) {
-      this.clearImage();
-      this.status = 'Waiting for camera — no recent image';
+      this.status = this.imageVisible
+        ? 'Waiting for camera — showing last frame'
+        : 'Waiting for camera — no recent image';
     }
     this.bridge.postMessage({ type: 'activity', active: true, playing: this.playing });
   };
@@ -121,8 +122,9 @@ export class Camera {
       this.light = data.light ?? null;
       this.lightDisabled = this.light === null;
     }
-    if (data.camera && (this.playing || data.failed)) this.status = data.camera;
-    if (data.failed) this.clearImage();
+    if (data.camera && (this.playing || data.failed))
+      this.status =
+        data.failed && this.imageVisible ? data.camera + ' — showing last frame' : data.camera;
     if (!this.playing) return;
     if (data.image) {
       const frameGeneration = data.generation;

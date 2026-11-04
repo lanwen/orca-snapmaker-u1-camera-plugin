@@ -304,6 +304,24 @@ for (const outcome of ['load', 'error'] as const) {
   });
 }
 
+test('a camera 404 retains the last frame through retries and recovers on the next image', () => {
+  start();
+  publish({ generation: 1, image: 'last-good-frame', camera: 'Live · 4 FPS' });
+  settleFrame();
+  publish({ generation: 1, failed: true, camera: 'Printer returned HTTP 404.' });
+  assert.equal(visible(image()), true);
+  assert.equal(image().getAttribute('src'), 'last-good-frame');
+  assert.match(field('camera').textContent!, /404.*showing last frame/);
+  advance(7000);
+  assert.equal(visible(image()), true);
+  assert.equal(image().getAttribute('src'), 'last-good-frame');
+  assert.match(field('camera').textContent!, /showing last frame/);
+  publish({ generation: 1, image: 'recovered-frame', camera: 'Live · 4 FPS' });
+  settleFrame();
+  assert.equal(image().getAttribute('src'), 'recovered-frame');
+  assert.equal(field('camera').textContent, 'Live · 4 FPS');
+});
+
 test('Stop removes the current frame and late images cannot restart playback', () => {
   start();
   publish({ generation: 1, image: 'frame' });
@@ -386,8 +404,8 @@ test('window focus does not control playback, but a stale image is no longer pre
   assert.equal(lastMessage().playing, true);
   assert.equal(visible(image()), true);
   advance(6000);
-  assert.equal(visible(image()), false);
-  assert.ok(field('camera').textContent?.trim(), 'A stalled feed has an explanation');
+  assert.equal(visible(image()), true, 'A stalled feed retains its last frame');
+  assert.match(field('camera').textContent!, /showing last frame/);
 });
 
 test('selection changes stop playback, explain unavailable targets, and allow later recovery', () => {
