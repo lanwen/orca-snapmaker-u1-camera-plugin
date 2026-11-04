@@ -106,7 +106,7 @@ function publishScreenshot() {
   const picker = document.getElementById('preview-state');
   if (picker) picker.value = screenshotState;
   screenshotHandler({type:'target', generation:1, target:'Workshop · Snapmaker U1'});
-  screenshotHandler({generation:1, printer:screenshotLabels[screenshotState],
+  screenshotHandler({generation:1, printer:screenshotLabels[screenshotFixtures[screenshotState].state],
     light:screenshotLight, stats:screenshotFixtures[screenshotState],
     image:screenshotImage, camera:'Live · 4.4 FPS'});
 }

@@ -128,6 +128,8 @@ const settle = () => new Promise((resolve) => setImmediate(resolve));
       await settle();
       assert.equal(doc.getElementById('stats').dataset.state, rendered, state);
       assert.equal(picker.value, state);
+      if (['phase-unknown', 'plan-only', 'preparing-no-plan'].includes(state))
+        assert.equal(doc.getElementById('printer').textContent, 'Printing');
       assert.equal(
         doc.getElementById('progress-bar').hasAttribute('data-shimmer'),
         [
