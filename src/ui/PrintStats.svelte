@@ -146,17 +146,19 @@
   </div>
   <div id="journey-stat" class="stats-journey" hidden={standby || missing}>
     <div id="remaining-stat" hidden={!showEstimate}>
-      <strong id="remaining-value"
-        >{number(stats?.remaining) ? '≈ ' + duration(stats.remaining, true) : '—'}</strong
-      ><span>left</span>
+      <strong id="remaining-value">
+        {#if number(stats?.remaining)}
+          <small class="approximation">≈</small> {duration(stats.remaining, true)}
+        {:else}—{/if}
+      </strong><span>left</span>
     </div>
     <div id="plan-stat" hidden={!showPlan}>
-      <strong id="plan-value"
-        >{number(stats?.planned_total) ? '≈ ' + duration(stats.planned_total, true) : '—'}<small
-          hidden={!preparing}>{' print plan + preparation'}</small
-        ></strong
-      >
-      <span hidden={preparing}>Slicer plan at normal speed</span>
+      <strong id="plan-value">
+        {#if number(stats?.planned_total)}
+          <small class="approximation">≈</small> {duration(stats.planned_total, true)}
+        {:else}—{/if}
+      </strong>
+      <span id="plan-caption" hidden={!preparing}>+ preparation</span>
     </div>
     <div
       id="progress-bar"
@@ -249,6 +251,7 @@
     background: transparent;
     pointer-events: auto;
     font-variant-numeric: tabular-nums;
+    line-height: 1.2;
     text-shadow: 0 1px 4px #0009;
   }
   #stats:hover,
@@ -264,8 +267,9 @@
   }
   .stats-gauge {
     display: grid;
-    grid-template-rows: 16px minmax(64px, 1fr) 16px;
-    gap: 8px;
+    grid-template-rows: 16px 44px 16px;
+    align-content: start;
+    gap: 6px;
   }
   .stats-primary {
     display: grid;
@@ -321,7 +325,6 @@
     font-size: 42px;
     font-weight: 550;
     letter-spacing: -2px;
-    line-height: 1;
   }
   .layers {
     grid-row: 3;
@@ -334,9 +337,9 @@
   }
   .stats-journey {
     display: grid;
-    grid-template-rows: 64px 4px 48px;
-    align-content: center;
-    gap: 10px;
+    grid-template-rows: 32px 4px 32px;
+    align-content: start;
+    gap: 8px;
     border-left: 1px solid #ffffff28;
     padding-left: 18px;
   }
@@ -345,15 +348,33 @@
     grid-area: 1 / 1;
     align-self: start;
   }
+  #plan-stat {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0 6px;
+  }
   #remaining-stat {
     display: flex;
     align-items: baseline;
     gap: 7px;
   }
+  #remaining-value,
+  #plan-value {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.2em;
+  }
   #remaining-value {
     font-size: 22px;
     font-weight: 550;
     letter-spacing: -0.6px;
+  }
+  .approximation {
+    color: #96a4b3;
+    font-size: 0.6em;
+    font-weight: 400;
+    letter-spacing: 0;
   }
   #remaining-stat span {
     color: #c0cbd5;
@@ -362,21 +383,11 @@
   #plan-value {
     font-size: 22px;
     font-weight: 550;
-    line-height: 1.4;
   }
-  #plan-value small {
+  #plan-caption {
     color: #c0cbd5;
     font-size: 11px;
     font-weight: 400;
-  }
-  #plan-stat span {
-    display: block;
-    margin-top: 3px;
-  }
-  #plan-stat span {
-    color: #c0cbd5;
-    font-size: 10px;
-    line-height: 1.4;
   }
   #progress-bar {
     grid-area: 2 / 1;
@@ -467,14 +478,12 @@
     margin-bottom: 4px;
     color: #c0cbd5;
     font-size: 10px;
-    line-height: 1.2;
   }
   #stats dd {
     margin: 0;
     color: #edf3f9;
     font-size: 12px;
     font-weight: 500;
-    line-height: 1.3;
   }
   #stats #finish-value {
     overflow-wrap: anywhere;
@@ -504,7 +513,6 @@
     background: #ffffff0d;
     font-size: 11px;
     font-weight: 600;
-    line-height: 1;
   }
   #material-value {
     overflow-wrap: anywhere;
@@ -559,10 +567,9 @@
   #stats-message {
     font-size: 16px;
     font-weight: 500;
-    line-height: 1.4;
   }
   #stats[data-state='preparing'] #stats-message {
-    font-size: 22px;
+    font-size: 18px;
   }
   @media (max-width: 650px) {
     #stats {
@@ -573,10 +580,8 @@
     #progress-value {
       font-size: 36px;
     }
-    #stats[data-state='preparing'] #stats-message {
-      font-size: 18px;
-    }
     .stats-journey {
+      grid-template-rows: 48px 4px 48px;
       padding-left: 12px;
     }
     .stats-details {

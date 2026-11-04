@@ -48,7 +48,7 @@ const settle = () => new Promise((resolve) => setImmediate(resolve));
         assert.equal(visible(get('stats-message')), phase === 'preparing');
         assert.equal(visible(get('plan-value')), phase === 'preparing');
         if (phase === 'preparing') {
-          assert.match(get('plan-value').textContent, /35m print plan \+ preparation/);
+          assert.match(get('plan-stat').textContent, /35m\s*\+ preparation/);
           assert.equal(visible(get('finish-value')), true);
           assert.match(get('finish-value').textContent, /^after /);
           assert.equal(get('progress-bar').hasAttribute('aria-valuenow'), false);

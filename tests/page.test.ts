@@ -272,7 +272,7 @@ test('layer-zero purge keeps preparation and its plan separate from remaining ti
   assert.equal(progress().getAttribute('aria-valuetext'), 'Preparation in progress');
   assert.equal(visible(field('remaining-value')), false);
   assert.equal(visible(field('plan-value')), true);
-  assert.match(field('plan-value').textContent!, /35m print plan \+ preparation/);
+  assert.match(field('plan-stat').textContent!, /35m\s*\+ preparation/);
   assert.equal(visible(field('elapsed-value')), true);
   assert.equal(visible(field('finish-value')), true);
   assert.match(field('finish-value').textContent!, /^after /);
@@ -292,7 +292,7 @@ for (const phase of ['printing', 'unknown', 'finishing'] as const) {
     publish({ generation: 1, stats: { ...metrics, phase, remaining: null } });
     assert.equal(visible(field('remaining-value')), false);
     assert.equal(visible(field('plan-value')), true);
-    assert.match(field('plan-stat').textContent!, /Slicer plan at normal speed/);
+    assert.deepEqual(numbers(field('plan-value')), [35]);
     assert.equal(visible(field('finish-value')), false);
     if (phase === 'unknown') assert.equal(visible(field('stats-message')), false);
     if (phase === 'finishing') assert.equal(field('stats-state').textContent, 'Finishing');
