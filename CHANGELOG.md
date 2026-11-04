@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.6.0
+
+- fix: renew camera monitoring every sixty seconds (#44) ([1ef5e7c](https://github.com/lanwen/orca-snapmaker-u1-camera-plugin/commit/1ef5e7ce7f2f461a3945eb2f8d4a422d1f6ba7eb))
+- fix: wait for camera acknowledgement until the deadline (#43) ([6cd2ab4](https://github.com/lanwen/orca-snapmaker-u1-camera-plugin/commit/6cd2ab4c18a74c5271efc45bc748565c0eb73dc6))
+- feat: clarify temperature targets and streamline preview controls (#42) ([b650b54](https://github.com/lanwen/orca-snapmaker-u1-camera-plugin/commit/b650b544ecfa7a701ed3d478ab15365af7186d33))
+- chore: format staged files and align uv cooldown settings (#41) ([7c07e4f](https://github.com/lanwen/orca-snapmaker-u1-camera-plugin/commit/7c07e4fad71593f14b9c387e90a86c5882bf10e5))
+- fix: clarify print progress layout (#40) ([9bd0e1e](https://github.com/lanwen/orca-snapmaker-u1-camera-plugin/commit/9bd0e1e33b4f11a6e87d263de57a89dbc80e67c6))
+- build: streamline visual review and isolate release checks (#39) ([9bd24ce](https://github.com/lanwen/orca-snapmaker-u1-camera-plugin/commit/9bd24ce0232bfd77a4029591b348b48fe2d22562))
+- fix: retain the last camera frame during snapshot failures (#37) ([aace94b](https://github.com/lanwen/orca-snapmaker-u1-camera-plugin/commit/aace94bb1c0f8c60279c179a65cb4cc01f299c91))
+- fix: align print estimates with slicer progress and preparation (#36) ([cbb8db8](https://github.com/lanwen/orca-snapmaker-u1-camera-plugin/commit/cbb8db85ac7c07d2518665a64fcdab0384d6f6ee))
+
 ## 0.5.0
 
 - fix: keep release suggestions free of PR attribution links (#33) ([3e0eed4](https://github.com/lanwen/orca-snapmaker-u1-camera-plugin/commit/3e0eed48d5a0ade9da12ca08c64cd83fefceba33))
