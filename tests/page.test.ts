@@ -295,7 +295,7 @@ for (const phase of ['printing', 'unknown', 'finishing'] as const) {
     assert.match(field('plan-stat').textContent!, /Slicer plan at normal speed/);
     assert.equal(visible(field('finish-value')), false);
     if (phase === 'unknown') assert.equal(visible(field('stats-message')), false);
-    if (phase === 'finishing') assert.equal(field('stats-message').textContent, 'Finishing');
+    if (phase === 'finishing') assert.equal(field('stats-state').textContent, 'Finishing');
     assert.equal(progress().hasAttribute('data-shimmer'), true);
   });
 }

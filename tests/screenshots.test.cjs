@@ -147,7 +147,7 @@ const settle = () => new Promise((resolve) => setImmediate(resolve));
       if (state === 'preparing') assert.equal(bar.hasAttribute('data-heating'), true);
       if (state === 'preparing-warm') assert.equal(bar.hasAttribute('data-heating'), false);
       if (state === 'finishing')
-        assert.match(doc.getElementById('stats-message').textContent, /Finishing/);
+        assert.equal(doc.getElementById('stats-state').textContent, 'Finishing');
       if (state === 'phase-unknown')
         assert.equal(doc.getElementById('stats-state').textContent, 'Printing');
       if (state === 'preparing-no-plan') assert.equal(doc.getElementById('plan-stat').hidden, true);

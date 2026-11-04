@@ -83,9 +83,7 @@
           ? heating
             ? 'Heating up'
             : 'Preparing to print'
-          : printing && stats?.phase === 'finishing'
-            ? 'Finishing'
-            : '',
+          : '',
   );
   const progress = $derived(number(stats?.progress) ? Math.min(100, stats.progress * 100) : null);
   const indeterminate = $derived(preparing || (activePrint && !progress));
@@ -123,11 +121,15 @@
 <section id="stats" aria-labelledby="stats-title" tabindex="0" hidden={!stats} data-state={state}>
   <h2 id="stats-title">Print statistics</h2>
   <div class="stats-gauge">
-    <span id="stats-state" hidden={!states[state]}>{states[state] ?? ''}</span>
-    <span id="stats-message" hidden={!message}>{message}</span>
-    <strong id="progress-value" hidden={standby || preparing || missing || progress === null}
-      >{progress === null ? '—' : Math.floor(progress) + '%'}</strong
+    <span id="stats-state" hidden={!states[state]}
+      >{printing && stats?.phase === 'finishing' ? 'Finishing' : (states[state] ?? '')}</span
     >
+    <div class="stats-primary">
+      <span id="stats-message" hidden={!message}>{message}</span>
+      <strong id="progress-value" hidden={standby || preparing || missing || progress === null}
+        >{progress === null ? '—' : Math.floor(progress) + '%'}</strong
+      >
+    </div>
     <div
       id="layers-stat"
       class="layers"
@@ -237,9 +239,9 @@
   #stats {
     grid-column: 1 / -1;
     display: grid;
-    grid-template-columns: 100px minmax(0, 1fr) 185px;
+    grid-template-columns: 110px minmax(0, 1fr) 185px;
     gap: 18px;
-    width: 666px;
+    width: 720px;
     max-width: 100%;
     padding: 16px;
     border: 1px solid transparent;
@@ -261,10 +263,21 @@
     outline-offset: 3px;
   }
   .stats-gauge {
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
+    display: grid;
+    grid-template-rows: 16px minmax(64px, 1fr) 16px;
     gap: 8px;
+  }
+  .stats-primary {
+    display: grid;
+    grid-row: 2;
+    align-items: center;
+    min-width: 0;
+  }
+  .stats-primary > * {
+    grid-area: 1 / 1;
+  }
+  #stats:is([data-state='standby'], [data-state='unavailable']) .stats-gauge {
+    grid-template-rows: 16px auto;
   }
   #stats-title {
     position: absolute;
@@ -274,6 +287,7 @@
     clip-path: inset(50%);
   }
   #stats-state {
+    grid-row: 1;
     display: inline-flex;
     align-items: center;
     gap: 6px;
@@ -310,6 +324,8 @@
     line-height: 1;
   }
   .layers {
+    grid-row: 3;
+    align-self: center;
     color: #c0cbd5;
     font-size: 10px;
   }
@@ -317,12 +333,17 @@
     margin-left: 4px;
   }
   .stats-journey {
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
+    display: grid;
+    grid-template-rows: 64px 4px 48px;
+    align-content: center;
     gap: 10px;
     border-left: 1px solid #ffffff28;
     padding-left: 18px;
+  }
+  #remaining-stat,
+  #plan-stat {
+    grid-area: 1 / 1;
+    align-self: start;
   }
   #remaining-stat {
     display: flex;
@@ -358,6 +379,7 @@
     line-height: 1.4;
   }
   #progress-bar {
+    grid-area: 2 / 1;
     height: 4px;
     overflow: hidden;
     border-radius: 99px;
@@ -395,13 +417,13 @@
     animation: progress-shimmer 2.4s ease-in-out infinite;
   }
   #stats[data-state='printing'] #progress-fill::after {
-    --progress-highlight: #c4e2ff;
-    opacity: 0.55;
+    --progress-highlight: #e0f2ff;
+    opacity: 1;
     animation-duration: 3.2s;
   }
   #stats[data-state='paused'] #progress-fill::after {
-    --progress-highlight: #ffe2a3;
-    opacity: 0.55;
+    --progress-highlight: #fff4d9;
+    opacity: 1;
     animation-duration: 3.2s;
   }
   @keyframes progress-shimmer {
@@ -428,10 +450,18 @@
     background: #ff9999;
   }
   .stats-times {
-    display: flex;
-    justify-content: space-between;
+    grid-area: 3 / 1;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
     gap: 10px;
     margin: 0;
+  }
+  .stats-times > div:first-child {
+    grid-area: 1 / 1;
+  }
+  .stats-times > div:last-child {
+    grid-area: 1 / 2;
+    text-align: right;
   }
   #stats dt {
     margin-bottom: 4px;
@@ -451,12 +481,15 @@
   }
   .stats-details {
     display: grid;
+    grid-template-rows: 30px 40px;
     align-content: center;
     gap: 10px;
     border-left: 1px solid #ffffff28;
     padding-left: 18px;
   }
   .material {
+    grid-area: 1 / 1;
+    align-self: center;
     display: flex;
     align-items: center;
     gap: 8px;
@@ -485,9 +518,17 @@
     background: transparent;
   }
   .temperatures {
+    grid-area: 2 / 1;
     display: grid;
+    grid-template-rows: 16px 16px;
     gap: 7px;
     margin: 0;
+  }
+  .temperatures > div:first-child {
+    grid-area: 1 / 1;
+  }
+  .temperatures > div:last-child {
+    grid-area: 2 / 1;
   }
   .temperatures > div {
     display: flex;
@@ -501,22 +542,15 @@
   #stats .temperatures dd {
     white-space: nowrap;
   }
-  #stats:is(
-    [data-state='complete'],
-    [data-state='paused'],
-    [data-state='cancelled'],
-    [data-state='error']
-  ) {
-    width: 540px;
-    grid-template-columns: 100px minmax(0, 1fr) 180px;
-  }
   #stats[data-state='standby'] {
     width: 320px;
     grid-template-columns: 1fr 1fr;
   }
-  #stats[data-state='preparing'] {
-    width: 720px;
-    grid-template-columns: 110px minmax(0, 1fr) 185px;
+  #stats[data-state='standby'] .stats-details {
+    grid-template-rows: auto;
+  }
+  #stats[data-state='standby'] .temperatures {
+    grid-area: auto;
   }
   #stats[data-state='unavailable'] {
     width: 360px;
@@ -531,20 +565,16 @@
     font-size: 22px;
   }
   @media (max-width: 650px) {
-    #stats,
-    #stats:is(
-      [data-state='complete'],
-      [data-state='paused'],
-      [data-state='cancelled'],
-      [data-state='error'],
-      [data-state='preparing']
-    ) {
+    #stats {
       width: 480px;
       grid-template-columns: 90px minmax(0, 1fr);
       gap: 12px;
     }
     #progress-value {
       font-size: 36px;
+    }
+    #stats[data-state='preparing'] #stats-message {
+      font-size: 18px;
     }
     .stats-journey {
       padding-left: 12px;
@@ -555,11 +585,17 @@
       border-top: 1px solid #ffffff28;
       padding: 10px 0 0;
       grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+      grid-template-rows: 32px;
       align-items: center;
     }
     .temperatures {
+      grid-area: 1 / 2;
       grid-template-columns: 1fr 1fr;
+      grid-template-rows: 32px;
       gap: 12px;
+    }
+    .temperatures > div:last-child {
+      grid-area: 1 / 2;
     }
     .temperatures > div {
       display: block;
@@ -576,11 +612,19 @@
     }
     #stats[data-state='standby'] .temperatures {
       grid-template-columns: 1fr;
+      grid-template-rows: 32px 32px;
+    }
+    #stats[data-state='standby'] .temperatures > div:last-child {
+      grid-area: 2 / 1;
     }
   }
   @media (max-width: 420px) {
     .stats-details {
       grid-template-columns: 1fr;
+      grid-template-rows: 30px 32px;
+    }
+    .temperatures {
+      grid-area: 2 / 1;
     }
   }
 </style>

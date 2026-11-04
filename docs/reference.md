@@ -55,6 +55,8 @@ It is orange while a reported heater is more than 2 °C below target and returns
 Printing and finishing use a subtle blue highlight inside the filled portion of the bar; paused jobs retain an amber shimmer.
 Active jobs without completed progress use an indeterminate activity bar.
 Unavailable metric fields and finish estimates are omitted.
+Job states with bars share the longer preparation width and fixed layout slots, so missing values do not move status labels or bars.
+Entire absent sections, such as job progress in standby, still collapse.
 Reduced-motion mode keeps all gradients still.
 
 Metadata refreshes at most every 30 seconds, including successful entries, to observe updated metadata.

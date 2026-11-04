@@ -196,13 +196,13 @@ body { --viewer-top:calc(56px + 100vw * .05231144); }
                     for state in STATES[1:])
     (output / "showcase.html").write_text('''<!doctype html><html lang="en"><head><meta charset="utf-8">
 <title>Snapmaker U1 · Camera and print states</title><style>
-* { box-sizing:border-box; } html,body { margin:0; width:960px; height:1448px; overflow:hidden; }
+* { box-sizing:border-box; } html,body { margin:0; width:960px; height:1628px; overflow:hidden; }
 body { padding:24px; background:#10151b; color:#edf3f9; font:18px system-ui; display:flex; flex-direction:column; gap:18px; }
 section { display:flex; flex-direction:column; gap:10px; flex:none; }
 h2 { margin:0; font-size:20px; line-height:24px; font-weight:550; }
 iframe { display:block; border:0; background:#0b0e12; }
 .hero iframe { width:100%; height:480px; border:1px solid #ffffff20; border-radius:12px; }
-.crop { position:relative; height:240px; overflow:hidden; border:1px solid #ffffff20; border-radius:12px; }
+.crop { position:relative; height:300px; overflow:hidden; border:1px solid #ffffff20; border-radius:12px; }
 .crop iframe { position:absolute; width:900px; height:650px; left:-18px; bottom:-10px; transform:scale(1.25); transform-origin:bottom left; }
 </style></head><body><section class="hero"><h2>Camera view</h2><iframe title="Simulated Orca camera tab" src="printing.html"></iframe></section>''' + tiles + '</body></html>')
     return entry
@@ -222,7 +222,7 @@ def export_showcase(directory, destination):
         result = subprocess.run([
             browser, "--headless", "--no-first-run", "--no-default-browser-check",
             "--disable-background-networking", "--disable-sync", "--hide-scrollbars",
-            "--user-data-dir=" + profile, "--window-size=960,1448", "--force-device-scale-factor=1",
+            "--user-data-dir=" + profile, "--window-size=960,1628", "--force-device-scale-factor=1",
             "--virtual-time-budget=4000", "--screenshot=" + str(destination),
             (Path(directory).resolve() / "showcase.html").as_uri(),
         ], capture_output=True, text=True, timeout=45)
