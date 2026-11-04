@@ -14,7 +14,7 @@ depends = ["setup"]
 run = "python scripts/build.py"
 
 [tasks."screenshots:prepare"]
-description = "Prepare four simulated Orca screenshot views"
+description = "Prepare the all-states UI preview and four screenshot views"
 depends = ["build"]
 run = "python scripts/prepare_screenshots.py"
 

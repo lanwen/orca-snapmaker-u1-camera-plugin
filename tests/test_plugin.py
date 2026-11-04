@@ -222,6 +222,142 @@ class ClientTests(unittest.TestCase):
         self.assertTrue(result["light"])
         self.assertIsNone(result["stats"]["progress"])
 
+    def estimate_status(self):
+        return {"print_stats": {"state": "printing", "filename": "part.gcode",
+                                "print_duration": 3000, "total_duration": 3100,
+                                "info": {"current_layer": 30, "total_layer": 100}},
+                "display_status": {"progress": .36},
+                "virtual_sdcard": {"progress": .30966, "file_position": 300, "file_size": 1000},
+                "gcode_move": {"speed_factor": 1}}
+
+    def test_orca_time_plan_uses_confirmed_progress_and_model_phase(self):
+        metadata = {"slicer": "OrcaSlicer", "estimated_time": 2081}
+        result = plugin.print_metrics(self.estimate_status(), metadata)
+        self.assertAlmostEqual(result["remaining"], 1331.84)
+        self.assertEqual(result["planned_total"], 2081)
+        self.assertEqual(result["phase"], "printing")
+        for layer, phase in [(0, "preparing"), (None, "unknown"), (.5, "unknown"),
+                             (True, "unknown"), (-1, "unknown"), (101, "unknown")]:
+            with self.subTest(layer=layer):
+                status = self.estimate_status()
+                status["print_stats"]["info"]["current_layer"] = layer
+                result = plugin.print_metrics(status, metadata)
+                self.assertEqual(result["phase"], phase)
+                self.assertIsNone(result["remaining"])
+                self.assertEqual(result["planned_total"], 2081)
+
+    def test_estimation_rejects_ambiguous_or_invalid_sources(self):
+        metadata = {"slicer": "OrcaSlicer", "estimated_time": 2081}
+        cases = [("display_status", "progress", value)
+                 for value in (None, True, -1, 1.1, float("nan"), float("inf"), .365)]
+        cases += [("virtual_sdcard", "progress", value) for value in (None, .36, True, -1, 2)]
+        cases += [("gcode_move", "speed_factor", value) for value in (None, True, .5, 2)]
+        for section, field, value in cases:
+            with self.subTest(section=section, value=value):
+                status = self.estimate_status()
+                status[section][field] = value
+                self.assertIsNone(plugin.print_metrics(status, metadata)["remaining"])
+        for invalid in (None, [], {"estimated_time": 2081},
+                        {"slicer": "SnapmakerOrca", "estimated_time": 2081}):
+            self.assertIsNone(plugin.print_metrics(self.estimate_status(), invalid)["remaining"])
+        for value in (None, True, 0, -1, "2081", float("nan"), float("inf")):
+            result = plugin.print_metrics(self.estimate_status(), dict(metadata, estimated_time=value))
+            self.assertIsNone(result["remaining"])
+            self.assertIsNone(result["planned_total"])
+        for display, byte_progress in [(.360000001, .30), (.36, .3600005)]:
+            status = self.estimate_status()
+            status["display_status"]["progress"] = display
+            status["virtual_sdcard"]["progress"] = byte_progress
+            remaining = plugin.print_metrics(status, metadata)["remaining"]
+            self.assertEqual(remaining is not None, byte_progress == .30)
+
+    def test_pause_resume_finishing_and_terminal_estimates(self):
+        status = self.estimate_status()
+        metadata = {"slicer": "OrcaSlicer", "estimated_time": 2081}
+        for state in ("paused", "cancelled", "error", "standby"):
+            status["print_stats"]["state"] = state
+            self.assertIsNone(plugin.print_metrics(status, metadata)["remaining"])
+        status["print_stats"]["state"] = "printing"
+        self.assertAlmostEqual(plugin.print_metrics(status, metadata)["remaining"], 1331.84)
+        status["display_status"]["progress"] = .30966
+        self.assertIsNone(plugin.print_metrics(status, metadata)["remaining"])
+        status["display_status"]["progress"] = 1
+        result = plugin.print_metrics(status, metadata)
+        self.assertEqual(result["phase"], "finishing")
+        self.assertIsNone(result["remaining"])
+        status["print_stats"]["state"] = "complete"
+        result = plugin.print_metrics(status, metadata)
+        self.assertEqual((result["remaining"], result["progress"]), (0, 1))
+
+    def test_metadata_cache_tracks_run_resets_and_refreshes_with_bounded_retry(self):
+        printer = plugin.Printer("http://printer.local")
+        status = self.estimate_status()
+        printer.http.query_objects = Mock(return_value=status)
+        printer.http.file_metadata = Mock(return_value={"slicer": "OrcaSlicer", "estimated_time": 2081,
+                                                        "modified": 1})
+        with patch.object(plugin.time, "monotonic", return_value=100) as clock:
+            self.assertAlmostEqual(printer.status()["stats"]["remaining"], 1331.84)
+            queries = printer.http.query_objects.call_args.args
+            self.assertIn(plugin.ObjectQuery("gcode_move", ("speed_factor",)), queries)
+            self.assertIn(plugin.ObjectQuery("virtual_sdcard", ("progress", "file_position", "file_size")), queries)
+            for state in ("paused", "printing"):
+                status["print_stats"]["state"] = state
+                printer.status()
+            self.assertEqual(printer.http.file_metadata.call_count, 1)
+            clock.return_value = 130
+            printer.http.file_metadata.return_value = {"slicer": "OrcaSlicer", "estimated_time": 3000,
+                                                        "modified": 2}
+            self.assertEqual(printer.status()["stats"]["planned_total"], 3000)
+            printer.http.file_metadata.side_effect = RuntimeError("Unavailable")
+            clock.return_value = 160
+            self.assertIsNone(printer.status()["stats"]["planned_total"])
+            before = printer.http.file_metadata.call_count
+            printer.status()
+            self.assertEqual(printer.http.file_metadata.call_count, before)
+            for section, field, value in [("print_stats", "filename", "second.gcode"),
+                                          ("print_stats", "total_duration", 1),
+                                          ("virtual_sdcard", "file_position", 1),
+                                          ("virtual_sdcard", "file_size", 2000)]:
+                before = printer.http.file_metadata.call_count
+                status[section][field] = value
+                self.assertIsNone(printer.status()["stats"]["planned_total"])
+                self.assertEqual(printer.http.file_metadata.call_count, before + 1)
+                printer.status()
+                self.assertEqual(printer.http.file_metadata.call_count, before + 1)
+            # Same-name reprint after completion fetches immediately, even after failure.
+            status["print_stats"]["state"] = "complete"
+            printer.status()
+            status["print_stats"]["state"] = "printing"
+            before = printer.http.file_metadata.call_count
+            printer.status()
+            self.assertEqual(printer.http.file_metadata.call_count, before + 1)
+            clock.return_value = 190
+            printer.http.file_metadata.side_effect = None
+            printer.http.file_metadata.return_value = []
+            self.assertIsNone(printer.status()["stats"]["planned_total"])
+            before = printer.http.file_metadata.call_count
+            printer.status()
+            self.assertEqual(printer.http.file_metadata.call_count, before)
+            clock.return_value = 220
+            printer.http.file_metadata.return_value = {"slicer": "OrcaSlicer", "estimated_time": 2081}
+            self.assertEqual(printer.status()["stats"]["planned_total"], 2081)
+
+    def test_metadata_size_must_match_the_active_reader_when_available(self):
+        printer = plugin.Printer("http://printer.local")
+        printer.http.query_objects = Mock(return_value=self.estimate_status())
+        printer.http.file_metadata = Mock(return_value={"slicer": "OrcaSlicer", "estimated_time": 2081,
+                                                        "size": 2000})
+        self.assertIsNone(printer.status()["stats"]["planned_total"])
+        printer.metadata_retry_at = 0
+        printer.http.file_metadata.return_value["size"] = 1000
+        self.assertAlmostEqual(printer.status()["stats"]["remaining"], 1331.84)
+
+    def test_file_metadata_encodes_filename_and_uses_authenticated_transport(self):
+        client = plugin.HttpClient("http://printer.local", "secret")
+        with patch.object(client, "json", return_value={"result": {"estimated_time": 2081}}) as request:
+            self.assertEqual(client.file_metadata("folder/a & b.gcode"), {"estimated_time": 2081})
+            request.assert_called_once_with("/server/files/metadata?filename=folder%2Fa%20%26%20b.gcode", None)
+
     def test_print_metrics_follow_active_physical_tool(self):
         status = {"print_stats": {"state": "printing", "total_duration": 4200,
                                   "print_duration": 3600,
@@ -233,7 +369,7 @@ class ClientTests(unittest.TestCase):
                   "heater_bed": {"temperature": 70, "target": 75}}
         result = plugin.print_metrics(status)
         self.assertEqual((result["tool"], result["material"], result["color"]), (2, "PETG", "#12AB34"))
-        self.assertEqual((result["elapsed"], result["remaining"]), (4200, 3600))
+        self.assertEqual((result["elapsed"], result["remaining"]), (4200, None))
         self.assertEqual(result["hotend"]["temperature"], 235)
         self.assertEqual(result["current_layer"], 100)
         status["display_status"]["progress"] = 0

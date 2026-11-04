@@ -25,7 +25,7 @@ class Links(HTMLParser):
 
 
 class ScreenshotTests(unittest.TestCase):
-    def test_all_four_states_render_and_switch_without_host_requests(self):
+    def test_all_preview_states_render_and_switch_without_host_requests(self):
         with tempfile.TemporaryDirectory() as directory:
             entry = screenshots.prepare(directory)
             for document in [entry, Path(directory) / "showcase.html"]:

@@ -52,21 +52,43 @@ def nonnegative(value):
     return value if type(value) in (int, float) and math.isfinite(value) and value >= 0 else None
 
 
-def print_metrics(status):
+def print_metrics(status, metadata=None):
     stats = status.get("print_stats") or {}
     state = stats.get("state", "Unknown")
-    progress = nonnegative((status.get("display_status") or {}).get("progress"))
-    if progress is None:
-        progress = nonnegative((status.get("virtual_sdcard") or {}).get("progress"))
-    progress = min(progress, 1) if progress is not None else None
-    if state == "complete":
-        progress = 1
+
+    def fraction(value):
+        value = nonnegative(value)
+        return value if value is not None and value <= 1 else None
+
+    def layer(value):
+        value = nonnegative(value)
+        return value if value is not None and value == int(value) else None
+
+    display = fraction((status.get("display_status") or {}).get("progress"))
+    byte_progress = fraction((status.get("virtual_sdcard") or {}).get("progress"))
+    progress = display if display is not None else byte_progress
     duration = nonnegative(stats.get("print_duration"))
-    # Progress-based estimate; the firmware does not expose M73 remaining time.
-    remaining = (duration * (1 - progress) / progress
-                 if progress and duration and state in ("printing", "paused") else None)
+    info = stats.get("info") or {}
+    current, total = layer(info.get("current_layer")), layer(info.get("total_layer"))
+    phase = "unknown"  # Missing or contradictory layer markers cannot establish a phase.
+    if current is not None and (total is None or current <= total):
+        phase = "preparing" if current == 0 else "printing"
+    metadata = metadata if isinstance(metadata, dict) else {}
+    planned = nonnegative(metadata.get("estimated_time")) or None
+    speed = nonnegative((status.get("gcode_move") or {}).get("speed_factor"))
+    # Standard U1 fallback equals byte progress; retained Orca M73 is integer percent.
+    m73 = (metadata.get("slicer") == "OrcaSlicer" and planned is not None
+           and display is not None and byte_progress is not None
+           and abs(display - byte_progress) > 0.000001
+           and abs(display * 100 - round(display * 100)) <= 0.000001)
+    remaining = None
+    if state == "printing" and phase == "printing" and m73:
+        if display == 1:
+            phase = "finishing"  # M73 is complete but the printer still has work to finish.
+        elif speed is not None and abs(speed - 1) <= 0.000001:
+            remaining = planned * (1 - display)
     if state == "complete":
-        remaining = 0
+        progress, remaining = 1, 0
     name = (status.get("toolhead") or {}).get("extruder")
     match = re.fullmatch(r"extruder([1-3]?)", name) if isinstance(name, str) else None
     index = int(match[1] or 0) if match else None
@@ -79,12 +101,11 @@ def print_metrics(status):
     color = filament("filament_color_rgba")
     color = "#" + color[:6] if isinstance(color, str) and re.fullmatch(r"[0-9a-fA-F]{8}", color) else None
     material = filament("filament_type")
-    info = stats.get("info") or {}
     return {"state": state, "progress": progress,
-            "current_layer": nonnegative(info.get("current_layer")),
-            "total_layer": nonnegative(info.get("total_layer")),
+            "current_layer": current,
+            "total_layer": total,
             "elapsed": nonnegative(stats.get("total_duration")), "printing_duration": duration,
-            "remaining": remaining,
+            "remaining": remaining, "planned_total": planned, "phase": phase,
             "tool": index, "material": material if isinstance(material, str) and material != "NONE" else None,
             "color": color, "bed": status.get("heater_bed") or {},
             "hotend": status.get(name) or {} if match else {}}
@@ -96,6 +117,9 @@ class Printer:
         self.last_hash = None
         self.changed_at = time.monotonic()
         self.frame_times = deque(maxlen=30)
+        self.previous_run = None
+        self.metadata = None
+        self.metadata_retry_at = 0
 
     def start_monitor(self):
         self.http.start_monitor()
@@ -122,14 +146,42 @@ class Printer:
     def status(self):
         status = self.http.query_objects(ObjectQuery("webhooks"), ObjectQuery("print_stats"),
                                          ObjectQuery("led cavity_led"), ObjectQuery("display_status"),
-                                         ObjectQuery("virtual_sdcard", ("progress",)),
+                                         ObjectQuery("virtual_sdcard", ("progress", "file_position", "file_size")),
+                                         ObjectQuery("gcode_move", ("speed_factor",)),
                                          ObjectQuery("toolhead", ("extruder",)),
                                          ObjectQuery("print_task_config", ("filament_type", "filament_color_rgba")),
                                          *(ObjectQuery(name, ("temperature", "target")) for name in
                                            ("heater_bed", "extruder", "extruder1", "extruder2", "extruder3")))
+        stats = status.get("print_stats") or {}
+        sd = status.get("virtual_sdcard") or {}
+        state = stats.get("state")
+        active = state in ("printing", "paused")
+        filename = stats.get("filename")
+        run = (state, filename, nonnegative(stats.get("total_duration")),
+               nonnegative(sd.get("file_position")), nonnegative(sd.get("file_size")))
+        previous = self.previous_run
+        new_run = (previous is None or filename != previous[1] or run[4] != previous[4]
+                   or active and previous[0] not in ("printing", "paused")
+                   or any(run[i] is not None and previous[i] is not None and run[i] < previous[i]
+                          for i in (2, 3)))
+        self.previous_run = run
+        if new_run or not active:
+            self.metadata, self.metadata_retry_at = None, 0
+        now = time.monotonic()
+        if active and isinstance(filename, str) and filename and now >= self.metadata_retry_at:
+            self.metadata_retry_at = now + 30
+            self.metadata = None
+            try:
+                metadata = self.http.file_metadata(filename)
+                if isinstance(metadata, dict) and nonnegative(metadata.get("estimated_time")):
+                    size = nonnegative(metadata.get("size"))
+                    if size is None or run[4] is None or size == run[4]:
+                        self.metadata = metadata
+            except Exception:
+                pass  # Optional metadata must not hide live printer status.
         led = status.get("led cavity_led", {}).get("color_data")
         return {"printer": status.get("print_stats", {}).get("state", "Unknown"),
-                "light": bool(led[0][3]) if led else None, "stats": print_metrics(status)}
+                "light": bool(led[0][3]) if led else None, "stats": print_metrics(status, self.metadata)}
 
     def set_light(self, enabled):
         self.http.set_light(LightCommand(enabled))

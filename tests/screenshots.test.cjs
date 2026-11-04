@@ -44,12 +44,20 @@ const settle = () => new Promise((resolve) => setImmediate(resolve));
           phase === 'printing',
           'Only running prints show an ETA',
         );
-        assert.equal(
-          visible(get('progress-bar')),
-          phase !== 'preparing',
-          'Preparation does not imply print progress',
-        );
+        assert.equal(visible(get('progress-bar')), true);
         assert.equal(visible(get('stats-message')), phase === 'preparing');
+        assert.equal(visible(get('plan-value')), phase === 'preparing');
+        if (phase === 'preparing') {
+          assert.match(get('plan-stat').textContent, /35m\s*\+ preparation/);
+          assert.equal(visible(get('finish-value')), true);
+          assert.match(get('finish-value').textContent, /^after /);
+          assert.equal(get('progress-bar').hasAttribute('aria-valuenow'), false);
+          assert.equal(
+            get('progress-bar').getAttribute('aria-valuetext'),
+            'Preparation in progress',
+          );
+          assert.equal(get('elapsed-value').textContent, '01:36');
+        }
         assert.equal(visible(get('tool-value')), phase !== 'complete');
         if (phase === 'complete') {
           const bar = get('progress-bar');
@@ -84,9 +92,76 @@ const settle = () => new Promise((resolve) => setImmediate(resolve));
       dom.window.close();
     }
   }
-  console.log(
-    'Four compiled screenshot states render and keyboard switching makes no host requests.',
-  );
+  const previewErrors = [];
+  const previewConsole = new VirtualConsole();
+  previewConsole.on('jsdomError', (error) => previewErrors.push(error));
+  const preview = new JSDOM(fs.readFileSync(`${directory}/index.html`, 'utf8'), {
+    runScripts: 'dangerously',
+    virtualConsole: previewConsole,
+  });
+  try {
+    await settle();
+    const doc = preview.window.document;
+    const picker = doc.getElementById('preview-state');
+    const cases = {
+      printing: 'printing',
+      preparing: 'preparing',
+      'preparing-warm': 'preparing',
+      paused: 'paused',
+      finishing: 'printing',
+      complete: 'complete',
+      cancelled: 'cancelled',
+      error: 'error',
+      standby: 'standby',
+      unavailable: 'unavailable',
+      'phase-unknown': 'printing',
+      'plan-only': 'printing',
+      'preparing-no-plan': 'preparing',
+    };
+    assert.deepEqual(
+      Array.from(picker.options, (option) => option.value),
+      Object.keys(cases),
+    );
+    for (const [state, rendered] of Object.entries(cases)) {
+      picker.value = state;
+      picker.dispatchEvent(new preview.window.Event('change', { bubbles: true }));
+      await settle();
+      assert.equal(doc.getElementById('stats').dataset.state, rendered, state);
+      assert.equal(picker.value, state);
+      if (['phase-unknown', 'plan-only', 'preparing-no-plan'].includes(state))
+        assert.equal(doc.getElementById('printer').textContent, 'Printing');
+      assert.equal(
+        doc.getElementById('progress-bar').hasAttribute('data-shimmer'),
+        [
+          'printing',
+          'preparing',
+          'preparing-warm',
+          'paused',
+          'finishing',
+          'phase-unknown',
+          'plan-only',
+          'preparing-no-plan',
+        ].includes(state),
+      );
+      const bar = doc.getElementById('progress-bar');
+      if (state === 'preparing') assert.equal(bar.hasAttribute('data-heating'), true);
+      if (state === 'preparing-warm') assert.equal(bar.hasAttribute('data-heating'), false);
+      if (state === 'finishing')
+        assert.equal(doc.getElementById('stats-state').textContent, 'Finishing');
+      if (state === 'phase-unknown')
+        assert.equal(doc.getElementById('stats-state').textContent, 'Printing');
+      if (state === 'preparing-no-plan') assert.equal(doc.getElementById('plan-stat').hidden, true);
+    }
+    doc.body.dispatchEvent(
+      new preview.window.KeyboardEvent('keydown', { key: '1', bubbles: true }),
+    );
+    await settle();
+    assert.equal(picker.value, 'printing', 'Keyboard shortcuts keep the picker in sync');
+    assert.deepEqual(previewErrors, []);
+  } finally {
+    preview.window.close();
+  }
+  console.log('All 13 preview states render; the four showcase states retain keyboard switching.');
 })().catch((error) => {
   console.error(error);
   process.exitCode = 1;

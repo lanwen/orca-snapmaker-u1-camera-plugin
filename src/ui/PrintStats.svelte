@@ -4,17 +4,33 @@
   const number = (value: unknown): value is number =>
     typeof value === 'number' && Number.isFinite(value) && value >= 0;
   const layer = (value: unknown) => (number(value) ? Math.floor(value).toLocaleString() : '—');
-  function duration(value: unknown) {
+  function duration(value: unknown, estimate = false) {
     if (!number(value)) return '—';
-    const minutes = Math.floor(value / 60);
+    const minutes = estimate ? Math.ceil(value / 60) : Math.floor(value / 60);
     return value === 0
       ? '0m'
       : minutes < 1
         ? '<1m'
         : (minutes >= 60 ? Math.floor(minutes / 60) + 'h ' : '') + (minutes % 60) + 'm';
   }
+  function elapsedClock(value: unknown) {
+    if (!number(value)) return '—';
+    const seconds = Math.floor(value);
+    const minutes = Math.floor(seconds / 60);
+    const pad = (part: number) => String(part).padStart(2, '0');
+    return (
+      (minutes >= 60 ? Math.floor(minutes / 60) + ':' : '') +
+      pad(minutes % 60) +
+      ':' +
+      pad(seconds % 60)
+    );
+  }
   function temperature(value: Heater = {}, showTarget = true) {
     const degrees = (item: unknown) => (number(item) ? Math.round(item) : '—');
+    if (!number(value.temperature))
+      return showTarget && number(value.target) && value.target > 0
+        ? 'Target ' + degrees(value.target) + ' °C'
+        : '';
     const target =
       showTarget &&
       number(value.target) &&
@@ -24,7 +40,7 @@
   }
   const states: Record<string, string> = {
     printing: 'Printing', // Active print, with progress and estimates.
-    preparing: 'Preparing', // Job started before extrusion or the first layer.
+    preparing: 'Preparing', // Before the first model layer, including early purge.
     paused: 'Paused', // Interrupted print, without a finish estimate.
     complete: 'Complete', // Finished print, with cooling temperatures.
     error: 'Error', // Failed job.
@@ -32,14 +48,20 @@
     standby: 'Standby', // No job running.
     unavailable: 'Status unavailable', // Status missing or older than ten seconds.
   };
-  // No extrusion time or first layer yet: preparation, even if the file has started.
-  const preparing = $derived(
-    stats?.state === 'printing' &&
-      stats.printing_duration === 0 &&
-      (!number(stats.current_layer) || stats.current_layer === 0),
-  );
+  const preparing = $derived(stats?.state === 'printing' && stats.phase === 'preparing');
   const state = $derived(preparing ? 'preparing' : (stats?.state ?? 'unavailable'));
   const printing = $derived(state === 'printing');
+  const activePrint = $derived(stats?.state === 'printing' || stats?.state === 'paused');
+  const showEstimate = $derived(
+    printing && stats?.phase === 'printing' && number(stats?.remaining),
+  );
+  const showPlan = $derived(
+    (printing || preparing) && !showEstimate && number(stats?.planned_total),
+  );
+  const preparationFinish = $derived(
+    preparing && number(stats?.planned_total) && stats.planned_total > 0,
+  );
+  const showFinish = $derived(showEstimate || preparationFinish);
   const standby = $derived(state === 'standby');
   const missing = $derived(state === 'unavailable');
   const terminal = $derived(['complete', 'cancelled', 'error'].includes(state));
@@ -64,15 +86,26 @@
           : '',
   );
   const progress = $derived(number(stats?.progress) ? Math.min(100, stats.progress * 100) : null);
+  const indeterminate = $derived(preparing || (activePrint && !progress));
   const color = $derived(
     typeof stats?.color === 'string' && /^#[0-9a-f]{6}$/i.test(stats.color)
       ? stats.color.toUpperCase()
       : null,
   );
+  const showTool = $derived(
+    !terminal && !standby && Number.isInteger(stats?.tool) && number(stats?.tool) && stats.tool < 4,
+  );
+  const showMaterial = $derived(
+    !standby && state !== 'error' && Boolean(showTool || stats?.material || color),
+  );
+  const bedTemperature = $derived(temperature(stats?.bed, !terminal && !standby));
+  const hotendTemperature = $derived(temperature(stats?.hotend, !terminal && !standby));
   const finish = $derived(
-    stats?.state === 'printing' && number(stats.remaining)
-      ? new Date(receivedAt + stats.remaining * 1000)
-      : null,
+    preparationFinish && number(stats?.planned_total)
+      ? new Date(receivedAt + stats.planned_total * 1000)
+      : showEstimate && number(stats?.remaining)
+        ? new Date(receivedAt + stats.remaining * 1000)
+        : null,
   );
   const finishTime = $derived(
     finish && Number.isFinite(finish.getTime())
@@ -88,56 +121,103 @@
 <section id="stats" aria-labelledby="stats-title" tabindex="0" hidden={!stats} data-state={state}>
   <h2 id="stats-title">Print statistics</h2>
   <div class="stats-gauge">
-    <span id="stats-state">{states[state] ?? 'Unknown'}</span>
-    <span id="stats-message" hidden={!missing && !standby && !preparing}>{message}</span>
-    <strong id="progress-value" hidden={standby || preparing || missing}
-      >{progress === null ? '—' : Math.floor(progress) + '%'}</strong
+    <span id="stats-state" hidden={!states[state]}
+      >{printing && stats?.phase === 'finishing' ? 'Finishing' : (states[state] ?? '')}</span
     >
-    <div id="layers-stat" class="layers" hidden={standby || preparing || missing}>
+    <div class="stats-primary">
+      <span id="stats-message" hidden={!message}>{message}</span>
+      <strong id="progress-value" hidden={standby || preparing || missing || progress === null}
+        >{progress === null ? '—' : Math.floor(progress) + '%'}</strong
+      >
+    </div>
+    <div
+      id="layers-stat"
+      class="layers"
+      hidden={standby ||
+        preparing ||
+        missing ||
+        !number(stats?.current_layer) ||
+        !number(stats?.total_layer)}
+    >
       Layers<span id="layers-value"
         >{layer(stats?.current_layer)} / {layer(stats?.total_layer)}</span
       >
     </div>
   </div>
-  <div id="journey-stat" class="stats-journey" hidden={standby || preparing || missing}>
-    <div id="remaining-stat" hidden={!printing}>
-      <strong id="remaining-value"
-        >{number(stats?.remaining) ? '≈ ' + duration(stats.remaining) : '—'}</strong
-      ><span>left</span>
+  <div id="journey-stat" class="stats-journey" hidden={standby || missing}>
+    <div id="remaining-stat" hidden={!showEstimate}>
+      <strong id="remaining-value">
+        {#if number(stats?.remaining)}
+          <small class="approximation">≈</small> {duration(stats.remaining, true)}
+        {:else}—{/if}
+      </strong><span>left</span>
+    </div>
+    <div id="plan-stat" hidden={!showPlan}>
+      <strong id="plan-value">
+        {#if number(stats?.planned_total)}
+          <small class="approximation">≈</small> {duration(stats.planned_total, true)}
+        {:else}—{/if}
+      </strong>
+      <span id="plan-caption" hidden={!preparing}>+ preparation</span>
     </div>
     <div
       id="progress-bar"
+      hidden={!activePrint && progress === null}
+      data-indeterminate={indeterminate || undefined}
+      data-shimmer={activePrint || undefined}
+      data-heating={(preparing && heating) || undefined}
       role="progressbar"
-      aria-label="Print progress"
+      aria-label={preparing
+        ? 'Preparing print'
+        : indeterminate
+          ? 'Print activity'
+          : 'Print progress'}
       aria-valuemin="0"
       aria-valuemax="100"
-      aria-valuenow={progress === null ? undefined : Math.floor(progress)}
-      aria-valuetext={progress === null
-        ? 'Progress unavailable'
-        : Math.floor(progress) + '% complete'}
+      aria-valuenow={indeterminate || progress === null ? undefined : Math.floor(progress)}
+      aria-valuetext={preparing
+        ? 'Preparation in progress'
+        : stats?.state === 'paused'
+          ? 'Print paused'
+          : progress === null
+            ? 'Print in progress'
+            : Math.floor(progress) + '% complete'}
     >
-      <span id="progress-fill" style:width={(progress ?? 0) + '%'}></span>
+      <span id="progress-fill" style:width={(indeterminate ? 100 : (progress ?? 0)) + '%'}></span>
     </div>
-    <dl class="stats-times">
-      <div>
+    <dl class="stats-times" hidden={!number(stats?.elapsed) && !showFinish}>
+      <div hidden={!number(stats?.elapsed)}>
         <dt>Elapsed</dt>
-        <dd id="elapsed-value">{duration(stats?.elapsed)}</dd>
+        <dd id="elapsed-value" title="Printer-reported elapsed time, to the second">
+          {elapsedClock(stats?.elapsed)}
+        </dd>
       </div>
-      <div id="finish-stat" hidden={!printing}>
+      <div id="finish-stat" hidden={!showFinish}>
         <dt>Est. finish</dt>
-        <dd id="finish-value">{finishTime}</dd>
+        <dd
+          id="finish-value"
+          title={preparationFinish
+            ? 'Slicer plan from this update; preparation adds time.'
+            : undefined}
+        >
+          {preparationFinish ? 'after ' : ''}{finishTime}
+        </dd>
       </div>
     </dl>
   </div>
-  <div id="hardware-stat" class="stats-details" hidden={missing}>
-    <div id="material-stat" class="material" hidden={standby || state === 'error'}>
-      <span id="tool-stat" hidden={terminal || standby}
+  <div
+    id="hardware-stat"
+    class="stats-details"
+    hidden={missing || (!showMaterial && !bedTemperature && !hotendTemperature)}
+  >
+    <div id="material-stat" class="material" hidden={!showMaterial}>
+      <span id="tool-stat" hidden={!showTool}
         ><span id="tool-value" title="Toolhead"
           >{Number.isInteger(stats?.tool) && number(stats?.tool) && stats.tool < 4
             ? 'T' + stats.tool
             : '—'}</span
         ></span
-      ><span id="material-value">{stats?.material || 'Unknown material'}</span><span
+      ><span id="material-value" hidden={!stats?.material}>{stats?.material ?? ''}</span><span
         id="material-swatch"
         aria-hidden="true"
         hidden={!color}
@@ -145,13 +225,13 @@
       ></span>
     </div>
     <dl class="temperatures">
-      <div>
+      <div hidden={!bedTemperature}>
         <dt id="bed-label">Bed</dt>
-        <dd id="bed-value">{temperature(stats?.bed, !terminal && !standby)}</dd>
+        <dd id="bed-value">{bedTemperature}</dd>
       </div>
-      <div>
+      <div hidden={!hotendTemperature}>
         <dt id="hotend-label">Hotend</dt>
-        <dd id="hotend-value">{temperature(stats?.hotend, !terminal && !standby)}</dd>
+        <dd id="hotend-value">{hotendTemperature}</dd>
       </div>
     </dl>
   </div>
@@ -161,9 +241,9 @@
   #stats {
     grid-column: 1 / -1;
     display: grid;
-    grid-template-columns: 100px minmax(0, 1fr) 185px;
+    grid-template-columns: 110px minmax(0, 1fr) 185px;
     gap: 18px;
-    width: 666px;
+    width: 720px;
     max-width: 100%;
     padding: 16px;
     border: 1px solid transparent;
@@ -171,6 +251,7 @@
     background: transparent;
     pointer-events: auto;
     font-variant-numeric: tabular-nums;
+    line-height: 1.2;
     text-shadow: 0 1px 4px #0009;
   }
   #stats:hover,
@@ -185,10 +266,22 @@
     outline-offset: 3px;
   }
   .stats-gauge {
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    gap: 8px;
+    display: grid;
+    grid-template-rows: 16px 44px 16px;
+    align-content: start;
+    gap: 6px;
+  }
+  .stats-primary {
+    display: grid;
+    grid-row: 2;
+    align-items: center;
+    min-width: 0;
+  }
+  .stats-primary > * {
+    grid-area: 1 / 1;
+  }
+  #stats:is([data-state='standby'], [data-state='unavailable']) .stats-gauge {
+    grid-template-rows: 16px auto;
   }
   #stats-title {
     position: absolute;
@@ -198,6 +291,7 @@
     clip-path: inset(50%);
   }
   #stats-state {
+    grid-row: 1;
     display: inline-flex;
     align-items: center;
     gap: 6px;
@@ -231,9 +325,10 @@
     font-size: 42px;
     font-weight: 550;
     letter-spacing: -2px;
-    line-height: 1;
   }
   .layers {
+    grid-row: 3;
+    align-self: center;
     color: #c0cbd5;
     font-size: 10px;
   }
@@ -241,28 +336,61 @@
     margin-left: 4px;
   }
   .stats-journey {
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    gap: 10px;
+    display: grid;
+    grid-template-rows: 32px 4px 32px;
+    align-content: start;
+    gap: 8px;
     border-left: 1px solid #ffffff28;
     padding-left: 18px;
+  }
+  #remaining-stat,
+  #plan-stat {
+    grid-area: 1 / 1;
+    align-self: start;
+  }
+  #plan-stat {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0 6px;
   }
   #remaining-stat {
     display: flex;
     align-items: baseline;
     gap: 7px;
   }
+  #remaining-value,
+  #plan-value {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.2em;
+  }
   #remaining-value {
     font-size: 22px;
     font-weight: 550;
     letter-spacing: -0.6px;
   }
+  .approximation {
+    color: #96a4b3;
+    font-size: 0.6em;
+    font-weight: 400;
+    letter-spacing: 0;
+  }
   #remaining-stat span {
     color: #c0cbd5;
     font-size: 10px;
   }
+  #plan-value {
+    font-size: 22px;
+    font-weight: 550;
+  }
+  #plan-caption {
+    color: #c0cbd5;
+    font-size: 11px;
+    font-weight: 400;
+  }
   #progress-bar {
+    grid-area: 2 / 1;
     height: 4px;
     overflow: hidden;
     border-radius: 99px;
@@ -270,10 +398,55 @@
   }
   #progress-fill {
     display: block;
+    position: relative;
+    overflow: hidden;
     width: 0;
     height: 100%;
     border-radius: inherit;
     background: #7abaff;
+  }
+  #progress-bar[data-indeterminate] #progress-fill {
+    background: #a0cbff38;
+  }
+  #progress-bar[data-heating] {
+    --progress-highlight: #ffbb77;
+  }
+  #progress-bar[data-heating] #progress-fill {
+    background: #ffaf6538;
+  }
+  #progress-bar[data-shimmer] #progress-fill::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+      90deg,
+      transparent,
+      var(--progress-highlight, #a0cbff),
+      transparent
+    );
+    transform: translateX(-100%);
+    animation: progress-shimmer 2.4s ease-in-out infinite;
+  }
+  #stats[data-state='printing'] #progress-fill::after {
+    --progress-highlight: #e0f2ff;
+    opacity: 1;
+    animation-duration: 3.2s;
+  }
+  #stats[data-state='paused'] #progress-fill::after {
+    --progress-highlight: #fff4d9;
+    opacity: 1;
+    animation-duration: 3.2s;
+  }
+  @keyframes progress-shimmer {
+    to {
+      transform: translateX(100%);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    #progress-bar[data-shimmer] #progress-fill::after {
+      animation: none;
+      transform: none;
+    }
   }
   #stats[data-state='complete'] #progress-fill {
     background: #72dec2;
@@ -288,35 +461,44 @@
     background: #ff9999;
   }
   .stats-times {
-    display: flex;
-    justify-content: space-between;
+    grid-area: 3 / 1;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
     gap: 10px;
     margin: 0;
+  }
+  .stats-times > div:first-child {
+    grid-area: 1 / 1;
+  }
+  .stats-times > div:last-child {
+    grid-area: 1 / 2;
+    text-align: right;
   }
   #stats dt {
     margin-bottom: 4px;
     color: #c0cbd5;
     font-size: 10px;
-    line-height: 1.2;
   }
   #stats dd {
     margin: 0;
     color: #edf3f9;
     font-size: 12px;
     font-weight: 500;
-    line-height: 1.3;
   }
   #stats #finish-value {
     overflow-wrap: anywhere;
   }
   .stats-details {
     display: grid;
+    grid-template-rows: 30px 40px;
     align-content: center;
     gap: 10px;
     border-left: 1px solid #ffffff28;
     padding-left: 18px;
   }
   .material {
+    grid-area: 1 / 1;
+    align-self: center;
     display: flex;
     align-items: center;
     gap: 8px;
@@ -331,7 +513,6 @@
     background: #ffffff0d;
     font-size: 11px;
     font-weight: 600;
-    line-height: 1;
   }
   #material-value {
     overflow-wrap: anywhere;
@@ -345,9 +526,17 @@
     background: transparent;
   }
   .temperatures {
+    grid-area: 2 / 1;
     display: grid;
+    grid-template-rows: 16px 16px;
     gap: 7px;
     margin: 0;
+  }
+  .temperatures > div:first-child {
+    grid-area: 1 / 1;
+  }
+  .temperatures > div:last-child {
+    grid-area: 2 / 1;
   }
   .temperatures > div {
     display: flex;
@@ -361,22 +550,15 @@
   #stats .temperatures dd {
     white-space: nowrap;
   }
-  #stats:is(
-    [data-state='complete'],
-    [data-state='paused'],
-    [data-state='cancelled'],
-    [data-state='error']
-  ) {
-    width: 540px;
-    grid-template-columns: 100px minmax(0, 1fr) 180px;
-  }
   #stats[data-state='standby'] {
     width: 320px;
     grid-template-columns: 1fr 1fr;
   }
-  #stats[data-state='preparing'] {
-    width: 560px;
-    grid-template-columns: minmax(0, 1fr) 185px;
+  #stats[data-state='standby'] .stats-details {
+    grid-template-rows: auto;
+  }
+  #stats[data-state='standby'] .temperatures {
+    grid-area: auto;
   }
   #stats[data-state='unavailable'] {
     width: 360px;
@@ -385,20 +567,12 @@
   #stats-message {
     font-size: 16px;
     font-weight: 500;
-    line-height: 1.4;
   }
   #stats[data-state='preparing'] #stats-message {
-    font-size: 22px;
+    font-size: 18px;
   }
   @media (max-width: 650px) {
-    #stats,
-    #stats:is(
-      [data-state='complete'],
-      [data-state='paused'],
-      [data-state='cancelled'],
-      [data-state='error'],
-      [data-state='preparing']
-    ) {
+    #stats {
       width: 480px;
       grid-template-columns: 90px minmax(0, 1fr);
       gap: 12px;
@@ -406,10 +580,8 @@
     #progress-value {
       font-size: 36px;
     }
-    #stats[data-state='preparing'] .stats-gauge {
-      grid-column: 1 / -1;
-    }
     .stats-journey {
+      grid-template-rows: 48px 4px 48px;
       padding-left: 12px;
     }
     .stats-details {
@@ -418,11 +590,17 @@
       border-top: 1px solid #ffffff28;
       padding: 10px 0 0;
       grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+      grid-template-rows: 32px;
       align-items: center;
     }
     .temperatures {
+      grid-area: 1 / 2;
       grid-template-columns: 1fr 1fr;
+      grid-template-rows: 32px;
       gap: 12px;
+    }
+    .temperatures > div:last-child {
+      grid-area: 1 / 2;
     }
     .temperatures > div {
       display: block;
@@ -439,11 +617,19 @@
     }
     #stats[data-state='standby'] .temperatures {
       grid-template-columns: 1fr;
+      grid-template-rows: 32px 32px;
+    }
+    #stats[data-state='standby'] .temperatures > div:last-child {
+      grid-area: 2 / 1;
     }
   }
   @media (max-width: 420px) {
     .stats-details {
       grid-template-columns: 1fr;
+      grid-template-rows: 30px 32px;
+    }
+    .temperatures {
+      grid-area: 2 / 1;
     }
   }
 </style>

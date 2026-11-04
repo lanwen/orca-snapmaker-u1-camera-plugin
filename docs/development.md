@@ -72,9 +72,20 @@ See [release automation](releases.md) for versioning and publishing.
 ## README screenshots
 
 Run `mise run screenshots:prepare`, then open `dist/screenshots/index.html` in a browser.
+Use the preview state picker to inspect all print states, including heating, warm preparation, unavailable estimates, errors, and idle status.
+The four-state showcase remains a separate view for README screenshots.
 The four standalone views include a simulated Orca window and the selected Snapmaker U1 tab.
 They use the production camera page with fixed sample data and make no printer requests.
 No Orca installation is needed.
+
+For repeated reviews with dependencies already installed, rebuild the self-contained preview directly:
+
+```sh
+mise exec -- python scripts/build.py
+mise exec -- python scripts/prepare_screenshots.py
+```
+
+Open or refresh `dist/screenshots/index.html` and review affected states at desktop and narrow widths.
 
 The default camera image and app chrome come from the existing README screenshot.
 To use another local camera frame, run `python scripts/prepare_screenshots.py --camera /path/to/frame.jpg`.

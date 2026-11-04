@@ -24,6 +24,8 @@ window.orca = {
         image: message.playing ? image : undefined,
         stats: {
           state: 'printing',
+          phase: 'printing',
+          planned_total: 5200,
           progress: 0.42,
           current_layer: 36,
           total_layer: 86,

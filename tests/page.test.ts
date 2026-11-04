@@ -61,6 +61,8 @@ const lastMessage = () => {
 const frames = () => sent.filter((message) => message.type === 'frame');
 const metrics = {
   state: 'printing',
+  phase: 'printing' as const,
+  planned_total: 2081,
   progress: 0.426,
   current_layer: 128,
   total_layer: 300,
@@ -100,8 +102,7 @@ test('print statistics display incoming measurements while the camera is stopped
     'Progress rounds down to a whole percent',
   );
   assert.deepEqual(numbers(field('layers-value')), [128, 300]);
-  assert.match(field('elapsed-value').textContent!, /1\s*(?:h|hour)/i);
-  assert.match(field('elapsed-value').textContent!, /10\s*(?:m|min)/i);
+  assert.equal(field('elapsed-value').textContent, '1:10:00');
   assert.deepEqual(numbers(field('remaining-value')), [1, 40]);
   assert.equal(
     field('material-value').textContent,
@@ -122,6 +123,62 @@ test('print statistics display incoming measurements while the camera is stopped
   assert.equal(lastMessage().playing, false);
 });
 
+test('elapsed time shows whole reported seconds without inventing a ticking clock', () => {
+  selectPrinter();
+  for (const [elapsed, clock] of [
+    [0, '00:00'],
+    [59.9, '00:59'],
+    [60, '01:00'],
+    [3599, '59:59'],
+    [3600, '1:00:00'],
+    [4207.9, '1:10:07'],
+    [NaN, '—'],
+  ] as const) {
+    publish({ generation: 1, stats: { ...metrics, elapsed } });
+    assert.equal(field('elapsed-value').textContent, clock);
+    advance(1000);
+    assert.equal(field('elapsed-value').textContent, clock);
+  }
+});
+
+test('preparation gives a dated after-time from the current slicer plan and no false percentage', () => {
+  vi.setSystemTime(new Date(2026, 10, 4, 23, 50, 0));
+  selectPrinter();
+  publish({
+    generation: 1,
+    stats: { ...metrics, phase: 'preparing', current_layer: 0, remaining: null },
+  });
+  const baseline = new Date(Date.now() + metrics.planned_total * 1000);
+  const expected =
+    'after ' +
+    baseline.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) +
+    ', ' +
+    baseline.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+  assert.equal(field('finish-value').textContent, expected);
+  assert.equal(progress().hasAttribute('aria-valuenow'), false);
+  publish({
+    generation: 1,
+    stats: {
+      ...metrics,
+      phase: 'preparing',
+      current_layer: 0,
+      remaining: null,
+      planned_total: null,
+    },
+  });
+  assert.equal(
+    visible(field('finish-value')),
+    false,
+    'Missing plans cannot create a finish baseline',
+  );
+  publish({
+    generation: 1,
+    stats: { ...metrics, state: 'paused', phase: 'preparing', remaining: null },
+  });
+  assert.equal(visible(field('finish-value')), false, 'A pause has no finish forecast');
+  assert.equal(progress().getAttribute('aria-valuenow'), '42');
+});
+
 test('pausing hides moving estimates and resuming restores them', () => {
   selectPrinter();
   publish({ generation: 1, stats: metrics });
@@ -136,6 +193,7 @@ test('pausing hides moving estimates and resuming restores them', () => {
   );
   assert.equal(visible(field('remaining-value')), false);
   assert.equal(visible(field('finish-value')), false);
+  assert.equal(progress().hasAttribute('data-shimmer'), true);
   assert.equal(visible(progress()), true, 'Pausing retains completed progress');
   assert.equal(visible(field('tool-value')), true);
   publish({ generation: 1, stats: metrics });
@@ -153,6 +211,7 @@ for (const state of ['complete', 'cancelled', 'error']) {
     assert.equal(visible(field('remaining-value')), false);
     assert.equal(visible(field('finish-value')), false);
     assert.equal(visible(field('tool-value')), false);
+    assert.equal(progress().hasAttribute('data-shimmer'), false);
     assert.deepEqual(numbers(field('hotend-value')), [235]);
     assert.equal(visible(progress()), true);
     if (state === 'complete') assert.equal(Number(progress().getAttribute('aria-valuenow')), 100);
@@ -171,26 +230,75 @@ test('heater targets appear only while an active heater is away from its target'
   }
 });
 
-test('preparation hides speculative progress and ETA until extrusion or the first layer', () => {
+test('the preparation bar is warm only while a reported heater is below target', () => {
   selectPrinter();
-  publish({ generation: 1, stats: { ...metrics, printing_duration: 0, current_layer: 0 } });
-  assert.equal(visible(field('stats-message')), true);
-  assert.equal(visible(progress()), false);
-  assert.equal(visible(field('remaining-value')), false);
-  assert.equal(visible(field('hotend-value')), true);
-  for (const started of [
-    { printing_duration: 0, current_layer: 1 },
-    { printing_duration: 60, current_layer: 0 },
-  ]) {
-    publish({ generation: 1, stats: { ...metrics, ...started } });
-    assert.equal(
-      visible(progress()),
-      true,
-      'Either extrusion or a first layer establishes a running print',
-    );
-    assert.equal(visible(field('stats-message')), false);
+  for (const [bed, hotend, heating] of [
+    [{ temperature: 40, target: 60 }, { temperature: 210, target: 210 }, true],
+    [{ temperature: 58, target: 60 }, { temperature: 209, target: 210 }, false],
+    [{ temperature: 60, target: 60 }, { temperature: 205, target: 210 }, true],
+    [{ temperature: NaN, target: 60 }, { temperature: 210, target: 0 }, false],
+  ] as const) {
+    publish({
+      generation: 1,
+      stats: { ...metrics, phase: 'preparing', current_layer: 0, remaining: null, bed, hotend },
+    });
+    assert.equal(progress().hasAttribute('data-heating'), heating);
+    assert.equal(progress().hasAttribute('aria-valuenow'), false);
   }
+  publish({ generation: 1, stats: metrics });
+  assert.equal(
+    progress().hasAttribute('data-heating'),
+    false,
+    'Printing stays blue even if reheating',
+  );
+  assert.equal(field('progress-fill').style.width, metrics.progress * 100 + '%');
 });
+
+test('layer-zero purge keeps preparation and its plan separate from remaining time', () => {
+  selectPrinter();
+  publish({
+    generation: 1,
+    stats: {
+      ...metrics,
+      phase: 'preparing',
+      printing_duration: 60,
+      current_layer: 0,
+      remaining: null,
+    },
+  });
+  assert.equal(field('stats-state').textContent, 'Preparing');
+  assert.equal(visible(progress()), true);
+  assert.equal(progress().hasAttribute('aria-valuenow'), false);
+  assert.equal(progress().getAttribute('aria-valuetext'), 'Preparation in progress');
+  assert.equal(visible(field('remaining-value')), false);
+  assert.equal(visible(field('plan-value')), true);
+  assert.match(field('plan-stat').textContent!, /35m\s*\+ preparation/);
+  assert.equal(visible(field('elapsed-value')), true);
+  assert.equal(visible(field('finish-value')), true);
+  assert.match(field('finish-value').textContent!, /^after /);
+  publish({ generation: 1, stats: { ...metrics, remaining: 1331.84 } });
+  assert.equal(visible(progress()), true);
+  assert.deepEqual(numbers(field('remaining-value')), [23]);
+  assert.equal(visible(field('finish-value')), true);
+  assert.equal(visible(field('plan-value')), false);
+  const finish = field('finish-value').textContent;
+  advance(3000);
+  assert.equal(field('finish-value').textContent, finish, 'No countdown between snapshots');
+});
+
+for (const phase of ['printing', 'unknown', 'finishing'] as const) {
+  test(`${phase} without an eligible estimate shows the known plan and hides unavailable estimates`, () => {
+    selectPrinter();
+    publish({ generation: 1, stats: { ...metrics, phase, remaining: null } });
+    assert.equal(visible(field('remaining-value')), false);
+    assert.equal(visible(field('plan-value')), true);
+    assert.deepEqual(numbers(field('plan-value')), [35]);
+    assert.equal(visible(field('finish-value')), false);
+    if (phase === 'unknown') assert.equal(visible(field('stats-message')), false);
+    if (phase === 'finishing') assert.equal(field('stats-state').textContent, 'Finishing');
+    assert.equal(progress().hasAttribute('data-shimmer'), true);
+  });
+}
 
 test('idle and missing status never present old job details as current', () => {
   selectPrinter();
@@ -232,16 +340,32 @@ test('unknown or invalid measurements stay unknown rather than becoming NaN or z
   });
   assert.equal(progress().hasAttribute('aria-valuenow'), false);
   for (const id of ['layers-value', 'tool-value', 'hotend-value', 'remaining-value']) {
+    assert.equal(visible(field(id)), false, `${id} hides missing measurements`);
     assert.deepEqual(numbers(field(id)), [], `${id} does not invent a measurement`);
     assert.doesNotMatch(field(id).textContent!, /NaN|undefined|null/);
   }
   assert.equal(visible(field('material-swatch')), false);
+  assert.equal(visible(field('material-value')), false);
+  assert.equal(visible(field('elapsed-value')), false);
+  assert.equal(visible(field('progress-value')), false);
+  assert.equal(progress().hasAttribute('data-shimmer'), true);
   publish({ generation: 1, stats: { ...metrics, progress: 1.5 } });
   assert.equal(
     Number(progress().getAttribute('aria-valuenow')),
     100,
     'Progress cannot exceed completion',
   );
+});
+
+test('a known heater target is shown without inventing a current temperature', () => {
+  selectPrinter();
+  publish({ generation: 1, stats: { ...metrics, bed: { target: 60 }, hotend: { target: 210 } } });
+  assert.equal(field('bed-value').textContent, 'Target 60 °C');
+  assert.equal(field('hotend-value').textContent, 'Target 210 °C');
+  assert.equal(visible(field('hotend-value')), true);
+  publish({ generation: 1, stats: { ...metrics, state: 'complete', bed: {}, hotend: {} } });
+  assert.equal(visible(field('bed-value')), false);
+  assert.equal(visible(field('hotend-value')), false);
 });
 
 test('light toggles are host-confirmed and work without starting playback', () => {
