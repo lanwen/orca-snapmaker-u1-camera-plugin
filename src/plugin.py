@@ -277,7 +277,7 @@ class Monitor:
                         continue
                     if playing and time.monotonic() >= keepalive_at:
                         client.start_monitor()
-                        keepalive_at = time.monotonic() + 10
+                        keepalive_at = time.monotonic() + 60
                     if not self.current(generation):
                         continue
                     with self.condition:

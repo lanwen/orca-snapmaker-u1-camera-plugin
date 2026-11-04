@@ -8,7 +8,7 @@
   The next snapshot is requested as soon as the previous image loads, with at most one frame awaiting display.
   This follows Fluidd's adaptive snapshot loading pattern with its target-FPS delay removed.
   The displayed FPS counts changing images rather than repeated downloads of the same image.
-- While active, the worker sends `camera.start_monitor` with `domain=lan` and `interval=0`, then renews it every ten seconds.
+- While active, the worker sends `camera.start_monitor` with `domain=lan` and `interval=0`, then renews it every sixty seconds.
 - Leaving the page stops local polling and closes its WebSocket.
   The plugin does not send a global camera-stop command, which could interrupt another viewer.
   The printer stops producing images after its own monitoring timeout unless another viewer keeps it awake.
