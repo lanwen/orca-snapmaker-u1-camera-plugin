@@ -168,6 +168,37 @@ class ClientTests(unittest.TestCase):
         printer.close()
         ws.close.assert_called_once_with(timeout=0)
 
+    def test_monitor_renewal_resets_send_timeout_after_late_ack(self):
+        client = plugin.HttpClient(self.address)
+        ws = Mock()
+        ws.timeout = 2
+        ws.settimeout.side_effect = lambda timeout: setattr(ws, 'timeout', timeout)
+        send_timeouts = []
+        ws.send.side_effect = lambda _: send_timeouts.append(ws.timeout)
+        ws.recv.side_effect = [json.dumps({"method": "notification"}),
+                               json.dumps({"id": 1, "result": {}}),
+                               json.dumps({"id": 2, "result": {}})]
+        with patch.object(plugin.websocket, "create_connection", return_value=ws), \
+                patch.object(plugin.time, "monotonic", side_effect=[0, 0, 1.999, 10, 10]):
+            client.start_monitor()
+            self.assertAlmostEqual(ws.timeout, .001)
+            client.start_monitor()
+        self.assertEqual(send_timeouts, [2, 2])
+        client.close()
+
+    def test_monitor_renewal_reads_ack_after_queued_notifications(self):
+        client = plugin.HttpClient(self.address)
+        ws = Mock()
+        ws.recv.side_effect = [json.dumps({"id": 1, "result": {}})] + [
+            json.dumps({"method": "notify_status_update", "params": [{}, 1]})
+        ] * 100 + [json.dumps({"id": 2, "result": {}})]
+        with patch.object(plugin.websocket, "create_connection", return_value=ws), \
+                patch.object(plugin.time, "monotonic", return_value=0):
+            client.start_monitor()
+            client.start_monitor()
+        self.assertEqual(ws.recv.call_count, 102)
+        client.close()
+
     def test_monitor_limits_responses_and_wait_time(self):
         for reply, error in [('x' * 512_001, 'too large'),
                              (json.dumps({"method": "notification"}), 'did not acknowledge')]:
@@ -176,9 +207,10 @@ class ClientTests(unittest.TestCase):
                 ws = Mock()
                 ws.recv.return_value = reply
                 with patch.object(plugin.websocket, "create_connection", return_value=ws), \
+                        patch.object(plugin.time, "monotonic", side_effect=[0, .5, 1, 1.5, 2]), \
                         self.assertRaisesRegex(RuntimeError, error):
                     client.start_monitor()
-                self.assertLessEqual(ws.recv.call_count, 100)
+                self.assertEqual(ws.recv.call_count, 1 if error == 'too large' else 3)
                 client.close()
         client = plugin.HttpClient(self.address)
         with patch.object(plugin.websocket, "create_connection", return_value=Mock()), \
