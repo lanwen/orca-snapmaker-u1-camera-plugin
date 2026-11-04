@@ -438,6 +438,33 @@ def eventually(predicate):
     assert predicate(), "Worker did not reach expected state"
 
 
+class WorkerScheduleTests(unittest.TestCase):
+    def test_camera_activates_immediately_and_renews_after_sixty_seconds(self):
+        now = [100]
+        client = Mock()
+        client.status.return_value = {}
+        activations = []
+
+        def snapshot():
+            activations.append(client.start_monitor.call_count)
+            if len(activations) == 3:
+                monitor.closed = True
+            else:
+                now[0] = 159 if len(activations) == 1 else 160
+                monitor.update(("printer", ""), playing=True)
+                monitor.frame_ready = True
+            return {"image": "frame"}
+
+        client.snapshot.side_effect = snapshot
+        with patch.object(plugin.threading.Thread, "start"), \
+                patch.object(plugin.time, "monotonic", side_effect=lambda: now[0]):
+            monitor = plugin.Monitor(Mock(), lambda *target: client)
+            monitor.update(("printer", ""), playing=True)
+            monitor.run()
+        self.assertEqual(activations, [1, 1, 2])
+        client.close.assert_called_once()
+
+
 class WorkerTests(unittest.TestCase):
     def setUp(self):
         self.clients = []
