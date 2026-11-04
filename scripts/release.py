@@ -225,17 +225,19 @@ def merge_snapshot(number, sha, version):
     if {file["filename"] for file in files} != {"pyproject.toml", "uv.lock"}:
         raise ValueError("Snapshot PR must change only pyproject.toml and uv.lock")
     for _ in range(120):
-        runs = json.loads(gh("run", "list", "--repo", repository(), "--workflow", "check.yml",
-                             "--event", "pull_request", "--commit", sha, "--limit", "20",
-                             "--json", "status,conclusion", token=os.environ.get("GH_CHECKS_TOKEN")))
-        runs = [run for run in runs if run["conclusion"] != "cancelled"]
-        if runs and runs[0]["status"] == "completed":
-            conclusion = runs[0]["conclusion"]
-            if conclusion == "success":
-                return gh("pr", "merge", str(number), "--repo", repository(), "--squash",
-                          "--match-head-commit", sha)
-            if conclusion != "cancelled":
-                raise ValueError("Snapshot PR check did not pass: " + conclusion)
+        passed = True
+        for workflow in ("check.yml", "pr-policy.yml"):
+            runs = json.loads(gh("run", "list", "--repo", repository(), "--workflow", workflow,
+                                 "--event", "pull_request", "--commit", sha, "--limit", "20",
+                                 "--json", "status,conclusion", token=os.environ.get("GH_CHECKS_TOKEN")))
+            runs = [run for run in runs if run["conclusion"] != "cancelled"]
+            if not runs or runs[0]["status"] != "completed":
+                passed = False
+            elif runs[0]["conclusion"] != "success":
+                raise ValueError(f"Snapshot PR {workflow} did not pass: " + runs[0]["conclusion"])
+        if passed:
+            return gh("pr", "merge", str(number), "--repo", repository(), "--squash",
+                      "--match-head-commit", sha)
         time.sleep(5)
     raise ValueError("Timed out waiting for snapshot PR checks")
 
@@ -355,7 +357,7 @@ def write_outputs(**values):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=["info", "prepare-pr", "check-pr", "merge-snapshot", "publish"])
+    parser.add_argument("command", choices=["info", "prepare-pr", "check-pr", "classify-pr", "merge-snapshot", "publish"])
     args = parser.parse_args()
     if args.command == "info":
         version = read_version(ROOT)
@@ -377,6 +379,9 @@ def main():
             raise
         if os.environ.get("GITHUB_OUTPUT"):
             write_outputs(snapshot_only=str(snapshot_only(event["pull_request"])).lower())
+    elif args.command == "classify-pr":
+        event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text(encoding="utf-8"))
+        write_outputs(snapshot_only=str(snapshot_only(event["pull_request"])).lower())
     elif args.command == "merge-snapshot":
         merge_snapshot(int(os.environ["SNAPSHOT_PR"]), os.environ["SNAPSHOT_HEAD_SHA"], os.environ["SNAPSHOT_VERSION"])
     else:

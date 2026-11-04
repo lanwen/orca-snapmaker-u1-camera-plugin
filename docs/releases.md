@@ -99,7 +99,9 @@ When more release changes arrive, automation preserves your text but resets the 
 The check also rejects an older generated change list, even before automation refreshes the description.
 An unchanged refresh preserves your completed review.
 You can confirm the review without changing the text when the new commits do not need a public-note update.
-Editing the description runs the checks again.
+Editing the title, description, or labels reruns the separate PR policy check without cancelling or restarting code verification.
+Code verification runs on new commits, opening or reopening a PR, and marking it ready for review.
+Snapshot automation waits for both code verification and PR policy to pass for its exact head commit.
 Missing or unreviewed notes produce a named error annotation and a check summary with a link to the PR and editing instructions.
 Missing or malformed markers stop publication; text is never silently truncated.
 

@@ -18,6 +18,10 @@ description = "Prepare the all-states UI preview and four screenshot views"
 depends = ["build"]
 run = "python scripts/prepare_screenshots.py"
 
+[tasks."screenshots:review"]
+description = "Review prepared UI states in headless Chrome without rebuilding"
+run = "uv run --no-sync python scripts/review_preview.py"
+
 [tasks.test]
 description = "Test the built plugin and camera page"
 depends = ["setup", "build"]
@@ -49,6 +53,10 @@ run = "python scripts/release.py prepare-pr"
 [tasks."release:check-pr"]
 description = "Check the PR title and development/release version policy"
 run = "python scripts/release.py check-pr"
+
+[tasks."release:classify-pr"]
+description = "Identify an exact generated snapshot bump for code checks"
+run = "python scripts/release.py classify-pr"
 
 [tasks."release:merge-snapshot"]
 description = "Merge the generated snapshot PR after its checks pass"

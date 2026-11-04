@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -65,8 +66,16 @@ class ReleaseFixture(unittest.TestCase):
             context = patch.object(module, "ROOT", self.root)
             context.start()
             self.addCleanup(context.stop)
-        # Release preparation must work without a developer's cached package metadata.
-        env = patch.dict("os.environ", {"GH_REPO": "example/plugin", "UV_CACHE_DIR": str(self.root / "uv-cache")})
+        config = self.root / "uv.toml"
+        config.write_text("")
+        # Exercise the real tools without inheriting developer config, caches, or signing.
+        settings = {key: value for key, value in os.environ.items()
+                    if not key.startswith(("UV_", "GIT_"))}
+        settings.update(GH_REPO="example/plugin", UV_CACHE_DIR=str(self.root / "uv-cache"),
+                        UV_CONFIG_FILE=str(config), UV_PYTHON=sys.executable,
+                        UV_PYTHON_DOWNLOADS="never",
+                        GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1")
+        env = patch.dict("os.environ", settings, clear=True)
         env.start()
         self.addCleanup(env.stop)
 
@@ -80,6 +89,31 @@ class ReleaseFixture(unittest.TestCase):
         lock = tomllib.loads((self.root / "uv.lock").read_text())
         project = next(package for package in lock["package"] if package["source"] == {"virtual": "."})
         self.assertEqual(project["version"], read_version(self.root))
+
+
+class FixtureIsolationTests(unittest.TestCase):
+    def test_release_tools_ignore_conflicting_user_configuration(self):
+        with tempfile.TemporaryDirectory() as directory:
+            uv_config = Path(directory) / "uv.toml"
+            uv_config.write_text('exclude-newer = "1970-01-01T00:00:00Z"\n')
+            git_config = Path(directory) / "gitconfig"
+            git_config.write_text('[commit]\n gpgsign = true\n[gpg]\n program = missing-test-signer\n')
+            with patch.dict(os.environ, UV_CONFIG_FILE=str(uv_config), UV_PYTHON="missing-python",
+                            UV_OFFLINE="true", GIT_CONFIG_GLOBAL=str(git_config),
+                            GIT_CONFIG_COUNT="1", GIT_CONFIG_KEY_0="commit.gpgsign", GIT_CONFIG_VALUE_0="true"):
+                fixture = ReleaseFixture()
+                try:
+                    fixture.setUp()
+                    release.set_version(fixture.root, "0.3.0")
+                    fixture.assert_lock_version()
+                    subprocess.run(["git", "init", "-q"], cwd=fixture.root, check=True)
+                    release.git("add", "pyproject.toml", "uv.lock")
+                    release.git("-c", "user.name=Test", "-c", "user.email=test@example.com",
+                                "commit", "-qm", "isolated fixture")
+                    self.assertEqual(os.environ["UV_PYTHON"], sys.executable)
+                    self.assertNotIn("UV_OFFLINE", os.environ)
+                finally:
+                    fixture.doCleanups()
 
 
 class PreparationTests(ReleaseFixture):
@@ -200,6 +234,17 @@ class SnapshotOnlyTests(ReleaseFixture):
     def test_exact_snapshot_version_bump_uses_light_checks(self):
         self.assertTrue(release.snapshot_only(self.pr))
 
+    def test_code_classification_does_not_validate_editable_pr_policy(self):
+        self.pr["title"] = "Unfinished title"
+        event = self.root / "event.json"
+        event.write_text(json.dumps({"pull_request": self.pr}))
+        with patch.dict(os.environ, GITHUB_EVENT_PATH=str(event)), \
+                patch("sys.argv", ["release.py", "classify-pr"]), \
+                patch.object(release, "check_pr", side_effect=AssertionError("Policy belongs to its own check")), \
+                patch.object(release, "write_outputs") as outputs:
+            release.main()
+        outputs.assert_called_once_with(snapshot_only="false")
+
     def test_label_alone_or_fork_cannot_skip_full_checks(self):
         self.pr["head"]["ref"] = "feature/example"
         self.assertFalse(release.snapshot_only(self.pr))
@@ -256,6 +301,9 @@ class SnapshotMergeTests(unittest.TestCase):
         self.github.assert_any_call("run", "list", "--repo", "example/plugin", "--workflow", "check.yml",
                                     "--event", "pull_request", "--commit", self.sha, "--limit", "20",
                                     "--json", "status,conclusion", token="checks-token")
+        self.github.assert_any_call("run", "list", "--repo", "example/plugin", "--workflow", "pr-policy.yml",
+                                    "--event", "pull_request", "--commit", self.sha, "--limit", "20",
+                                    "--json", "status,conclusion", token="checks-token")
         self.github.assert_any_call("pr", "merge", "3", "--repo", "example/plugin", "--squash",
                                     "--match-head-commit", self.sha)
 
@@ -269,12 +317,27 @@ class SnapshotMergeTests(unittest.TestCase):
         self.assertEqual(self.github.call_args.args[:2], ("pr", "merge"))
 
     def test_waits_for_registered_checks_and_replacements_of_cancelled_runs(self):
-        self.github.side_effect = [json.dumps(runs) for runs in [[],
+        pending = iter([json.dumps(runs) for runs in [[],
             [{"status": "in_progress", "conclusion": None}],
             [{"status": "completed", "conclusion": "cancelled"}],
-            [{"status": "completed", "conclusion": "success"}]]] + [""]
+            [{"status": "completed", "conclusion": "success"}]]])
+        self.github.side_effect = lambda *args, **kwargs: (
+            next(pending) if "check.yml" in args else self.github.return_value
+        ) if args[:2] == ("run", "list") else ""
         release.merge_snapshot(3, self.sha, "0.3.1.dev0")
         self.assertEqual(self.github.call_args.args[:2], ("pr", "merge"))
+
+    def test_code_success_does_not_bypass_missing_or_failed_policy(self):
+        for policy in [[], [{"status": "completed", "conclusion": "failure"}],
+                       [{"status": "completed", "conclusion": "skipped"}]]:
+            with self.subTest(policy=policy):
+                self.github.reset_mock()
+                self.github.side_effect = lambda *args, **kwargs: (
+                    json.dumps(policy) if "pr-policy.yml" in args else self.github.return_value
+                )
+                with self.assertRaises(ValueError):
+                    release.merge_snapshot(3, self.sha, "0.3.1.dev0")
+                self.assertFalse(any(call.args[:2] == ("pr", "merge") for call in self.github.call_args_list))
 
     def test_failed_or_missing_checks_never_merge(self):
         for runs in [[], [{"status": "completed", "conclusion": "failure"}]]:

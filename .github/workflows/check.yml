@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
-    types: [opened, edited, reopened, synchronize, ready_for_review, labeled, unlabeled]
+    types: [opened, reopened, synchronize, ready_for_review]
 
 permissions:
   contents: read
@@ -22,12 +22,12 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
       - uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d # v5
-      - name: Check PR policy and public release notes
-        id: policy
+      - name: Identify exact snapshot version bump
+        id: snapshot
         if: github.event_name == 'pull_request'
-        run: mise run release:check-pr
+        run: mise run release:classify-pr
       - run: mise run check
-        if: steps.policy.outputs.snapshot_only != 'true'
+        if: steps.snapshot.outputs.snapshot_only != 'true'
       - name: Verify snapshot diff
-        if: steps.policy.outputs.snapshot_only == 'true'
+        if: steps.snapshot.outputs.snapshot_only == 'true'
         run: git diff --check HEAD^ HEAD

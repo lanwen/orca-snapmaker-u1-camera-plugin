@@ -87,6 +87,21 @@ mise exec -- python scripts/prepare_screenshots.py
 
 Open or refresh `dist/screenshots/index.html` and review affected states at desktop and narrow widths.
 
+Use the maintained headless review command with prepared HTML and installed dependencies:
+
+```sh
+mise run screenshots:review -- --states printing preparing paused
+```
+
+Omit `--states` for a final review of all states at 1100px and 390px widths.
+Use `--widths 1440 390` to choose other widths.
+The command reuses local Chrome or Chromium with a temporary profile, opens local files without a server, and checks alignment, overflow, shimmer movement, and reduced motion.
+It writes state screenshots, a review gallery, and measured results to `dist/preview-review/`.
+Open `dist/preview-review/index.html` to inspect the rendered typography and spacing; automated geometry checks do not replace that visual review.
+It does not rebuild the HTML or install dependencies.
+For publication, add `--gifs` to capture animated states at the first width; this requires `ffmpeg`.
+Generate README and PR assets once after the visual iteration is complete.
+
 The default camera image and app chrome come from the existing README screenshot.
 To use another local camera frame, run `python scripts/prepare_screenshots.py --camera /path/to/frame.jpg`.
 
