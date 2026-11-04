@@ -15,6 +15,21 @@ STATES = (
     "paused",  # Interrupted job, with estimates suppressed.
     "complete",  # Finished job, with current cooling temperatures.
 )
+PREVIEW_LABELS = {
+    "printing": "Printing",  # Model printing with an eligible estimate.
+    "preparing": "Heating",  # Preparation with heaters below target.
+    "preparing-warm": "Preparing (warm)",  # Preparation after warm-up.
+    "paused": "Paused",  # Interrupted print without a finish estimate.
+    "finishing": "Finishing",  # Full slicer progress while still active.
+    "complete": "Complete",  # Finished print with final measurements.
+    "cancelled": "Cancelled",  # Stopped job with partial progress.
+    "error": "Error",  # Failed print with retained measurements.
+    "standby": "Standby",  # Idle printer with current temperatures.
+    "unavailable": "Status unavailable",  # Missing printer status, independent of the camera.
+    "phase-unknown": "Unknown phase",  # Active print without reliable layers.
+    "plan-only": "Estimate unavailable",  # Original plan without a current estimate.
+    "preparing-no-plan": "Preparation without plan",  # Missing slicer metadata during preparation.
+}
 
 
 def image_uri(camera=None):
@@ -57,6 +72,22 @@ def screenshot_page(camera=None):
                                  current_layer=86, elapsed=5118, printing_duration=4950,
                                  remaining=0, bed={"temperature": 42, "target": 0},
                                  hotend={"temperature": 41, "target": 0})
+    fixtures["preparing-warm"] = dict(fixtures["preparing"],
+                                     bed={"temperature": 60, "target": 60},
+                                     hotend={"temperature": 210, "target": 210})
+    fixtures["finishing"] = dict(fixtures["printing"], phase="finishing", progress=1,
+                                 current_layer=86, remaining=None)
+    for state in ("cancelled", "error"):
+        fixtures[state] = dict(fixtures["printing"], state=state, remaining=None,
+                               bed={"temperature": 45, "target": 0},
+                               hotend={"temperature": 95, "target": 0})
+    fixtures["standby"] = {"state": "standby", "bed": {"temperature": 24, "target": 0},
+                           "hotend": {"temperature": 25, "target": 0}}
+    fixtures["unavailable"] = {"state": "unavailable"}
+    fixtures["phase-unknown"] = dict(fixtures["printing"], phase="unknown", current_layer=None,
+                                     remaining=None)
+    fixtures["plan-only"] = dict(fixtures["printing"], remaining=None)
+    fixtures["preparing-no-plan"] = dict(fixtures["preparing"], planned_total=None)
     bootstrap = r'''
 <script>
 // Screenshot-only transport. No messages or commands reach the real printer.
@@ -67,12 +98,15 @@ window.Date = class extends NativeDate {
 };
 Object.defineProperty(document, 'hidden', {get: () => false});
 const screenshotFixtures = __FIXTURES__;
+const screenshotLabels = __LABELS__;
 const screenshotStates = Object.keys(screenshotFixtures);
 const screenshotImage = __IMAGE__;
 let screenshotState = __SCREENSHOT_STATE__, screenshotHandler, screenshotLight = true, screenshotStarted = false;
 function publishScreenshot() {
+  const picker = document.getElementById('preview-state');
+  if (picker) picker.value = screenshotState;
   screenshotHandler({type:'target', generation:1, target:'Workshop · Snapmaker U1'});
-  screenshotHandler({generation:1, printer:screenshotState === 'preparing' ? 'Preparing' : screenshotState,
+  screenshotHandler({generation:1, printer:screenshotLabels[screenshotState],
     light:screenshotLight, stats:screenshotFixtures[screenshotState],
     image:screenshotImage, camera:'Live · 4.4 FPS'});
 }
@@ -90,8 +124,13 @@ window.orca = {
   }
 };
 window.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('preview-state')?.addEventListener('change', event => {
+    if (!screenshotStates.includes(event.target.value)) return;
+    screenshotState = event.target.value;
+    publishScreenshot();
+  });
   document.addEventListener('keydown', event => {
-    if (event.ctrlKey || event.metaKey || event.altKey || event.target.closest('input,textarea,[contenteditable]')) return;
+    if (event.ctrlKey || event.metaKey || event.altKey || event.target.closest('input,textarea,select,[contenteditable]')) return;
     if (/^[1-4]$/.test(event.key)) {
       screenshotState = screenshotStates[Number(event.key) - 1];
       publishScreenshot();
@@ -106,7 +145,9 @@ body.screenshot-surface #stats { border-color:#ffffff26; background:#111820e8; b
 #screenshot-help { position:fixed; top:90px; right:30px; z-index:10; padding:16px; border:1px solid #ffffff40; border-radius:10px; background:#111820f5; font:13px/1.7 system-ui; }
 </style>
 '''
-    bootstrap = bootstrap.replace("__FIXTURES__", json.dumps(fixtures)).replace("__IMAGE__", json.dumps(image_uri(camera)))
+    bootstrap = (bootstrap.replace("__FIXTURES__", json.dumps(fixtures))
+                 .replace("__LABELS__", json.dumps(PREVIEW_LABELS))
+                 .replace("__IMAGE__", json.dumps(image_uri(camera))))
     page = page.replace("</head>", bootstrap + "</head>")
     page = page.replace("<body>", '<body><aside id="screenshot-help" hidden>Screenshot data · no printer connection<br>1 Printing · 2 Preparing · 3 Paused · 4 Complete<br>H Toggle stats surface · ? Toggle this help</aside>')
     return page
@@ -129,23 +170,25 @@ body { --viewer-top:calc(100vw * .05231144); }
     output.mkdir(parents=True, exist_ok=True)
     for state in STATES:
         (output / (state + ".html")).write_text(page.replace("__SCREENSHOT_STATE__", json.dumps(state)))
-    links = "".join('<a href="' + state + '.html">' + state.title() + '</a>' for state in STATES)
-    index = """<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>U1 README screenshot views</title><style>
-:root { color-scheme:dark; font:16px/1.6 system-ui; background:#10151b; color:#edf3f9; }
-body { max-width:760px; margin:60px auto; padding:24px; }
-h1 { font-size:28px; font-weight:550; } nav { display:flex; flex-wrap:wrap; gap:12px; margin:28px 0; }
-a { color:#a0cbff; text-decoration:none; padding:10px 18px; border:1px solid #ffffff30; border-radius:8px; }
-code { color:#a0cbff; } p { color:#c0cbd5; }
-</style></head><body><h1>Snapmaker U1 screenshot views</h1>
-<p>Simulated Orca window and selected plugin tab. Fixed sample data, production camera UI, no installation or printer connection.</p>
-<nav aria-label="Screenshot states">__LINKS__</nav>
-<p>Open any state, click the camera, then press <b>1</b> Printing, <b>2</b> Preparing, <b>3</b> Paused, or <b>4</b> Complete.
-Press <b>H</b> to toggle the stats background, or <b>?</b> for help.</p>
-<p>For matching README images, use the same browser size for all four states (for example 1440 × 1000), hide help, move the pointer away, and capture only the page content.</p>
-<p>Use <code>--camera /path/to/frame.jpg</code> when preparing the views to replace the illustrative camera image.</p>
-</body></html>""".replace("__LINKS__", links)
+    options = "".join('<option value="' + state + '"' +
+                      (' selected' if state == "preparing" else '') + '>' + label + '</option>'
+                      for state, label in PREVIEW_LABELS.items())
+    controls = ('<aside id="preview-controls"><label for="preview-state">Preview state</label>'
+                '<select id="preview-state">' + options + '</select>'
+                '<span>Offline sample data</span><a href="showcase.html">Showcase</a></aside>')
+    preview_style = """<style>
+#preview-controls { position:fixed; inset:0 0 auto; height:56px; padding:10px 20px; display:flex; align-items:center; gap:12px; background:#10151b; border-bottom:1px solid #ffffff20; z-index:10; font:13px/1.4 system-ui; }
+#preview-controls label { color:#b6c4d0; }
+#preview-controls select { min-width:170px; max-width:220px; padding:7px 10px; border:1px solid #ffffff30; border-radius:7px; background:#1b2630; color:#edf3f9; font:inherit; }
+#preview-controls span { margin-left:auto; color:#9aabb8; }
+#preview-controls a { color:#a0cbff; }
+.orca-chrome { top:56px; }
+body { --viewer-top:calc(56px + 100vw * .05231144); }
+@media(max-width:600px) { #preview-controls { padding:10px 12px; } #preview-controls span, #preview-controls a { display:none; } }
+</style>"""
+    index = (page.replace("__SCREENSHOT_STATE__", json.dumps("preparing"))
+             .replace("</head>", preview_style + "</head>")
+             .replace("<body>", "<body>" + controls))
     entry = output / "index.html"
     entry.write_text(index)
     tiles = "".join('<section><h2>' + state.title() + '</h2><div class="crop"><iframe title="' +
@@ -199,6 +242,6 @@ if __name__ == "__main__":
     if args.export:
         print(f"Exported: {export_showcase(entry.parent, args.export)}")
     print("Open index.html in a browser. Each state includes a simulated Orca title and tab bar.")
-    print("Click the camera, then use 1 Printing, 2 Preparing, 3 Paused, 4 Complete.")
+    print(f"Use the state picker for all {len(PREVIEW_LABELS)} states; 1–4 switch the showcase states.")
     print("H toggles the stats background; ? toggles help. Hide help before capture.")
     print("Keep the same browser size and capture only page content for all four images.")
