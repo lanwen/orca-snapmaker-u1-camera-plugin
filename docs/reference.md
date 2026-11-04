@@ -50,7 +50,10 @@ Only raw state `printing`, model phase `printing`, and a finite speed factor wit
 Paused jobs, speed overrides, missing inputs, and ambiguous source evidence have no finish forecast.
 The UI rounds plan and remaining durations up to minutes and anchors finish time to the received snapshot without animating a countdown.
 Elapsed time shows whole printer-reported seconds as `mm:ss` or `h:mm:ss`, refreshed with status rather than extrapolated locally.
-The preparation bar uses a moving gradient without a percentage or accessibility value; reduced-motion mode keeps the gradient still.
+The preparation bar uses a moving gradient without a percentage or accessibility value.
+It is orange while a reported heater is more than 2 °C below target and returns to blue when warm.
+During active printing, a subtle blue highlight moves only inside the filled portion of the bar.
+Reduced-motion mode keeps both gradients still.
 
 Metadata refreshes at most every 30 seconds, including successful entries, to observe updated metadata.
 Filename or file-size changes, inactive-to-active transitions, and backwards clock or file-position movement clear cached metadata and fetch immediately.

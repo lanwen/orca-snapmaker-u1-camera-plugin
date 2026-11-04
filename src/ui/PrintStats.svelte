@@ -140,6 +140,7 @@
     <div
       id="progress-bar"
       data-indeterminate={preparing || undefined}
+      data-heating={(preparing && heating) || undefined}
       role="progressbar"
       aria-label={preparing ? 'Preparing print' : 'Print progress'}
       aria-valuemin="0"
@@ -334,30 +335,47 @@
   }
   #progress-fill {
     display: block;
+    position: relative;
+    overflow: hidden;
     width: 0;
     height: 100%;
     border-radius: inherit;
     background: #7abaff;
   }
   #progress-bar[data-indeterminate] #progress-fill {
-    position: relative;
     background: #a0cbff38;
   }
-  #progress-bar[data-indeterminate] #progress-fill::after {
+  #progress-bar[data-heating] {
+    --progress-highlight: #ffbb77;
+  }
+  #progress-bar[data-heating] #progress-fill {
+    background: #ffaf6538;
+  }
+  #stats:is([data-state='printing'], [data-state='preparing']) #progress-fill::after {
     content: '';
     position: absolute;
     inset: 0;
-    background: linear-gradient(90deg, transparent, #a0cbff, transparent);
+    background: linear-gradient(
+      90deg,
+      transparent,
+      var(--progress-highlight, #a0cbff),
+      transparent
+    );
     transform: translateX(-100%);
-    animation: preparation-shimmer 2.4s ease-in-out infinite;
+    animation: progress-shimmer 2.4s ease-in-out infinite;
   }
-  @keyframes preparation-shimmer {
+  #stats[data-state='printing'] #progress-fill::after {
+    --progress-highlight: #c4e2ff;
+    opacity: 0.55;
+    animation-duration: 3.2s;
+  }
+  @keyframes progress-shimmer {
     to {
       transform: translateX(100%);
     }
   }
   @media (prefers-reduced-motion: reduce) {
-    #progress-bar[data-indeterminate] #progress-fill::after {
+    #stats:is([data-state='printing'], [data-state='preparing']) #progress-fill::after {
       animation: none;
       transform: none;
     }

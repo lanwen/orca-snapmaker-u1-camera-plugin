@@ -228,6 +228,30 @@ test('heater targets appear only while an active heater is away from its target'
   }
 });
 
+test('the preparation bar is warm only while a reported heater is below target', () => {
+  selectPrinter();
+  for (const [bed, hotend, heating] of [
+    [{ temperature: 40, target: 60 }, { temperature: 210, target: 210 }, true],
+    [{ temperature: 58, target: 60 }, { temperature: 209, target: 210 }, false],
+    [{ temperature: 60, target: 60 }, { temperature: 205, target: 210 }, true],
+    [{ temperature: NaN, target: 60 }, { temperature: 210, target: 0 }, false],
+  ] as const) {
+    publish({
+      generation: 1,
+      stats: { ...metrics, phase: 'preparing', current_layer: 0, remaining: null, bed, hotend },
+    });
+    assert.equal(progress().hasAttribute('data-heating'), heating);
+    assert.equal(progress().hasAttribute('aria-valuenow'), false);
+  }
+  publish({ generation: 1, stats: metrics });
+  assert.equal(
+    progress().hasAttribute('data-heating'),
+    false,
+    'Printing stays blue even if reheating',
+  );
+  assert.equal(field('progress-fill').style.width, metrics.progress * 100 + '%');
+});
+
 test('layer-zero purge keeps preparation and its plan separate from remaining time', () => {
   selectPrinter();
   publish({
