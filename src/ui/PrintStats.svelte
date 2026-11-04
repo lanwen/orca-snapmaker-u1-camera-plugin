@@ -130,35 +130,35 @@
         >{progress === null ? '—' : Math.floor(progress) + '%'}</strong
       >
     </div>
-    <div
-      id="layers-stat"
-      class="layers"
-      hidden={standby ||
-        preparing ||
-        missing ||
-        !number(stats?.current_layer) ||
-        !number(stats?.total_layer)}
-    >
-      Layers<span id="layers-value"
-        >{layer(stats?.current_layer)} / {layer(stats?.total_layer)}</span
-      >
-    </div>
   </div>
   <div id="journey-stat" class="stats-journey" hidden={standby || missing}>
-    <div id="remaining-stat" hidden={!showEstimate}>
-      <strong id="remaining-value">
-        {#if number(stats?.remaining)}
-          <small class="approximation">≈</small> {duration(stats.remaining, true)}
-        {:else}—{/if}
-      </strong><span>left</span>
-    </div>
-    <div id="plan-stat" hidden={!showPlan}>
-      <strong id="plan-value">
-        {#if number(stats?.planned_total)}
-          <small class="approximation">≈</small> {duration(stats.planned_total, true)}
-        {:else}—{/if}
-      </strong>
-      <span id="plan-caption" hidden={!preparing}>+ preparation</span>
+    <div class="journey-header">
+      <div id="remaining-stat" hidden={!showEstimate}>
+        <strong id="remaining-value">
+          {#if number(stats?.remaining)}
+            <small class="approximation">≈</small> {duration(stats.remaining, true)}
+          {:else}—{/if}
+        </strong><span>left</span>
+      </div>
+      <div id="plan-stat" hidden={!showPlan}>
+        <strong id="plan-value">
+          {#if number(stats?.planned_total)}
+            <small class="approximation">≈</small> {duration(stats.planned_total, true)}
+          {:else}—{/if}
+        </strong>
+        <span id="plan-caption" hidden={!preparing}>+ preparation</span>
+      </div>
+      <div
+        id="layers-stat"
+        aria-label="Layers"
+        hidden={standby ||
+          preparing ||
+          missing ||
+          !number(stats?.current_layer) ||
+          !number(stats?.total_layer)}
+      >
+        <span id="layers-value">{layer(stats?.current_layer)} / {layer(stats?.total_layer)}</span>
+      </div>
     </div>
     <div
       id="progress-bar"
@@ -241,7 +241,7 @@
   #stats {
     grid-column: 1 / -1;
     display: grid;
-    grid-template-columns: 110px minmax(0, 1fr) 185px;
+    grid-template-columns: 132px minmax(0, 1fr) 185px;
     gap: 18px;
     width: 720px;
     max-width: 100%;
@@ -267,7 +267,7 @@
   }
   .stats-gauge {
     display: grid;
-    grid-template-rows: 16px 44px 16px;
+    grid-template-rows: 16px 66px;
     align-content: start;
     gap: 6px;
   }
@@ -322,18 +322,18 @@
     background: #ff9999;
   }
   #progress-value {
-    font-size: 42px;
+    font-size: 56px;
+    line-height: 1;
     font-weight: 550;
     letter-spacing: -2px;
   }
-  .layers {
-    grid-row: 3;
-    align-self: center;
+  #layers-stat {
+    grid-area: 1 / 2;
+    justify-self: end;
+    align-self: end;
+    white-space: nowrap;
     color: #c0cbd5;
     font-size: 10px;
-  }
-  #layers-value {
-    margin-left: 4px;
   }
   .stats-journey {
     display: grid;
@@ -343,10 +343,17 @@
     border-left: 1px solid #ffffff28;
     padding-left: 18px;
   }
+  .journey-header {
+    grid-area: 1 / 1;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: baseline;
+    gap: 4px 8px;
+  }
   #remaining-stat,
   #plan-stat {
     grid-area: 1 / 1;
-    align-self: start;
+    align-self: end;
   }
   #plan-stat {
     display: flex;
@@ -574,11 +581,11 @@
   @media (max-width: 650px) {
     #stats {
       width: 480px;
-      grid-template-columns: 90px minmax(0, 1fr);
+      grid-template-columns: 108px minmax(0, 1fr);
       gap: 12px;
     }
     #progress-value {
-      font-size: 36px;
+      font-size: 46px;
     }
     .stats-journey {
       grid-template-rows: 48px 4px 48px;
