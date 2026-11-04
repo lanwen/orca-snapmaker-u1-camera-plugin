@@ -130,9 +130,9 @@
     </div>
     <div id="plan-stat" hidden={!showPlan}>
       <strong id="plan-value"
-        >{number(stats?.planned_total) ? '≈ ' + duration(stats.planned_total, true) : '—'}{preparing
-          ? ' print plan + preparation'
-          : ''}</strong
+        >{number(stats?.planned_total) ? '≈ ' + duration(stats.planned_total, true) : '—'}<small
+          hidden={!preparing}>{' print plan + preparation'}</small
+        ></strong
       >
       <span hidden={preparing}>Slicer plan at normal speed</span>
     </div>
@@ -307,9 +307,14 @@
     font-size: 10px;
   }
   #plan-value {
-    font-size: 16px;
+    font-size: 22px;
     font-weight: 550;
     line-height: 1.4;
+  }
+  #plan-value small {
+    color: #c0cbd5;
+    font-size: 11px;
+    font-weight: 400;
   }
   #plan-stat span {
     display: block;
