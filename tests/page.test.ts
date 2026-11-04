@@ -202,32 +202,115 @@ test('pausing hides moving estimates and resuming restores them', () => {
 });
 
 for (const state of ['complete', 'cancelled', 'error']) {
-  test(`${state} jobs retain measurements but hide running estimates, tool, and heater targets`, () => {
+  test(`${state} jobs retain measurements but hide running estimates and tool, and show cooling targets`, () => {
     selectPrinter();
     publish({
       generation: 1,
-      stats: { ...metrics, state, progress: state === 'complete' ? 1 : metrics.progress },
+      stats: {
+        ...metrics,
+        state,
+        progress: state === 'complete' ? 1 : metrics.progress,
+        hotend: { temperature: 235, target: 0 },
+      },
     });
     assert.equal(visible(field('remaining-value')), false);
     assert.equal(visible(field('finish-value')), false);
     assert.equal(visible(field('tool-value')), false);
     assert.equal(progress().hasAttribute('data-shimmer'), false);
-    assert.deepEqual(numbers(field('hotend-value')), [235]);
+    assert.deepEqual(numbers(field('hotend-value')), [235, 0]);
+    assert.equal(field('hotend-value').querySelector('sub')?.textContent, '0 °C');
     assert.equal(visible(progress()), true);
     if (state === 'complete') assert.equal(Number(progress().getAttribute('aria-valuenow')), 100);
   });
 }
 
-test('heater targets appear only while an active heater is away from its target', () => {
+test('heater targets show the direction only outside the temperature tolerance', () => {
   selectPrinter();
   for (const [temperature, target, displayed] of [
     [230, 240, [230, 240]],
     [238, 240, [238]],
-    [90, 0, [90]],
+    [250, 240, [250, 240]],
+    [242, 240, [242]],
+    [90, 0, [90, 0]],
   ] as const) {
     publish({ generation: 1, stats: { ...metrics, hotend: { temperature, target } } });
     assert.deepEqual(numbers(field('hotend-value')), displayed);
+    const changing = Math.abs(temperature - target) > 2;
+    const tag = temperature < target ? 'sup' : 'sub';
+    assert.equal(
+      field('hotend-value').querySelector(tag)?.textContent ?? null,
+      changing ? target + ' °C' : null,
+    );
+    assert.equal(
+      field('hotend-value').querySelector('.temperature-arrow')?.textContent ?? null,
+      changing ? (temperature < target ? '↑' : '↓') : null,
+    );
   }
+});
+
+test('off heaters hide cooling indicators after a minute within one degree and resume on movement', () => {
+  selectPrinter();
+  const update = (bed: number, hotend: number, target = 0) =>
+    publish({
+      generation: 1,
+      stats: {
+        state: 'standby',
+        bed: { temperature: bed, target },
+        hotend: { temperature: hotend, target },
+      },
+    });
+  update(24, 90);
+  for (let seconds = 5; seconds <= 60; seconds += 5) {
+    advance(5000);
+    update(seconds % 10 === 0 ? 24 : 25, 90 - seconds / 5);
+    assert.equal(field('bed-value').querySelector('sub') === null, seconds === 60);
+    assert.ok(field('hotend-value').querySelector('sub'), 'Falling temperatures keep cooling');
+  }
+  assert.deepEqual(numbers(field('bed-value')), [24]);
+  advance(5000);
+  update(26, 77);
+  assert.ok(field('bed-value').querySelector('.temperature-arrow'), 'Movement restores cooling');
+  for (let seconds = 5; seconds <= 60; seconds += 5) {
+    advance(5000);
+    update(26, 77);
+  }
+  assert.equal(field('bed-value').querySelector('.temperature-arrow'), null);
+  assert.equal(field('hotend-value').querySelector('sub'), null);
+  advance(5000);
+  update(26, 77, 20);
+  assert.equal(field('bed-value').querySelector('sub')?.textContent, '20 °C');
+  advance(5000);
+  update(26, 77);
+  assert.ok(field('bed-value').querySelector('sub'), 'Changing the target resets stability');
+});
+
+test('missing readings and printer changes cannot establish cooling stability', () => {
+  selectPrinter();
+  const update = (hotend = { temperature: 25, target: 0 }, generation = 1) =>
+    publish({
+      generation,
+      stats: { state: 'standby', hotend },
+    });
+  update();
+  for (let seconds = 5; seconds <= 55; seconds += 5) {
+    advance(5000);
+    update();
+  }
+  update({ temperature: NaN, target: 0 });
+  advance(5000);
+  update();
+  assert.ok(field('hotend-value').querySelector('sub'));
+  advance(11000);
+  update();
+  assert.ok(field('hotend-value').querySelector('sub'), 'A status gap resets observations');
+  for (let seconds = 5; seconds <= 60; seconds += 5) {
+    advance(5000);
+    update();
+  }
+  assert.equal(field('hotend-value').querySelector('sub'), null);
+  selectPrinter(2, 'Other printer');
+  update(undefined, 2);
+  assert.ok(field('hotend-value').querySelector('sub'), 'A different printer starts fresh');
 });
 
 test('the preparation bar is warm only while a reported heater is below target', () => {
