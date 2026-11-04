@@ -61,6 +61,8 @@ const lastMessage = () => {
 const frames = () => sent.filter((message) => message.type === 'frame');
 const metrics = {
   state: 'printing',
+  phase: 'printing' as const,
+  planned_total: 2081,
   progress: 0.426,
   current_layer: 128,
   total_layer: 300,
@@ -171,26 +173,50 @@ test('heater targets appear only while an active heater is away from its target'
   }
 });
 
-test('preparation hides speculative progress and ETA until extrusion or the first layer', () => {
+test('layer-zero purge keeps preparation and its plan separate from remaining time', () => {
   selectPrinter();
-  publish({ generation: 1, stats: { ...metrics, printing_duration: 0, current_layer: 0 } });
-  assert.equal(visible(field('stats-message')), true);
+  publish({
+    generation: 1,
+    stats: {
+      ...metrics,
+      phase: 'preparing',
+      printing_duration: 60,
+      current_layer: 0,
+      remaining: null,
+    },
+  });
+  assert.equal(field('stats-state').textContent, 'Preparing');
   assert.equal(visible(progress()), false);
   assert.equal(visible(field('remaining-value')), false);
-  assert.equal(visible(field('hotend-value')), true);
-  for (const started of [
-    { printing_duration: 0, current_layer: 1 },
-    { printing_duration: 60, current_layer: 0 },
-  ]) {
-    publish({ generation: 1, stats: { ...metrics, ...started } });
-    assert.equal(
-      visible(progress()),
-      true,
-      'Either extrusion or a first layer establishes a running print',
-    );
-    assert.equal(visible(field('stats-message')), false);
-  }
+  assert.equal(visible(field('plan-value')), true);
+  assert.match(field('plan-value').textContent!, /35m print plan \+ preparation/);
+  assert.equal(visible(field('elapsed-value')), true);
+  assert.equal(visible(field('finish-value')), false);
+  assert.equal(field('finish-unknown').textContent?.trim(), 'Finish unknown during preparation');
+  publish({ generation: 1, stats: { ...metrics, remaining: 1331.84 } });
+  assert.equal(visible(progress()), true);
+  assert.deepEqual(numbers(field('remaining-value')), [23]);
+  assert.equal(visible(field('finish-value')), true);
+  assert.equal(visible(field('plan-value')), false);
+  const finish = field('finish-value').textContent;
+  advance(3000);
+  assert.equal(field('finish-value').textContent, finish, 'No countdown between snapshots');
 });
+
+for (const phase of ['printing', 'unknown', 'finishing'] as const) {
+  test(`${phase} without an eligible estimate shows an original plan and unknown finish`, () => {
+    selectPrinter();
+    publish({ generation: 1, stats: { ...metrics, phase, remaining: null } });
+    assert.equal(visible(field('remaining-value')), false);
+    assert.equal(visible(field('plan-value')), true);
+    assert.match(field('plan-stat').textContent!, /Slicer plan at normal speed/);
+    assert.equal(visible(field('finish-value')), false);
+    assert.equal(field('finish-unknown').textContent?.trim(), 'Finish unknown');
+    if (phase === 'unknown') assert.match(field('stats-message').textContent!, /phase unknown/);
+    if (phase === 'finishing')
+      assert.match(field('stats-message').textContent!, /Finishing; ETA unknown/);
+  });
+}
 
 test('idle and missing status never present old job details as current', () => {
   selectPrinter();

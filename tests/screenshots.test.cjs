@@ -50,6 +50,12 @@ const settle = () => new Promise((resolve) => setImmediate(resolve));
           'Preparation does not imply print progress',
         );
         assert.equal(visible(get('stats-message')), phase === 'preparing');
+        assert.equal(visible(get('plan-value')), phase === 'preparing');
+        if (phase === 'preparing') {
+          assert.match(get('plan-value').textContent, /35m print plan \+ preparation/);
+          assert.equal(visible(get('finish-value')), false);
+          assert.match(get('finish-unknown').textContent, /Finish unknown during preparation/);
+        }
         assert.equal(visible(get('tool-value')), phase !== 'complete');
         if (phase === 'complete') {
           const bar = get('progress-bar');

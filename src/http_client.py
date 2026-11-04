@@ -90,6 +90,9 @@ class HttpClient:
                          for obj in objects)
         return self._query("/printer/objects/query?" + query)["status"]
 
+    def file_metadata(self, filename: str) -> dict:
+        return self._query("/server/files/metadata?filename=" + quote(filename, safe=""))
+
     def set_light(self, command: LightCommand) -> None:
         if type(command.enabled) is not bool:
             raise ValueError("Light state must be on or off.")

@@ -10,7 +10,14 @@ export interface PrintStats {
   total_layer?: number;
   elapsed?: number;
   printing_duration?: number;
+  // Eligible current estimate; zero only after completion.
   remaining?: number | null;
+  planned_total?: number | null;
+  phase?:
+    | 'preparing' // Layer zero, including purge and heating.
+    | 'printing' // A valid positive model layer.
+    | 'finishing' // Confirmed M73 completion while the job remains active.
+    | 'unknown'; // Missing or contradictory phase evidence.
   tool?: number;
   material?: string;
   color?: string;

@@ -41,6 +41,10 @@ Hover over the player to reveal Stop.
 Keyboard focus and touch also reveal the control.
 The light toggle works with playback started or stopped.
 
+During preparation, statistics show the slicer’s original print plan plus preparation, whose finish time is unknown.
+Supported OrcaSlicer jobs show approximate time left and finish time once model printing is confirmed at normal speed.
+When the inputs cannot support a finish estimate, the original plan stays labelled separately.
+
 Leaving the tab stops playback.
 Returning shows the play overlay.
 Switching to another app while the tab remains visible keeps playback running.

@@ -4,9 +4,9 @@
   const number = (value: unknown): value is number =>
     typeof value === 'number' && Number.isFinite(value) && value >= 0;
   const layer = (value: unknown) => (number(value) ? Math.floor(value).toLocaleString() : '—');
-  function duration(value: unknown) {
+  function duration(value: unknown, estimate = false) {
     if (!number(value)) return '—';
-    const minutes = Math.floor(value / 60);
+    const minutes = estimate ? Math.ceil(value / 60) : Math.floor(value / 60);
     return value === 0
       ? '0m'
       : minutes < 1
@@ -24,7 +24,7 @@
   }
   const states: Record<string, string> = {
     printing: 'Printing', // Active print, with progress and estimates.
-    preparing: 'Preparing', // Job started before extrusion or the first layer.
+    preparing: 'Preparing', // Before the first model layer, including early purge.
     paused: 'Paused', // Interrupted print, without a finish estimate.
     complete: 'Complete', // Finished print, with cooling temperatures.
     error: 'Error', // Failed job.
@@ -32,14 +32,15 @@
     standby: 'Standby', // No job running.
     unavailable: 'Status unavailable', // Status missing or older than ten seconds.
   };
-  // No extrusion time or first layer yet: preparation, even if the file has started.
-  const preparing = $derived(
-    stats?.state === 'printing' &&
-      stats.printing_duration === 0 &&
-      (!number(stats.current_layer) || stats.current_layer === 0),
-  );
+  const preparing = $derived(stats?.state === 'printing' && stats.phase === 'preparing');
   const state = $derived(preparing ? 'preparing' : (stats?.state ?? 'unavailable'));
   const printing = $derived(state === 'printing');
+  const showEstimate = $derived(
+    printing && stats?.phase === 'printing' && number(stats?.remaining),
+  );
+  const showPlan = $derived(
+    (printing || preparing) && !showEstimate && number(stats?.planned_total),
+  );
   const standby = $derived(state === 'standby');
   const missing = $derived(state === 'unavailable');
   const terminal = $derived(['complete', 'cancelled', 'error'].includes(state));
@@ -61,7 +62,11 @@
           ? heating
             ? 'Heating up'
             : 'Preparing to print'
-          : '',
+          : printing && stats?.phase === 'finishing'
+            ? 'Finishing; ETA unknown'
+            : printing && stats?.phase !== 'printing'
+              ? 'Print active; phase unknown'
+              : '',
   );
   const progress = $derived(number(stats?.progress) ? Math.min(100, stats.progress * 100) : null);
   const color = $derived(
@@ -70,9 +75,7 @@
       : null,
   );
   const finish = $derived(
-    stats?.state === 'printing' && number(stats.remaining)
-      ? new Date(receivedAt + stats.remaining * 1000)
-      : null,
+    showEstimate && number(stats?.remaining) ? new Date(receivedAt + stats.remaining * 1000) : null,
   );
   const finishTime = $derived(
     finish && Number.isFinite(finish.getTime())
@@ -89,7 +92,7 @@
   <h2 id="stats-title">Print statistics</h2>
   <div class="stats-gauge">
     <span id="stats-state">{states[state] ?? 'Unknown'}</span>
-    <span id="stats-message" hidden={!missing && !standby && !preparing}>{message}</span>
+    <span id="stats-message" hidden={!message}>{message}</span>
     <strong id="progress-value" hidden={standby || preparing || missing}
       >{progress === null ? '—' : Math.floor(progress) + '%'}</strong
     >
@@ -99,13 +102,25 @@
       >
     </div>
   </div>
-  <div id="journey-stat" class="stats-journey" hidden={standby || preparing || missing}>
-    <div id="remaining-stat" hidden={!printing}>
+  <div id="journey-stat" class="stats-journey" hidden={standby || missing}>
+    <div id="remaining-stat" hidden={!showEstimate}>
       <strong id="remaining-value"
-        >{number(stats?.remaining) ? '≈ ' + duration(stats.remaining) : '—'}</strong
+        >{number(stats?.remaining) ? '≈ ' + duration(stats.remaining, true) : '—'}</strong
       ><span>left</span>
     </div>
+    <div id="plan-stat" hidden={!showPlan}>
+      <strong id="plan-value"
+        >{number(stats?.planned_total) ? '≈ ' + duration(stats.planned_total, true) : '—'}{preparing
+          ? ' print plan + preparation'
+          : ''}</strong
+      >
+      <span hidden={preparing}>Slicer plan at normal speed</span>
+    </div>
+    <div id="finish-unknown" hidden={!(printing || preparing) || showEstimate}>
+      {preparing ? 'Finish unknown during preparation' : 'Finish unknown'}
+    </div>
     <div
+      hidden={preparing}
       id="progress-bar"
       role="progressbar"
       aria-label="Print progress"
@@ -123,7 +138,7 @@
         <dt>Elapsed</dt>
         <dd id="elapsed-value">{duration(stats?.elapsed)}</dd>
       </div>
-      <div id="finish-stat" hidden={!printing}>
+      <div id="finish-stat" hidden={!showEstimate}>
         <dt>Est. finish</dt>
         <dd id="finish-value">{finishTime}</dd>
       </div>
@@ -262,6 +277,21 @@
     color: #c0cbd5;
     font-size: 10px;
   }
+  #plan-value {
+    font-size: 16px;
+    font-weight: 550;
+    line-height: 1.4;
+  }
+  #plan-stat span {
+    display: block;
+    margin-top: 3px;
+  }
+  #plan-stat span,
+  #finish-unknown {
+    color: #c0cbd5;
+    font-size: 10px;
+    line-height: 1.4;
+  }
   #progress-bar {
     height: 4px;
     overflow: hidden;
@@ -375,8 +405,8 @@
     grid-template-columns: 1fr 1fr;
   }
   #stats[data-state='preparing'] {
-    width: 560px;
-    grid-template-columns: minmax(0, 1fr) 185px;
+    width: 720px;
+    grid-template-columns: 110px minmax(0, 1fr) 185px;
   }
   #stats[data-state='unavailable'] {
     width: 360px;
@@ -405,9 +435,6 @@
     }
     #progress-value {
       font-size: 36px;
-    }
-    #stats[data-state='preparing'] .stats-gauge {
-      grid-column: 1 / -1;
     }
     .stats-journey {
       padding-left: 12px;

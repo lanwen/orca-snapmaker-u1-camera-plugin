@@ -27,6 +27,37 @@ The page uses `visibilitychange` and `pagehide` to stop playback when leaving th
 App and keyboard focus do not control playback.
 Test the embedded webview when upgrading Orca or using another platform.
 
+## Print duration and finish estimates
+
+`planned_total` is the original positive, finite slicer `estimated_time` from the active file's bounded metadata response.
+It is never current time left.
+`remaining` is an eligible current estimate, null when unknown, and zero only for completed jobs.
+Elapsed and printing durations are the printer's clocks; neither clock is subtracted from the plan or extrapolated from file bytes.
+
+Layer zero means `preparing`, even after purge gives a positive printing duration.
+A positive integer model layer means `printing`; absent, invalid, or contradictory markers mean `unknown`.
+Confirmed M73 progress of 100% during an active job means `finishing`, with unknown ETA.
+Preparation has unknown remaining duration; no learned startup constant is applied.
+
+Finish estimates currently support metadata identifying `OrcaSlicer`, including the 2.5.0-dev producer, using its normal-mode time plan.
+Other producers, including unverified SnapmakerOrca variants, show only the original plan.
+The same status query must include display and virtual-SD progress fractions between zero and one.
+Display progress must differ from byte progress by more than 0.000001 and represent an integer percentage within 0.000001 after multiplication by 100.
+Under the standard [U1 display fallback](https://github.com/Snapmaker/u1-klipper/blob/7ac453b50fe6779b2ec0b759038a17da5e6d671d/klippy/extras/display_status.py#L20-L39) and [Orca M73 convention](https://github.com/OrcaSlicer/OrcaSlicer/blob/7e3d5d4d040a519815f62dc9dc94a0cf75ccb0c2/src/libslic3r/GCode/GCodeProcessor.cpp#L1455-L1471), this is conditional evidence of simulated-time progress.
+Only raw state `printing`, model phase `printing`, and a finite speed factor within 0.000001 of one permit `planned_total * (1 - display_progress)`.
+Paused jobs, speed overrides, missing inputs, and ambiguous source evidence have no finish forecast.
+The UI rounds plan and remaining durations up to minutes and anchors finish time to the received snapshot without animating a countdown.
+
+Metadata refreshes at most every 30 seconds, including successful entries, to observe updated metadata.
+Filename or file-size changes, inactive-to-active transitions, and backwards clock or file-position movement clear cached metadata and fetch immediately.
+Pause/resume without a reset remains the same run.
+A failed or malformed refresh clears estimate metadata until the next bounded retry while live status remains usable.
+A fresh connection starts without cached metadata and can estimate immediately from an eligible mid-print snapshot.
+A metadata size that differs from a known active-reader file size is rejected.
+Size and modified metadata do not prove content identity when an overwrite preserves the observed fields.
+This bounded inference cannot certify unknown firmware, manual progress commands, or derivative slicers.
+The installed Orca development build and full cold/warm accuracy still require field validation.
+
 ## Connection discovery
 
 An explicit plugin host takes priority over the selected preset.

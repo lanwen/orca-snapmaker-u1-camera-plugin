@@ -11,7 +11,7 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[1]
 STATES = (
     "printing",  # Active job, with progress and finish estimates.
-    "preparing",  # Before extrusion, with heaters still warming.
+    "preparing",  # Layer zero, including early purge while heaters warm.
     "paused",  # Interrupted job, with estimates suppressed.
     "complete",  # Finished job, with current cooling temperatures.
 )
@@ -37,15 +37,16 @@ def image_uri(camera=None):
 def screenshot_page(camera=None):
     page = (ROOT / "dist/ui/camera.html").read_text()
     fixtures = {
-        "printing": {"state": "printing", "progress": .42, "current_layer": 36,
+        "printing": {"state": "printing", "phase": "printing", "planned_total": 5200, "progress": .42, "current_layer": 36,
                      "total_layer": 86, "elapsed": 2160, "printing_duration": 2100,
                      "remaining": 3000, "tool": 3, "material": "PLA", "color": "#FFFFFF",
                      "bed": {"temperature": 59, "target": 60},
                      "hotend": {"temperature": 209, "target": 210}},
     }
-    # Before extrusion: show preparation and heater targets, without an ETA.
+    # Layer zero can include positive extrusion time; preparation has no ETA.
     fixtures["preparing"] = dict(fixtures["printing"], progress=0, current_layer=0,
-                                  elapsed=96, printing_duration=0, remaining=None,
+                                  phase="preparing", planned_total=2081,
+                                  elapsed=96, printing_duration=30, remaining=None,
                                   bed={"temperature": 42, "target": 60},
                                   hotend={"temperature": 157, "target": 210})
     fixtures["paused"] = dict(fixtures["printing"], state="paused", remaining=None,
