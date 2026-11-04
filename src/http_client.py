@@ -60,6 +60,7 @@ class HttpClient:
             )
         self.request_id += 1
         request_id = self.request_id
+        self.ws.settimeout(2)
         self.ws.send(json.dumps({"jsonrpc": "2.0", "id": request_id,
                                  "method": "camera.start_monitor",
                                  "params": {"domain": "lan", "interval": 0}}))

@@ -168,6 +168,24 @@ class ClientTests(unittest.TestCase):
         printer.close()
         ws.close.assert_called_once_with(timeout=0)
 
+    def test_monitor_renewal_resets_send_timeout_after_late_ack(self):
+        client = plugin.HttpClient(self.address)
+        ws = Mock()
+        ws.timeout = 2
+        ws.settimeout.side_effect = lambda timeout: setattr(ws, 'timeout', timeout)
+        send_timeouts = []
+        ws.send.side_effect = lambda _: send_timeouts.append(ws.timeout)
+        ws.recv.side_effect = [json.dumps({"method": "notification"}),
+                               json.dumps({"id": 1, "result": {}}),
+                               json.dumps({"id": 2, "result": {}})]
+        with patch.object(plugin.websocket, "create_connection", return_value=ws), \
+                patch.object(plugin.time, "monotonic", side_effect=[0, 0, 1.999, 10, 10]):
+            client.start_monitor()
+            self.assertAlmostEqual(ws.timeout, .001)
+            client.start_monitor()
+        self.assertEqual(send_timeouts, [2, 2])
+        client.close()
+
     def test_monitor_renewal_reads_ack_after_queued_notifications(self):
         client = plugin.HttpClient(self.address)
         ws = Mock()
