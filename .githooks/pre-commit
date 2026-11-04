@@ -1,4 +1,4 @@
 #!/bin/sh
 set -eu
 
-exec mise exec -- pnpm check:commit
+exec mise exec -- pnpm exec lint-staged --concurrent false
