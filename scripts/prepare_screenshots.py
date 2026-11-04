@@ -208,7 +208,7 @@ iframe { display:block; border:0; background:#0b0e12; }
     return entry
 
 
-def export_showcase(directory, destination):
+def find_browser():
     browser = shutil.which("chromium") or shutil.which("google-chrome")
     if not browser:
         chrome = Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
@@ -216,6 +216,11 @@ def export_showcase(directory, destination):
             browser = str(chrome)
     if not browser:
         raise RuntimeError("Install Chrome or Chromium to export the PNG.")
+    return browser
+
+
+def export_showcase(directory, destination):
+    browser = find_browser()
     destination = Path(destination).resolve()
     destination.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="u1-screenshot-browser-") as profile:

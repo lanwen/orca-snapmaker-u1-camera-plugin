@@ -17,6 +17,8 @@ import release
 release.read_version = lambda root: "0.4.1.dev0"
 release.open_release_body = lambda: ""
 release.prepare_pr = lambda *args: json.loads(os.environ["RELEASE_PLAN"])
+release.snapshot_only = lambda pr: True
+release.check_pr = lambda event: None
 sys.argv = ["release.py", sys.argv[-1].split(":")[-1]]
 release.main()
 '''
@@ -38,10 +40,12 @@ class ReleaseOutputTests(unittest.TestCase):
             mise.chmod(0o755)
             output = root / "outputs"
             output.write_text("earlier=preserved\n")
+            event = root / "event.json"
+            event.write_text(json.dumps({"pull_request": {}}))
             env = dict(os.environ, PATH=str(root) + os.pathsep + os.environ["PATH"],
                        GITHUB_OUTPUT=str(output), RELEASE_PYTHON=sys.executable,
                        RELEASE_SCRIPTS=str(ROOT / "scripts"), RELEASE_DRIVER=str(driver),
-                       RELEASE_PLAN=json.dumps(plan), RELEASE_MODE="release")
+                       RELEASE_PLAN=json.dumps(plan), RELEASE_MODE="release", GITHUB_EVENT_PATH=str(event))
             result = subprocess.run(["sh", "-eu", "-c", command], env=env,
                                     capture_output=True, text=True, check=True)
             lines = output.read_text().splitlines()
@@ -64,6 +68,12 @@ class ReleaseOutputTests(unittest.TestCase):
     def test_version_info_survives_noisy_setup(self):
         self.run_workflow_command("release.yml", "info",
                                   {"version": "0.4.1.dev0", "final": "false"})
+
+    def test_code_workflow_receives_snapshot_classification(self):
+        self.run_workflow_command("check.yml", "classify-pr", {"snapshot_only": "true"})
+
+    def test_metadata_workflow_checks_policy(self):
+        self.run_workflow_command("pr-policy.yml", "check-pr", {"snapshot_only": "true"})
 
     def test_local_cli_still_prints_version_info_without_github_output(self):
         with tempfile.TemporaryDirectory() as directory:
