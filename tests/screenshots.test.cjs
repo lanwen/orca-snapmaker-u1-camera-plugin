@@ -51,7 +51,6 @@ const settle = () => new Promise((resolve) => setImmediate(resolve));
           assert.match(get('plan-value').textContent, /35m print plan \+ preparation/);
           assert.equal(visible(get('finish-value')), true);
           assert.match(get('finish-value').textContent, /^after /);
-          assert.equal(visible(get('finish-unknown')), false);
           assert.equal(get('progress-bar').hasAttribute('aria-valuenow'), false);
           assert.equal(
             get('progress-bar').getAttribute('aria-valuetext'),
@@ -129,13 +128,26 @@ const settle = () => new Promise((resolve) => setImmediate(resolve));
       await settle();
       assert.equal(doc.getElementById('stats').dataset.state, rendered, state);
       assert.equal(picker.value, state);
+      assert.equal(
+        doc.getElementById('progress-bar').hasAttribute('data-shimmer'),
+        [
+          'printing',
+          'preparing',
+          'preparing-warm',
+          'paused',
+          'finishing',
+          'phase-unknown',
+          'plan-only',
+          'preparing-no-plan',
+        ].includes(state),
+      );
       const bar = doc.getElementById('progress-bar');
       if (state === 'preparing') assert.equal(bar.hasAttribute('data-heating'), true);
       if (state === 'preparing-warm') assert.equal(bar.hasAttribute('data-heating'), false);
       if (state === 'finishing')
         assert.match(doc.getElementById('stats-message').textContent, /Finishing/);
       if (state === 'phase-unknown')
-        assert.match(doc.getElementById('stats-message').textContent, /phase unknown/);
+        assert.equal(doc.getElementById('stats-state').textContent, 'Printing');
       if (state === 'preparing-no-plan') assert.equal(doc.getElementById('plan-stat').hidden, true);
     }
     doc.body.dispatchEvent(

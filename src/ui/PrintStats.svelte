@@ -27,6 +27,10 @@
   }
   function temperature(value: Heater = {}, showTarget = true) {
     const degrees = (item: unknown) => (number(item) ? Math.round(item) : '—');
+    if (!number(value.temperature))
+      return showTarget && number(value.target) && value.target > 0
+        ? 'Target ' + degrees(value.target) + ' °C'
+        : '';
     const target =
       showTarget &&
       number(value.target) &&
@@ -47,6 +51,7 @@
   const preparing = $derived(stats?.state === 'printing' && stats.phase === 'preparing');
   const state = $derived(preparing ? 'preparing' : (stats?.state ?? 'unavailable'));
   const printing = $derived(state === 'printing');
+  const activePrint = $derived(stats?.state === 'printing' || stats?.state === 'paused');
   const showEstimate = $derived(
     printing && stats?.phase === 'printing' && number(stats?.remaining),
   );
@@ -79,17 +84,24 @@
             ? 'Heating up'
             : 'Preparing to print'
           : printing && stats?.phase === 'finishing'
-            ? 'Finishing; ETA unknown'
-            : printing && stats?.phase !== 'printing'
-              ? 'Print active; phase unknown'
-              : '',
+            ? 'Finishing'
+            : '',
   );
   const progress = $derived(number(stats?.progress) ? Math.min(100, stats.progress * 100) : null);
+  const indeterminate = $derived(preparing || (activePrint && !progress));
   const color = $derived(
     typeof stats?.color === 'string' && /^#[0-9a-f]{6}$/i.test(stats.color)
       ? stats.color.toUpperCase()
       : null,
   );
+  const showTool = $derived(
+    !terminal && !standby && Number.isInteger(stats?.tool) && number(stats?.tool) && stats.tool < 4,
+  );
+  const showMaterial = $derived(
+    !standby && state !== 'error' && Boolean(showTool || stats?.material || color),
+  );
+  const bedTemperature = $derived(temperature(stats?.bed, !terminal && !standby));
+  const hotendTemperature = $derived(temperature(stats?.hotend, !terminal && !standby));
   const finish = $derived(
     preparationFinish && number(stats?.planned_total)
       ? new Date(receivedAt + stats.planned_total * 1000)
@@ -111,12 +123,20 @@
 <section id="stats" aria-labelledby="stats-title" tabindex="0" hidden={!stats} data-state={state}>
   <h2 id="stats-title">Print statistics</h2>
   <div class="stats-gauge">
-    <span id="stats-state">{states[state] ?? 'Unknown'}</span>
+    <span id="stats-state" hidden={!states[state]}>{states[state] ?? ''}</span>
     <span id="stats-message" hidden={!message}>{message}</span>
-    <strong id="progress-value" hidden={standby || preparing || missing}
+    <strong id="progress-value" hidden={standby || preparing || missing || progress === null}
       >{progress === null ? '—' : Math.floor(progress) + '%'}</strong
     >
-    <div id="layers-stat" class="layers" hidden={standby || preparing || missing}>
+    <div
+      id="layers-stat"
+      class="layers"
+      hidden={standby ||
+        preparing ||
+        missing ||
+        !number(stats?.current_layer) ||
+        !number(stats?.total_layer)}
+    >
       Layers<span id="layers-value"
         >{layer(stats?.current_layer)} / {layer(stats?.total_layer)}</span
       >
@@ -136,26 +156,33 @@
       >
       <span hidden={preparing}>Slicer plan at normal speed</span>
     </div>
-    <div id="finish-unknown" hidden={!(printing || preparing) || showFinish}>Finish unknown</div>
     <div
       id="progress-bar"
-      data-indeterminate={preparing || undefined}
+      hidden={!activePrint && progress === null}
+      data-indeterminate={indeterminate || undefined}
+      data-shimmer={activePrint || undefined}
       data-heating={(preparing && heating) || undefined}
       role="progressbar"
-      aria-label={preparing ? 'Preparing print' : 'Print progress'}
+      aria-label={preparing
+        ? 'Preparing print'
+        : indeterminate
+          ? 'Print activity'
+          : 'Print progress'}
       aria-valuemin="0"
       aria-valuemax="100"
-      aria-valuenow={preparing || progress === null ? undefined : Math.floor(progress)}
+      aria-valuenow={indeterminate || progress === null ? undefined : Math.floor(progress)}
       aria-valuetext={preparing
         ? 'Preparation in progress'
-        : progress === null
-          ? 'Progress unavailable'
-          : Math.floor(progress) + '% complete'}
+        : stats?.state === 'paused'
+          ? 'Print paused'
+          : progress === null
+            ? 'Print in progress'
+            : Math.floor(progress) + '% complete'}
     >
-      <span id="progress-fill" style:width={(preparing ? 100 : (progress ?? 0)) + '%'}></span>
+      <span id="progress-fill" style:width={(indeterminate ? 100 : (progress ?? 0)) + '%'}></span>
     </div>
-    <dl class="stats-times">
-      <div>
+    <dl class="stats-times" hidden={!number(stats?.elapsed) && !showFinish}>
+      <div hidden={!number(stats?.elapsed)}>
         <dt>Elapsed</dt>
         <dd id="elapsed-value" title="Printer-reported elapsed time, to the second">
           {elapsedClock(stats?.elapsed)}
@@ -174,15 +201,19 @@
       </div>
     </dl>
   </div>
-  <div id="hardware-stat" class="stats-details" hidden={missing}>
-    <div id="material-stat" class="material" hidden={standby || state === 'error'}>
-      <span id="tool-stat" hidden={terminal || standby}
+  <div
+    id="hardware-stat"
+    class="stats-details"
+    hidden={missing || (!showMaterial && !bedTemperature && !hotendTemperature)}
+  >
+    <div id="material-stat" class="material" hidden={!showMaterial}>
+      <span id="tool-stat" hidden={!showTool}
         ><span id="tool-value" title="Toolhead"
           >{Number.isInteger(stats?.tool) && number(stats?.tool) && stats.tool < 4
             ? 'T' + stats.tool
             : '—'}</span
         ></span
-      ><span id="material-value">{stats?.material || 'Unknown material'}</span><span
+      ><span id="material-value" hidden={!stats?.material}>{stats?.material ?? ''}</span><span
         id="material-swatch"
         aria-hidden="true"
         hidden={!color}
@@ -190,13 +221,13 @@
       ></span>
     </div>
     <dl class="temperatures">
-      <div>
+      <div hidden={!bedTemperature}>
         <dt id="bed-label">Bed</dt>
-        <dd id="bed-value">{temperature(stats?.bed, !terminal && !standby)}</dd>
+        <dd id="bed-value">{bedTemperature}</dd>
       </div>
-      <div>
+      <div hidden={!hotendTemperature}>
         <dt id="hotend-label">Hotend</dt>
-        <dd id="hotend-value">{temperature(stats?.hotend, !terminal && !standby)}</dd>
+        <dd id="hotend-value">{hotendTemperature}</dd>
       </div>
     </dl>
   </div>
@@ -321,8 +352,7 @@
     display: block;
     margin-top: 3px;
   }
-  #plan-stat span,
-  #finish-unknown {
+  #plan-stat span {
     color: #c0cbd5;
     font-size: 10px;
     line-height: 1.4;
@@ -351,7 +381,7 @@
   #progress-bar[data-heating] #progress-fill {
     background: #ffaf6538;
   }
-  #stats:is([data-state='printing'], [data-state='preparing']) #progress-fill::after {
+  #progress-bar[data-shimmer] #progress-fill::after {
     content: '';
     position: absolute;
     inset: 0;
@@ -369,13 +399,18 @@
     opacity: 0.55;
     animation-duration: 3.2s;
   }
+  #stats[data-state='paused'] #progress-fill::after {
+    --progress-highlight: #ffe2a3;
+    opacity: 0.55;
+    animation-duration: 3.2s;
+  }
   @keyframes progress-shimmer {
     to {
       transform: translateX(100%);
     }
   }
   @media (prefers-reduced-motion: reduce) {
-    #stats:is([data-state='printing'], [data-state='preparing']) #progress-fill::after {
+    #progress-bar[data-shimmer] #progress-fill::after {
       animation: none;
       transform: none;
     }

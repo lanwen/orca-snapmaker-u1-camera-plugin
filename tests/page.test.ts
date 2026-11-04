@@ -193,6 +193,7 @@ test('pausing hides moving estimates and resuming restores them', () => {
   );
   assert.equal(visible(field('remaining-value')), false);
   assert.equal(visible(field('finish-value')), false);
+  assert.equal(progress().hasAttribute('data-shimmer'), true);
   assert.equal(visible(progress()), true, 'Pausing retains completed progress');
   assert.equal(visible(field('tool-value')), true);
   publish({ generation: 1, stats: metrics });
@@ -210,6 +211,7 @@ for (const state of ['complete', 'cancelled', 'error']) {
     assert.equal(visible(field('remaining-value')), false);
     assert.equal(visible(field('finish-value')), false);
     assert.equal(visible(field('tool-value')), false);
+    assert.equal(progress().hasAttribute('data-shimmer'), false);
     assert.deepEqual(numbers(field('hotend-value')), [235]);
     assert.equal(visible(progress()), true);
     if (state === 'complete') assert.equal(Number(progress().getAttribute('aria-valuenow')), 100);
@@ -274,7 +276,6 @@ test('layer-zero purge keeps preparation and its plan separate from remaining ti
   assert.equal(visible(field('elapsed-value')), true);
   assert.equal(visible(field('finish-value')), true);
   assert.match(field('finish-value').textContent!, /^after /);
-  assert.equal(visible(field('finish-unknown')), false);
   publish({ generation: 1, stats: { ...metrics, remaining: 1331.84 } });
   assert.equal(visible(progress()), true);
   assert.deepEqual(numbers(field('remaining-value')), [23]);
@@ -286,17 +287,16 @@ test('layer-zero purge keeps preparation and its plan separate from remaining ti
 });
 
 for (const phase of ['printing', 'unknown', 'finishing'] as const) {
-  test(`${phase} without an eligible estimate shows an original plan and unknown finish`, () => {
+  test(`${phase} without an eligible estimate shows the known plan and hides unavailable estimates`, () => {
     selectPrinter();
     publish({ generation: 1, stats: { ...metrics, phase, remaining: null } });
     assert.equal(visible(field('remaining-value')), false);
     assert.equal(visible(field('plan-value')), true);
     assert.match(field('plan-stat').textContent!, /Slicer plan at normal speed/);
     assert.equal(visible(field('finish-value')), false);
-    assert.equal(field('finish-unknown').textContent?.trim(), 'Finish unknown');
-    if (phase === 'unknown') assert.match(field('stats-message').textContent!, /phase unknown/);
-    if (phase === 'finishing')
-      assert.match(field('stats-message').textContent!, /Finishing; ETA unknown/);
+    if (phase === 'unknown') assert.equal(visible(field('stats-message')), false);
+    if (phase === 'finishing') assert.equal(field('stats-message').textContent, 'Finishing');
+    assert.equal(progress().hasAttribute('data-shimmer'), true);
   });
 }
 
@@ -340,16 +340,32 @@ test('unknown or invalid measurements stay unknown rather than becoming NaN or z
   });
   assert.equal(progress().hasAttribute('aria-valuenow'), false);
   for (const id of ['layers-value', 'tool-value', 'hotend-value', 'remaining-value']) {
+    assert.equal(visible(field(id)), false, `${id} hides missing measurements`);
     assert.deepEqual(numbers(field(id)), [], `${id} does not invent a measurement`);
     assert.doesNotMatch(field(id).textContent!, /NaN|undefined|null/);
   }
   assert.equal(visible(field('material-swatch')), false);
+  assert.equal(visible(field('material-value')), false);
+  assert.equal(visible(field('elapsed-value')), false);
+  assert.equal(visible(field('progress-value')), false);
+  assert.equal(progress().hasAttribute('data-shimmer'), true);
   publish({ generation: 1, stats: { ...metrics, progress: 1.5 } });
   assert.equal(
     Number(progress().getAttribute('aria-valuenow')),
     100,
     'Progress cannot exceed completion',
   );
+});
+
+test('a known heater target is shown without inventing a current temperature', () => {
+  selectPrinter();
+  publish({ generation: 1, stats: { ...metrics, bed: { target: 60 }, hotend: { target: 210 } } });
+  assert.equal(field('bed-value').textContent, 'Target 60 °C');
+  assert.equal(field('hotend-value').textContent, 'Target 210 °C');
+  assert.equal(visible(field('hotend-value')), true);
+  publish({ generation: 1, stats: { ...metrics, state: 'complete', bed: {}, hotend: {} } });
+  assert.equal(visible(field('bed-value')), false);
+  assert.equal(visible(field('hotend-value')), false);
 });
 
 test('light toggles are host-confirmed and work without starting playback', () => {

@@ -78,6 +78,15 @@ The four standalone views include a simulated Orca window and the selected Snapm
 They use the production camera page with fixed sample data and make no printer requests.
 No Orca installation is needed.
 
+For repeated reviews with dependencies already installed, rebuild the self-contained preview directly:
+
+```sh
+mise exec -- python scripts/build.py
+mise exec -- python scripts/prepare_screenshots.py
+```
+
+Open or refresh `dist/screenshots/index.html` and review affected states at desktop and narrow widths.
+
 The default camera image and app chrome come from the existing README screenshot.
 To use another local camera frame, run `python scripts/prepare_screenshots.py --camera /path/to/frame.jpg`.
 
