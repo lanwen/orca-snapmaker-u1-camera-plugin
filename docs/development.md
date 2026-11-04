@@ -71,7 +71,9 @@ See [release automation](releases.md) for versioning and publishing.
 ## README screenshots
 
 Run `mise run screenshots:prepare`, then open `dist/screenshots/index.html` in a browser.
-Use the preview state picker to inspect all print states, including heating, warm preparation, unavailable estimates, errors, and idle status.
+Hover over the floating control on the left to choose a print state, including heating, warm preparation, unavailable estimates, errors, and idle status.
+Use the arrow buttons below it to move to the previous or next state.
+You can also click the state button or reach it with the keyboard.
 The four-state showcase remains a separate view for README screenshots.
 The four standalone views include a simulated Orca window and the selected Snapmaker U1 tab.
 They use the production camera page with fixed sample data and make no printer requests.

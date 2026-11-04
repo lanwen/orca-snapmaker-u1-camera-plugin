@@ -119,15 +119,23 @@ const settle = () => new Promise((resolve) => setImmediate(resolve));
       'preparing-no-plan': 'preparing',
     };
     assert.deepEqual(
-      Array.from(picker.options, (option) => option.value),
+      Array.from(
+        doc.querySelectorAll('[data-preview-state]'),
+        (button) => button.dataset.previewState,
+      ),
       Object.keys(cases),
     );
     for (const [state, rendered] of Object.entries(cases)) {
-      picker.value = state;
-      picker.dispatchEvent(new preview.window.Event('change', { bubbles: true }));
+      picker.click();
+      assert.equal(picker.getAttribute('aria-expanded'), 'true');
+      doc.querySelector(`[data-preview-state="${state}"]`).click();
       await settle();
       assert.equal(doc.getElementById('stats').dataset.state, rendered, state);
-      assert.equal(picker.value, state);
+      assert.equal(
+        doc.querySelector('[data-preview-state][aria-pressed="true"]').dataset.previewState,
+        state,
+      );
+      assert.equal(picker.getAttribute('aria-expanded'), 'false');
       if (['phase-unknown', 'plan-only', 'preparing-no-plan'].includes(state))
         assert.equal(doc.getElementById('printer').textContent, 'Printing');
       assert.equal(
@@ -156,7 +164,35 @@ const settle = () => new Promise((resolve) => setImmediate(resolve));
       new preview.window.KeyboardEvent('keydown', { key: '1', bubbles: true }),
     );
     await settle();
-    assert.equal(picker.value, 'printing', 'Keyboard shortcuts keep the picker in sync');
+    assert.equal(
+      doc.querySelector('[data-preview-state][aria-pressed="true"]').dataset.previewState,
+      'printing',
+      'Keyboard shortcuts keep the picker in sync',
+    );
+    doc.querySelector('[data-preview-step="-1"]').click();
+    await settle();
+    assert.equal(
+      doc.querySelector('[data-preview-state][aria-pressed="true"]').dataset.previewState,
+      'preparing-no-plan',
+      'Previous wraps to the last state',
+    );
+    doc.querySelector('[data-preview-step="1"]').click();
+    await settle();
+    assert.equal(
+      doc.getElementById('stats').dataset.state,
+      'printing',
+      'Next wraps to the first state',
+    );
+    picker.blur();
+    doc.getElementById('preview-picker').dispatchEvent(new preview.window.Event('pointerenter'));
+    assert.equal(picker.getAttribute('aria-expanded'), 'true', 'Hover opens the state choices');
+    doc.getElementById('preview-picker').dispatchEvent(new preview.window.Event('pointerleave'));
+    assert.equal(picker.getAttribute('aria-expanded'), 'false', 'Leaving closes the state choices');
+    picker.click();
+    doc.body.dispatchEvent(
+      new preview.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
+    );
+    assert.equal(picker.getAttribute('aria-expanded'), 'false', 'Escape closes the choices');
     assert.deepEqual(previewErrors, []);
   } finally {
     preview.window.close();

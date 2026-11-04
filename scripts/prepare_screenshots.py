@@ -103,8 +103,11 @@ const screenshotStates = Object.keys(screenshotFixtures);
 const screenshotImage = __IMAGE__;
 let screenshotState = __SCREENSHOT_STATE__, screenshotHandler, screenshotLight = true, screenshotStarted = false;
 function publishScreenshot() {
-  const picker = document.getElementById('preview-state');
-  if (picker) picker.value = screenshotState;
+  const trigger = document.getElementById('preview-state');
+  if (trigger) trigger.title = 'Preview state: ' + screenshotLabels[screenshotState];
+  document.querySelectorAll('[data-preview-state]').forEach(button => {
+    button.setAttribute('aria-pressed', String(button.dataset.previewState === screenshotState));
+  });
   screenshotHandler({type:'target', generation:1, target:'Workshop · Snapmaker U1'});
   screenshotHandler({generation:1, printer:screenshotLabels[screenshotFixtures[screenshotState].state],
     light:screenshotLight, stats:screenshotFixtures[screenshotState],
@@ -124,10 +127,40 @@ window.orca = {
   }
 };
 window.addEventListener('DOMContentLoaded', () => {
-  document.getElementById('preview-state')?.addEventListener('change', event => {
-    if (!screenshotStates.includes(event.target.value)) return;
-    screenshotState = event.target.value;
-    publishScreenshot();
+  const picker = document.getElementById('preview-picker');
+  const trigger = document.getElementById('preview-state');
+  const menu = document.getElementById('preview-menu');
+  const showMenu = (open) => {
+    if (!menu) return;
+    menu.hidden = !open;
+    trigger.setAttribute('aria-expanded', String(open));
+  };
+  picker?.addEventListener('pointerenter', () => showMenu(true));
+  picker?.addEventListener('pointerleave', () => showMenu(false));
+  picker?.addEventListener('focusout', event => {
+    if (!picker.contains(event.relatedTarget)) showMenu(false);
+  });
+  trigger?.addEventListener('click', () => showMenu(menu.hidden));
+  document.querySelectorAll('[data-preview-state]').forEach(button => {
+    button.addEventListener('click', () => {
+      screenshotState = button.dataset.previewState;
+      publishScreenshot();
+      showMenu(false);
+      trigger.focus();
+    });
+  });
+  document.querySelectorAll('[data-preview-step]').forEach(button => {
+    button.addEventListener('click', () => {
+      const index = screenshotStates.indexOf(screenshotState);
+      screenshotState = screenshotStates[(index + Number(button.dataset.previewStep) + screenshotStates.length) % screenshotStates.length];
+      publishScreenshot();
+    });
+  });
+  document.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && menu && !menu.hidden) {
+      showMenu(false);
+      trigger.focus();
+    }
   });
   document.addEventListener('keydown', event => {
     if (event.ctrlKey || event.metaKey || event.altKey || event.target.closest('input,textarea,select,[contenteditable]')) return;
@@ -170,21 +203,36 @@ body { --viewer-top:calc(100vw * .05231144); }
     output.mkdir(parents=True, exist_ok=True)
     for state in STATES:
         (output / (state + ".html")).write_text(page.replace("__SCREENSHOT_STATE__", json.dumps(state)))
-    options = "".join('<option value="' + state + '"' +
-                      (' selected' if state == "preparing" else '') + '>' + label + '</option>'
+    options = "".join('<button type="button" data-preview-state="' + state +
+                      '" aria-pressed="' + str(state == "preparing").lower() + '">' + label + '</button>'
                       for state, label in PREVIEW_LABELS.items())
-    controls = ('<aside id="preview-controls"><label for="preview-state">Preview state</label>'
-                '<select id="preview-state">' + options + '</select>'
-                '<span>Offline sample data</span><a href="showcase.html">Showcase</a></aside>')
+    controls = ('<aside id="preview-controls" aria-label="Offline preview controls">'
+                '<div id="preview-picker"><button type="button" id="preview-state" '
+                'aria-label="Choose preview state" aria-expanded="false" aria-controls="preview-menu" '
+                'title="Preview state: Heating"><span aria-hidden="true">◫</span></button>'
+                '<div id="preview-menu" hidden><div class="preview-panel">'
+                '<strong>Preview state</strong><small>Offline sample data</small>' + options +
+                '<a href="showcase.html">Open showcase ↗</a></div></div></div>'
+                '<button type="button" data-preview-step="-1" aria-label="Previous preview state" '
+                'title="Previous state"><span aria-hidden="true">↑</span></button>'
+                '<button type="button" data-preview-step="1" aria-label="Next preview state" '
+                'title="Next state"><span aria-hidden="true">↓</span></button></aside>')
     preview_style = """<style>
-#preview-controls { position:fixed; inset:0 0 auto; height:56px; padding:10px 20px; display:flex; align-items:center; gap:12px; background:#10151b; border-bottom:1px solid #ffffff20; z-index:10; font:13px/1.4 system-ui; }
-#preview-controls label { color:#b6c4d0; }
-#preview-controls select { min-width:170px; max-width:220px; padding:7px 10px; border:1px solid #ffffff30; border-radius:7px; background:#1b2630; color:#edf3f9; font:inherit; }
-#preview-controls span { margin-left:auto; color:#9aabb8; }
-#preview-controls a { color:#a0cbff; }
-.orca-chrome { top:56px; }
-body { --viewer-top:calc(56px + 100vw * .05231144); }
-@media(max-width:600px) { #preview-controls { padding:10px 12px; } #preview-controls span, #preview-controls a { display:none; } }
+#preview-controls { position:fixed; left:12px; top:40%; transform:translateY(-50%); z-index:10; width:42px; padding:4px; display:grid; gap:2px; border:1px solid #ffffff30; border-radius:24px; background:#17212ef5; box-shadow:0 12px 32px #0008, 0 2px 6px #0006, inset 0 1px #ffffff18; font:12px/1.3 system-ui; }
+#preview-controls button { display:block; width:100%; border:0; border-radius:18px; padding:9px 0; background:transparent; color:#dce8f4; cursor:pointer; font:inherit; }
+#preview-controls button:hover, #preview-controls button:focus-visible { background:#ffffff16; }
+#preview-controls button:focus-visible, #preview-controls a:focus-visible { outline:2px solid #7abaff; outline-offset:1px; }
+#preview-controls button span { font-size:18px; line-height:18px; }
+#preview-picker { position:relative; }
+#preview-controls #preview-state { background:#7abaff20; color:#a0cbff; }
+#preview-menu { position:absolute; left:100%; top:50%; transform:translateY(-50%); padding-left:10px; width:min(242px, calc(100vw - 64px)); }
+.preview-panel { max-height:calc(80dvh - 120px); overflow-y:auto; padding:10px; border:1px solid #ffffff30; border-radius:16px; background:#17212efa; box-shadow:0 16px 40px #0009, 0 2px 6px #0006; }
+.preview-panel strong, .preview-panel small { display:block; padding:0 8px; }
+.preview-panel strong { color:#edf3f9; font-size:12px; }
+.preview-panel small { margin:3px 0 8px; color:#9aabb8; font-size:10px; }
+#preview-controls .preview-panel button { padding:7px 8px; border-radius:7px; text-align:left; }
+#preview-controls .preview-panel button[aria-pressed="true"] { background:#7abaff25; color:#b9daff; }
+#preview-controls .preview-panel a { display:block; margin-top:6px; padding:8px; border-top:1px solid #ffffff20; color:#a0cbff; text-decoration:none; }
 </style>"""
     index = (page.replace("__SCREENSHOT_STATE__", json.dumps("preparing"))
              .replace("</head>", preview_style + "</head>")
@@ -196,14 +244,15 @@ body { --viewer-top:calc(56px + 100vw * .05231144); }
                     for state in STATES[1:])
     (output / "showcase.html").write_text('''<!doctype html><html lang="en"><head><meta charset="utf-8">
 <title>Snapmaker U1 · Camera and print states</title><style>
-* { box-sizing:border-box; } html,body { margin:0; width:960px; height:1628px; overflow:hidden; }
-body { padding:24px; background:#10151b; color:#edf3f9; font:18px system-ui; display:flex; flex-direction:column; gap:18px; }
+* { box-sizing:border-box; } html,body { margin:0; width:100%; min-height:100%; }
+body { max-width:960px; margin:0 auto; padding:24px; background:#10151b; color:#edf3f9; font:18px system-ui; display:flex; flex-direction:column; gap:18px; }
 section { display:flex; flex-direction:column; gap:10px; flex:none; }
 h2 { margin:0; font-size:20px; line-height:24px; font-weight:550; }
 iframe { display:block; border:0; background:#0b0e12; }
 .hero iframe { width:100%; height:480px; border:1px solid #ffffff20; border-radius:12px; }
 .crop { position:relative; height:300px; overflow:hidden; border:1px solid #ffffff20; border-radius:12px; }
-.crop iframe { position:absolute; width:900px; height:650px; left:-18px; bottom:-10px; transform:scale(1.25); transform-origin:bottom left; }
+.crop iframe { position:absolute; width:80%; height:650px; left:0; bottom:-10px; transform:scale(1.25); transform-origin:bottom left; }
+@media(max-width:650px) { body { padding:16px; } .crop { height:420px; } }
 </style></head><body><section class="hero"><h2>Camera view</h2><iframe title="Simulated Orca camera tab" src="printing.html"></iframe></section>''' + tiles + '</body></html>')
     return entry
 
