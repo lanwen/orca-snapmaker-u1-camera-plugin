@@ -1,6 +1,7 @@
 """Plugin source. Run mise run build to produce the installable file."""
 
 import base64
+import csv
 from collections import deque
 import hashlib
 import json
@@ -52,6 +53,40 @@ def nonnegative(value):
     return value if type(value) in (int, float) and math.isfinite(value) and value >= 0 else None
 
 
+def filament_text(value):
+    return value.strip() if isinstance(value, str) and value.strip() and value.strip().upper() != "NONE" else None
+
+
+def filament_profile(metadata, config, tool):
+    raw = metadata.get("filament_name")
+    mapping = config.get("extruder_map_table")
+    if (tool is None or metadata.get("slicer") not in ("OrcaSlicer", "SnapmakerOrca")
+            or not isinstance(raw, str) or not isinstance(mapping, list)):
+        return None
+    used = metadata.get("filament_used_mm")
+    parsed = set()
+    # Snapmaker's metadata parser strips the outer quotes from serialized profile lists.
+    candidates = (raw,) if raw.startswith('"') and raw.endswith('"') else (raw, '"' + raw + '"')
+    for candidate in candidates:
+        try:
+            names = next(csv.reader([candidate], delimiter=";", escapechar="\\", doublequote=False, strict=True))
+        except (csv.Error, StopIteration):
+            continue
+        if isinstance(used, list) and len(names) != len(used):
+            continue
+        parsed.add(tuple(filament_text(name) for name in names))
+    if len(parsed) != 1:
+        return None
+    names = parsed.pop()
+    if len(mapping) < len(names):
+        return None
+    profiles = {name for logical, name in enumerate(names)
+                if type(mapping[logical]) is int and mapping[logical] == tool
+                and (not isinstance(used, list) or nonnegative(used[logical]) != 0)}
+    # Several sliced filaments can share a physical head; only show an unambiguous profile.
+    return profiles.pop() if len(profiles) == 1 else None
+
+
 def print_metrics(status, metadata=None):
     stats = status.get("print_stats") or {}
     state = stats.get("state", "Unknown")
@@ -100,13 +135,16 @@ def print_metrics(status, metadata=None):
 
     color = filament("filament_color_rgba")
     color = "#" + color[:6] if isinstance(color, str) and re.fullmatch(r"[0-9a-fA-F]{8}", color) else None
-    material = filament("filament_type")
+    material = filament_text(filament("filament_type"))
     return {"state": state, "progress": progress,
             "current_layer": current,
             "total_layer": total,
             "elapsed": nonnegative(stats.get("total_duration")), "printing_duration": duration,
             "remaining": remaining, "planned_total": planned, "phase": phase,
-            "tool": index, "material": material if isinstance(material, str) and material != "NONE" else None,
+            "tool": index, "material": material,
+            "material_vendor": filament_text(filament("filament_vendor")),
+            "material_subtype": filament_text(filament("filament_sub_type")),
+            "material_profile": filament_profile(metadata, config, index),
             "color": color, "bed": status.get("heater_bed") or {},
             "hotend": status.get(name) or {} if match else {}}
 
@@ -143,7 +181,9 @@ class Printer:
                                          ObjectQuery("virtual_sdcard", ("progress", "file_position", "file_size")),
                                          ObjectQuery("gcode_move", ("speed_factor",)),
                                          ObjectQuery("toolhead", ("extruder",)),
-                                         ObjectQuery("print_task_config", ("filament_type", "filament_color_rgba")),
+                                         ObjectQuery("print_task_config", ("filament_type", "filament_color_rgba",
+                                                                          "filament_vendor", "filament_sub_type",
+                                                                          "extruder_map_table")),
                                          *(ObjectQuery(name, ("temperature", "target")) for name in
                                            ("heater_bed", "extruder", "extruder1", "extruder2", "extruder3")))
         stats = status.get("print_stats") or {}
@@ -167,7 +207,7 @@ class Printer:
             self.metadata = None
             try:
                 metadata = self.http.file_metadata(filename)
-                if isinstance(metadata, dict) and nonnegative(metadata.get("estimated_time")):
+                if isinstance(metadata, dict):
                     size = nonnegative(metadata.get("size"))
                     if size is None or run[4] is None or size == run[4]:
                         self.metadata = metadata

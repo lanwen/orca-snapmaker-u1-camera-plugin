@@ -47,6 +47,9 @@ Elapsed time uses a stopwatch format with seconds from the latest printer update
 Supported OrcaSlicer jobs show approximate time left and finish time once model printing is confirmed at normal speed.
 When the inputs cannot support a finish estimate, the original plan remains visible without a finish forecast.
 
+The material label shows the active toolhead's material, subtype, and brand when the printer reports them.
+Hover over or focus the material to see its slicer filament profile when the file metadata can be mapped to that toolhead.
+
 Leaving the tab stops playback.
 Returning shows the play overlay.
 Switching to another app while the tab remains visible keeps playback running.
