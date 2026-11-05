@@ -28,8 +28,8 @@
     "vitest": "^5.0.5"
   },
   "lint-staged": {
-    "{src/ui/**,tests/**,index.html,src/camera.html,package.json,tsconfig.json,vite.config.ts,svelte.config.js,.oxfmtrc.json,.oxlintrc.json}": "oxfmt --no-error-on-unmatched-pattern",
-    "{src/ui/**,tests/**,vite.config.ts,svelte.config.js}": "oxlint --deny-warnings"
+    "{{src/ui,tests}/**/*.{svelte,ts,js,cjs,css,html,json},index.html,src/camera.html,package.json,tsconfig.json,vite.config.ts,svelte.config.js,.oxfmtrc.json,.oxlintrc.json}": "oxfmt --no-error-on-unmatched-pattern",
+    "{{src/ui,tests}/**/*.{svelte,ts,js,cjs},vite.config.ts,svelte.config.js}": "oxlint --deny-warnings --no-error-on-unmatched-pattern"
   },
   "packageManager": "pnpm@12.16.1"
 }

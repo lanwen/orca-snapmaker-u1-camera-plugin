@@ -17,7 +17,7 @@ def tagged_section(body, kind):
         return None
     if body.count(start) != 1 or body.count(end) != 1 or body.index(end) < body.index(start):
         raise ReleaseNotesError(f"{kind.capitalize()} notes must have exactly one correctly ordered start/end marker pair")
-    return body.split(start, 1)[1].split(end, 1)[0].strip()
+    return body.split(start, 1)[1].split(end, 1)[0].replace("\r\n", "\n").strip()
 
 
 def public_section(body):
