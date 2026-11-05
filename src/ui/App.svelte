@@ -308,7 +308,7 @@
     inset: auto 0 0;
     padding: 36px 30px 24px;
     display: grid;
-    grid-template-columns: minmax(0, 720px) minmax(0, 1fr);
+    grid-template-columns: minmax(0, 895px) minmax(0, 1fr);
     align-items: end;
     gap: 12px 20px;
     background: linear-gradient(transparent, #0009);
@@ -416,7 +416,7 @@
       opacity: 1;
     }
   }
-  @media (max-width: 950px) {
+  @media (max-width: 1080px) {
     footer {
       grid-template-columns: minmax(0, 1fr) auto;
     }

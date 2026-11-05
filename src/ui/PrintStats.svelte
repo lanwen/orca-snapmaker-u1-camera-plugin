@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { Heater, PrintStats } from './types';
+  import Toolheads from './Toolheads.svelte';
   import PrintState from './PrintState.svelte';
   let { stats, receivedAt }: { stats: PrintStats | null; receivedAt: number } = $props();
   const number = (value: unknown): value is number =>
@@ -27,8 +28,11 @@
     );
   }
   function coolingTracker() {
+    let identity: unknown;
     let samples: { at: number; temperature: number }[] = [];
-    return (value: Heater = {}, at: number) => {
+    return (value: Heater = {}, at: number, tool?: number) => {
+      if (identity !== tool) samples = [];
+      identity = tool;
       if (value.target !== 0 || !number(value.temperature)) {
         samples = [];
         return false;
@@ -44,13 +48,25 @@
       );
     };
   }
+  const activeTool = $derived(
+    stats?.tools?.filter((tool) => tool.state === 'connected').length === 1
+      ? stats.tools.findIndex((tool) => tool.state === 'connected')
+      : (stats?.tools?.findIndex((tool) => tool.state === 'changing') ?? -1),
+  );
+  const hotend = $derived(
+    stats?.state === 'unavailable'
+      ? undefined
+      : stats?.tools
+        ? stats.tools[activeTool]?.heater
+        : stats?.hotend,
+  );
   const trackBedCooling = coolingTracker();
   const trackHotendCooling = coolingTracker();
   let settled = $state.raw({ bed: false, hotend: false });
   $effect(() => {
     settled = {
       bed: trackBedCooling(stats?.bed, receivedAt),
-      hotend: trackHotendCooling(stats?.hotend, receivedAt),
+      hotend: trackHotendCooling(hotend, receivedAt, activeTool),
     };
   });
   function temperature(value: Heater = {}, settled = false) {
@@ -90,9 +106,8 @@
   const showFinish = $derived(showEstimate || preparationFinish);
   const standby = $derived(printState === 'standby');
   const missing = $derived(printState === 'unavailable');
-  const terminal = $derived(['complete', 'cancelled', 'error'].includes(printState));
   const heating = $derived(
-    [stats?.bed, stats?.hotend].some(
+    [stats?.bed, hotend].some(
       (value) =>
         value &&
         number(value.temperature) &&
@@ -113,24 +128,8 @@
   );
   const progress = $derived(number(stats?.progress) ? Math.min(100, stats.progress * 100) : null);
   const indeterminate = $derived(preparing || (activePrint && !progress));
-  const color = $derived(
-    typeof stats?.color === 'string' && /^#[0-9a-f]{6}$/i.test(stats.color)
-      ? stats.color.toUpperCase()
-      : null,
-  );
-  const showTool = $derived(
-    !terminal && !standby && Number.isInteger(stats?.tool) && number(stats?.tool) && stats.tool < 4,
-  );
-  const materialName = $derived(
-    [...new Set([stats?.material, stats?.material_subtype].filter(Boolean))].join(' '),
-  );
-  const showMaterial = $derived(
-    !standby &&
-      printState !== 'error' &&
-      Boolean(showTool || materialName || stats?.material_vendor || color),
-  );
   const bedTemperature = $derived(temperature(stats?.bed, settled.bed));
-  const hotendTemperature = $derived(temperature(stats?.hotend, settled.hotend));
+  const hotendTemperature = $derived(temperature(hotend, settled.hotend));
   const finish = $derived(
     preparationFinish && number(stats?.planned_total)
       ? new Date(receivedAt + stats.planned_total * 1000)
@@ -154,9 +153,7 @@
       title={value.description}
       aria-label={value.description ? value.current + ' °C · ' + value.description : undefined}
     >
-      {#if value.direction}<span class="temperature-arrow {value.direction}" aria-hidden="true"
-          >{value.direction === 'heating' ? '↑' : '↓'}</span
-        >{/if}{value.current} °C<span class="temperature-target"
+      <span class="temperature-target"
         >{#if value.direction === 'heating'}<sup
             class="heating"
             aria-label={'Target ' + value.target + ' °C'}>{value.target} °C</sup
@@ -164,7 +161,9 @@
             class="cooling"
             aria-label={'Target ' + value.target + ' °C'}>{value.target} °C</sub
           >{/if}</span
-      >
+      >{#if value.direction}<span class="temperature-arrow {value.direction}" aria-hidden="true"
+          >{value.direction === 'heating' ? '↑' : '↓'}</span
+        >{/if}{value.current} °C
     </span>
   {:else if value.visible}Target {value.target} °C{/if}
 {/snippet}
@@ -261,62 +260,28 @@
       </div>
     </dl>
   </div>
-  <div
-    id="hardware-stat"
-    class="stats-details"
-    hidden={missing || (!showMaterial && !bedTemperature.visible && !hotendTemperature.visible)}
-  >
-    <div id="material-stat" class="material" hidden={!showMaterial}>
-      <span id="tool-stat" hidden={!showTool}
-        ><span id="tool-value" title="Toolhead"
-          >{Number.isInteger(stats?.tool) && number(stats?.tool) && stats.tool < 4
-            ? 'T' + stats.tool
-            : '—'}</span
-        ></span
+  <Toolheads {stats}>
+    {#snippet hotend()}<dd
+        id="hotend-value"
+        hidden={!hotendTemperature.visible}
+        aria-label="Current toolhead temperature"
       >
-      <!-- svelte-ignore a11y_no_noninteractive_tabindex (Focus reveals the sliced filament profile.) -->
-      <span
-        class="material-copy"
-        role="group"
-        tabindex={stats?.material_profile ? 0 : undefined}
-        aria-describedby={stats?.material_profile ? 'material-profile' : undefined}
-        title={[stats?.material_vendor, materialName].filter(Boolean).join(' · ') || undefined}
-      >
-        <span id="material-value" hidden={!materialName}>{materialName}</span>
-        <span id="material-vendor" hidden={!stats?.material_vendor}
-          >{stats?.material_vendor ?? ''}</span
-        >
-        <span id="material-profile" role="tooltip" hidden={!stats?.material_profile}>
-          Sliced with: {stats?.material_profile ?? ''}
-        </span>
-      </span>
-      <span
-        id="material-swatch"
-        aria-hidden="true"
-        hidden={!color}
-        style:background-color={color || 'transparent'}
-      ></span>
-    </div>
-    <dl class="temperatures">
-      <div hidden={!bedTemperature.visible}>
-        <dt id="bed-label">Bed</dt>
-        <dd id="bed-value">{@render heaterTemperature(bedTemperature)}</dd>
-      </div>
-      <div hidden={!hotendTemperature.visible}>
-        <dt id="hotend-label">Hotend</dt>
-        <dd id="hotend-value">{@render heaterTemperature(hotendTemperature)}</dd>
-      </div>
-    </dl>
-  </div>
+        {@render heaterTemperature(hotendTemperature)}
+      </dd>{/snippet}
+    {#snippet bed()}<dt id="bed-label" hidden={!bedTemperature.visible}>Bed</dt>
+      <dd id="bed-value" hidden={!bedTemperature.visible}>
+        {@render heaterTemperature(bedTemperature)}
+      </dd>{/snippet}
+  </Toolheads>
 </section>
 
 <style>
   #stats {
     grid-column: 1;
     display: grid;
-    grid-template-columns: 146px minmax(0, 1fr) 185px;
+    grid-template-columns: 146px minmax(0, 1fr) 360px;
     gap: 18px;
-    width: 720px;
+    width: 895px;
     max-width: 100%;
     padding: 16px;
     border: 1px solid transparent;
@@ -328,7 +293,7 @@
     text-shadow: 0 1px 4px #0009;
   }
   #stats:hover,
-  #stats:focus-visible {
+  #stats:focus-within {
     border-color: #ffffff26;
     background: #111820e8;
     box-shadow: 0 8px 32px #0003;
@@ -537,106 +502,6 @@
   #stats #finish-value {
     overflow-wrap: anywhere;
   }
-  .stats-details {
-    display: grid;
-    grid-template-rows: 30px 40px;
-    align-content: center;
-    gap: 10px;
-    border-left: 1px solid #ffffff28;
-    padding-left: 18px;
-  }
-  .material {
-    position: relative;
-    grid-area: 1 / 1;
-    align-self: center;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 12px;
-  }
-  #tool-value {
-    display: inline-block;
-    padding: 3px 6px;
-    border: 1px solid #ffffff60;
-    border-bottom-width: 2px;
-    border-radius: 5px;
-    background: #ffffff0d;
-    font-size: 11px;
-    font-weight: 600;
-  }
-  .material-copy {
-    flex: 1;
-    display: grid;
-    gap: 2px;
-    min-width: 0;
-  }
-  .material-copy:focus-visible {
-    outline: 2px solid #7abaff;
-    outline-offset: 3px;
-    border-radius: 3px;
-  }
-  #material-value,
-  #material-vendor {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  #material-vendor {
-    color: #c0cbd5;
-    font-size: 10px;
-  }
-  #material-profile {
-    position: absolute;
-    right: 0;
-    bottom: calc(100% + 8px);
-    width: max-content;
-    max-width: min(300px, calc(100vw - 68px));
-    padding: 8px 10px;
-    border: 1px solid #ffffff38;
-    border-radius: 8px;
-    background: #111820f5;
-    color: #edf3f9;
-    visibility: hidden;
-    white-space: normal;
-    overflow-wrap: anywhere;
-  }
-  .material-copy:hover #material-profile,
-  .material-copy:focus #material-profile {
-    visibility: visible;
-  }
-  #material-swatch {
-    flex: 0 0 10px;
-    width: 10px;
-    height: 10px;
-    border: 1px solid #ffffff80;
-    border-radius: 3px;
-    background: transparent;
-  }
-  .temperatures {
-    grid-area: 2 / 1;
-    display: grid;
-    grid-template-rows: 16px 16px;
-    gap: 7px;
-    margin: 0;
-  }
-  .temperatures > div:first-child {
-    grid-area: 1 / 1;
-  }
-  .temperatures > div:last-child {
-    grid-area: 2 / 1;
-  }
-  .temperatures > div {
-    display: flex;
-    justify-content: space-between;
-    align-items: baseline;
-    gap: 8px;
-  }
-  #stats .temperatures dt {
-    margin: 0;
-  }
-  #stats .temperatures dd {
-    white-space: nowrap;
-  }
   .heating {
     color: #ffbb77;
   }
@@ -646,33 +511,29 @@
   .temperature-arrow {
     margin-right: 3px;
   }
+  #stats #bed-label {
+    position: absolute;
+    right: 0;
+    bottom: calc(100% + 1px);
+    margin: 0;
+    font-size: 8px;
+    line-height: 1;
+  }
   .temperature-target {
     display: inline-block;
-    width: 5ch;
-    margin-left: 5px;
+    margin-right: 5px;
   }
-  .temperatures sup,
-  .temperatures sub {
+  sup,
+  sub {
     font-size: 0.75em;
     line-height: 0;
-  }
-  #stats[data-state='standby'] {
-    width: 400px;
-    grid-template-columns: max-content minmax(0, 1fr);
-  }
-  #stats[data-state='standby'] #stats-message {
-    font-size: 18px;
-    white-space: nowrap;
-  }
-  #stats[data-state='standby'] .stats-details {
-    grid-template-rows: auto;
-  }
-  #stats[data-state='standby'] .temperatures {
-    grid-area: auto;
   }
   #stats[data-state='unavailable'] {
     width: 360px;
     grid-template-columns: 1fr;
+  }
+  #stats[data-state='standby'] #stats-message {
+    font-size: 18px;
   }
   #stats-message {
     font-size: 16px;
@@ -681,11 +542,14 @@
   #stats[data-state='preparing'] #stats-message {
     font-size: 18px;
   }
-  @media (max-width: 650px) {
+  @media (max-width: 850px) {
     #stats {
       width: 480px;
       grid-template-columns: 120px minmax(0, 1fr);
       gap: 12px;
+    }
+    #stats[data-state='standby'] {
+      grid-template-columns: minmax(0, 1fr) max-content;
     }
     #progress-value {
       font-size: 46px;
@@ -693,53 +557,6 @@
     .stats-journey {
       grid-template-rows: 48px 4px 48px;
       padding-left: 12px;
-    }
-    .stats-details {
-      grid-column: 1 / -1;
-      border-left: 0;
-      border-top: 1px solid #ffffff28;
-      padding: 10px 0 0;
-      grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
-      grid-template-rows: 32px;
-      align-items: center;
-    }
-    .temperatures {
-      grid-area: 1 / 2;
-      grid-template-columns: 1fr 1fr;
-      grid-template-rows: 32px;
-      gap: 12px;
-    }
-    .temperatures > div:last-child {
-      grid-area: 1 / 2;
-    }
-    .temperatures > div {
-      display: block;
-    }
-    #stats .temperatures dt {
-      margin-bottom: 4px;
-    }
-    #stats[data-state='standby'] .stats-details {
-      grid-column: auto;
-      border-top: 0;
-      border-left: 1px solid #ffffff28;
-      padding: 0 0 0 12px;
-      grid-template-columns: 1fr;
-    }
-    #stats[data-state='standby'] .temperatures {
-      grid-template-columns: 1fr;
-      grid-template-rows: 32px 32px;
-    }
-    #stats[data-state='standby'] .temperatures > div:last-child {
-      grid-area: 2 / 1;
-    }
-  }
-  @media (max-width: 420px) {
-    .stats-details {
-      grid-template-columns: 1fr;
-      grid-template-rows: 30px 32px;
-    }
-    .temperatures {
-      grid-area: 2 / 1;
     }
   }
 </style>

@@ -129,23 +129,44 @@ def print_metrics(status, metadata=None):
     index = int(match[1] or 0) if match else None
     config = status.get("print_task_config") or {}
 
-    def filament(field):
+    def filament(field, tool):
         values = config.get(field)
-        return values[index] if isinstance(values, list) and index is not None and index < len(values) else None
+        return values[tool] if isinstance(values, list) and tool < len(values) else None
 
-    color = filament("filament_color_rgba")
-    color = "#" + color[:6] if isinstance(color, str) and re.fullmatch(r"[0-9a-fA-F]{8}", color) else None
-    material = filament_text(filament("filament_type"))
+    tools = []
+    for tool in range(4):
+        extruder = status.get("extruder" + (str(tool) if tool else ""))
+        head = extruder if isinstance(extruder, dict) else {}
+        physical = head.get("state")
+        head_state = ("unavailable" if not isinstance(extruder, dict) else
+                      "changing" if head.get("activating_move") is True else
+                      "connected" if physical == "ACTIVATE" else
+                      "parked" if physical == "PARKED" else
+                      "unknown" if physical is not None else
+                      "connected" if tool == index else "unknown")
+        color = filament("filament_color_rgba", tool)
+        color = "#" + color[:6] if isinstance(color, str) and re.fullmatch(r"[0-9a-fA-F]{8}", color) else None
+        tools.append({"state": head_state,
+                      "material": filament_text(filament("filament_type", tool)),
+                      "material_vendor": filament_text(filament("filament_vendor", tool)),
+                      "material_subtype": filament_text(filament("filament_sub_type", tool)),
+                      "material_profile": filament_profile(metadata, config, tool),
+                      "filament_present": filament("filament_exist", tool) if type(filament("filament_exist", tool)) is bool else None,
+                      "color": color, "nozzle_diameter": nonnegative(head.get("nozzle_diameter")) or None,
+                      "heater": {key: nonnegative(head.get(key)) for key in ("temperature", "target")}})
+    active = tools[index] if index is not None else {}
     return {"state": state, "progress": progress,
             "current_layer": current,
             "total_layer": total,
             "elapsed": nonnegative(stats.get("total_duration")), "printing_duration": duration,
             "remaining": remaining, "planned_total": planned, "phase": phase,
-            "tool": index, "material": material,
-            "material_vendor": filament_text(filament("filament_vendor")),
-            "material_subtype": filament_text(filament("filament_sub_type")),
-            "material_profile": filament_profile(metadata, config, index),
-            "color": color, "bed": status.get("heater_bed") or {},
+            "tool": index, "tools": tools,
+            "layer_height": nonnegative(metadata.get("layer_height")) or None,
+            "material": active.get("material"),
+            "material_vendor": active.get("material_vendor"),
+            "material_subtype": active.get("material_subtype"),
+            "material_profile": active.get("material_profile"),
+            "color": active.get("color"), "bed": status.get("heater_bed") or {},
             "hotend": status.get(name) or {} if match else {}}
 
 
@@ -183,9 +204,11 @@ class Printer:
                                          ObjectQuery("toolhead", ("extruder",)),
                                          ObjectQuery("print_task_config", ("filament_type", "filament_color_rgba",
                                                                           "filament_vendor", "filament_sub_type",
-                                                                          "extruder_map_table")),
-                                         *(ObjectQuery(name, ("temperature", "target")) for name in
-                                           ("heater_bed", "extruder", "extruder1", "extruder2", "extruder3")))
+                                                                          "extruder_map_table", "filament_exist")),
+                                         ObjectQuery("heater_bed", ("temperature", "target")),
+                                         *(ObjectQuery(name, ("temperature", "target", "nozzle_diameter",
+                                                              "state", "activating_move")) for name in
+                                           ("extruder", "extruder1", "extruder2", "extruder3")))
         stats = status.get("print_stats") or {}
         sd = status.get("virtual_sdcard") or {}
         state = stats.get("state")

@@ -94,7 +94,7 @@ def browser():
 
 
 def seek(client, milliseconds):
-    client.evaluate(f"document.getAnimations().forEach(a => {{a.pause(); a.currentTime={milliseconds}}})")
+    client.evaluate(f"document.getAnimations().filter(a => a instanceof CSSAnimation).forEach(a => {{a.pause(); a.currentTime={milliseconds}}})")
 
 
 def motion_style(client):
@@ -112,6 +112,116 @@ def check_alignment(rows):
         for axis in axes:
             if len({round(rect[axis], 1) for rect in visible}) > 1:
                 raise ValueError(f"{field} {axis} differs between states")
+
+
+def check_toolheads(client):
+    result = client.evaluate("""(async () => {
+      const wait = () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      const errors = [];
+      const root = document.querySelector('#hardware-stat');
+      const tabs = root.querySelectorAll('.index-tab');
+      if (tabs.length !== 4) errors.push('Four toolhead tabs are required');
+      const fixture = structuredClone(screenshotFixtures[screenshotState]);
+      const generation = screenshotStates.indexOf(screenshotState) + 1;
+      const update = async stats => { screenshotFixtures[screenshotState] = stats; screenshotHandler({generation, stats}); await wait(); };
+      for (const id of [0, 1, 2, 3]) {
+        const stats = structuredClone(fixture);
+        stats.tools.forEach((tool, i) => { tool.state = i === id ? 'connected' : 'parked'; });
+        stats.tools[id].heater = {temperature:157, target:210};
+        await update(stats);
+        if (root.querySelector('.chosen .index-tab')?.dataset.tool !== String(id)) errors.push('Wrong active tab');
+        const trace = root.querySelector('.trace-draw');
+        if (!trace || getComputedStyle(trace).animationName === 'none') errors.push('Tool change did not draw a path');
+        const temperature = root.querySelector('.current-temperature').getBoundingClientRect();
+        const origin = root.getBoundingClientRect();
+        const end = trace.getPointAtLength(trace.getTotalLength() - 3);
+        if (Math.abs(end.x - (temperature.right - origin.x + 4)) > 1 ||
+            Math.abs(end.y - (temperature.y + temperature.height/2 - origin.y)) > 1) errors.push('Trace misses temperature');
+        if (id === 0) {
+          const nozzle = root.querySelector('.nozzle-size').getBoundingClientRect();
+          if (Math.abs(nozzle.y + nozzle.height/2 - temperature.y - temperature.height/2) > 1) errors.push('T0 route is not horizontal');
+        }
+        const before = trace.getAttribute('d');
+        stats.tools[id].heater = {temperature:9, target:0};
+        await update(stats);
+        if (before === root.querySelector('.trace-draw').getAttribute('d')) errors.push('Temperature width did not update route');
+        if (id === 1) {
+          const tab = root.querySelector('.chosen .index-tab');
+          tab.focus(); await wait();
+          if (getComputedStyle(root.querySelector('[data-tool="0"] + .filament')).visibility !== 'visible') errors.push('Focus did not reveal parked filament');
+          tab.click(); await wait();
+          if (tab.getAttribute('aria-expanded') !== 'true') errors.push('Tap did not open tool details');
+          tab.dispatchEvent(new KeyboardEvent('keydown', {key:'Escape', bubbles:true})); await wait();
+          if (getComputedStyle(root.querySelector('.chosen .tool-tooltip')).visibility !== 'hidden') errors.push('Escape did not dismiss tool details');
+          tab.blur();
+        }
+        stats.tools[id].state = 'changing';
+        await update(stats);
+        if (!root.querySelector('.chosen .head-state')?.textContent.includes('↻')) errors.push('Missing change indicator');
+        if (root.querySelector('.trace-shimmer')) errors.push('Changing head is shown as connected');
+      }
+      await update({state:'unavailable'});
+      if (root.getClientRects().length) errors.push('Offline hardware information is visible');
+      screenshotFixtures[screenshotState] = fixture; publishScreenshot(); await wait();
+      return errors;
+    })()""")
+    if result:
+        raise ValueError('; '.join(result))
+
+
+def check_hover_escape(client):
+    client.evaluate("document.activeElement?.blur()")
+    client.call("Input.dispatchMouseEvent", {"type":"mouseMoved", "x":0, "y":0})
+    client.evaluate("new Promise(resolve => setTimeout(resolve, 280))")
+    tab = client.evaluate("(() => { const r=document.querySelector('.chosen .index-tab').getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2}; })()")
+    client.call("Input.dispatchMouseEvent", {"type":"mouseMoved", **tab})
+    client.wait_for("getComputedStyle(document.querySelector('.chosen .tool-tooltip')).visibility === 'visible'")
+    client.call("Input.dispatchKeyEvent", {"type":"keyDown", "key":"Escape", "code":"Escape"})
+    client.call("Input.dispatchKeyEvent", {"type":"keyUp", "key":"Escape", "code":"Escape"})
+    client.evaluate("new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))")
+    hidden = client.evaluate("getComputedStyle(document.querySelector('.chosen .tool-tooltip')).visibility === 'hidden'")
+    client.call("Input.dispatchMouseEvent", {"type":"mouseMoved", "x":0, "y":0})
+    client.evaluate("new Promise(resolve => setTimeout(resolve, 280))")
+    if not hidden:
+        raise ValueError("Escape does not dismiss a hover-only tooltip")
+
+
+def check_tooltip_hover(client):
+    client.evaluate("document.activeElement?.blur()")
+    client.call("Input.dispatchMouseEvent", {"type":"mouseMoved", "x":0, "y":0})
+    client.evaluate("new Promise(resolve => setTimeout(resolve, 280))")
+    tab = client.evaluate("(() => { const r=document.querySelector('.chosen .index-tab').getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2}; })()")
+    client.call("Input.dispatchMouseEvent", {"type":"mouseMoved", **tab})
+    client.evaluate("new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))")
+    position = client.evaluate("""(() => {
+      const tooltip=document.querySelector('.chosen .tool-tooltip');
+      const r=tooltip.getBoundingClientRect(), stats=document.querySelector('#stats').getBoundingClientRect();
+      return {left:r.left, top:r.top, bottom:r.bottom, x:r.left+12, y:r.top+15,
+        sectionTop:stats.top, cursor:getComputedStyle(document.querySelector('.chosen .index-tab')).cursor};
+    })()""")
+    if position["bottom"] > position["sectionTop"] - 7:
+        raise ValueError("Tooltip overlaps the statistics section")
+    if position["cursor"] == "pointer":
+        raise ValueError("Toolhead advertises a clickable action")
+    for step in range(1, 13):
+        fraction = step / 12
+        client.call("Input.dispatchMouseEvent", {"type":"mouseMoved",
+            "x":tab["x"] + (position["x"] - tab["x"]) * fraction,
+            "y":tab["y"] + (position["y"] - tab["y"]) * fraction})
+        client.evaluate("new Promise(resolve => setTimeout(resolve, 50))")
+    client.evaluate("new Promise(resolve => setTimeout(resolve, 300))")
+    if not client.evaluate("getComputedStyle(document.querySelector('.chosen .tool-tooltip')).visibility === 'visible'"):
+        raise ValueError("Tooltip closes while moving the pointer into it")
+    client.call("Input.dispatchMouseEvent", {"type":"mousePressed", "button":"left", "clickCount":1, "x":position["x"], "y":position["y"]})
+    for step in range(1, 6):
+        client.call("Input.dispatchMouseEvent", {"type":"mouseMoved", "button":"left", "buttons":1, "x":position["x"]+step*20, "y":position["y"]})
+        client.evaluate("new Promise(resolve => requestAnimationFrame(resolve))")
+    client.call("Input.dispatchMouseEvent", {"type":"mouseReleased", "button":"left", "clickCount":1, "x":position["x"]+100, "y":position["y"]})
+    if not client.evaluate("Boolean(getSelection().toString().trim())"):
+        raise ValueError("Tooltip text cannot be selected")
+    client.evaluate("getSelection().removeAllRanges()")
+    client.call("Input.dispatchMouseEvent", {"type":"mouseMoved", "x":0, "y":0})
+    client.evaluate("new Promise(resolve => setTimeout(resolve, 280))")
 
 
 def export_gif(client, destination, duration, ffmpeg):
@@ -150,6 +260,12 @@ def review(directory, output, states, widths, gifs=False):
                   document.querySelector('[data-preview-state=' + CSS.escape(%s) + ']').click();
                   await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
                 })()""" % json.dumps(state))
+                if state == "printing":
+                    for check in (check_toolheads, check_hover_escape, check_tooltip_hover):
+                        try:
+                            check(client)
+                        except ValueError as error:
+                            errors.append(f"Toolheads at {width}px: {error}")
                 row = client.evaluate("""(() => {
                   const rect = e => {
                     if (!e || !e.getClientRects().length) return null;
@@ -160,6 +276,9 @@ def review(directory, output, states, widths, gifs=False):
                     estimate:rect([...document.querySelectorAll('#remaining-value,#plan-value')]
                       .find(e => e.getClientRects().length)),
                     active:['printing','paused'].includes(screenshotFixtures[screenshotState].state),
+                    fpsWrapped:document.querySelector('#camera').dataset.state === 'live' &&
+                      document.querySelector('#camera > span').getBoundingClientRect().height >
+                        parseFloat(getComputedStyle(document.querySelector('#camera')).lineHeight) + 1,
                     pill:rect(document.querySelector('#camera')),
                     dot:rect(document.querySelector('.stream-dot')),
                     headerStatus:rect(document.querySelector('#printer')),
@@ -173,10 +292,20 @@ def review(directory, output, states, widths, gifs=False):
                     overflow:[...document.querySelectorAll('#stats,#plan-stat,#remaining-stat,#finish-value,#camera,.light-area,#warning-label,.printer-meta')]
                       .filter(e => e.getClientRects().length && e.scrollWidth > e.clientWidth+1).map(e => e.id)};
                 })()""")
+                if state in {"unavailable", "printer-unavailable"} and client.evaluate("Boolean(document.querySelector('#hardware-stat')?.getClientRects().length)"):
+                    errors.append(f"{state} at {width}px: Hardware information is visible without status")
+                if state in {"standby", "complete"} and client.evaluate("Boolean(document.querySelector('.index-stack')?.getClientRects().length || document.querySelector('.filament-traces')?.getClientRects().length)"):
+                    errors.append(f"{state} at {width}px: Toolhead tabs are visible without a running print")
+                flow = client.evaluate("Boolean(document.querySelector('.trace-shimmer'))")
+                expected_flow = client.evaluate("screenshotFixtures[screenshotState].state === 'printing' && screenshotFixtures[screenshotState].phase === 'printing' && Boolean(document.querySelector('.chosen')?.getClientRects().length)")
+                if flow != expected_flow:
+                    errors.append(f"{state} at {width}px: Filament animation does not match confirmed printing")
                 row.update(state=state, width=width, screenshot=f"{state}-{width}.png")
                 rows.append(row)
                 results.append(row)
                 try:
+                    if row["fpsWrapped"]:
+                        raise ValueError("Camera FPS label wraps")
                     if row["overflow"]:
                         raise ValueError("Overflow: " + ", ".join(row["overflow"]))
                     header, address, heading = row["headerStatus"], row["address"], row["heading"]
@@ -234,24 +363,24 @@ def review(directory, output, states, widths, gifs=False):
                     if gifs and width == widths[0]:
                         row["gif"] = f"{state}.gif"
                         export_gif(client, output / row["gif"], style["duration"], ffmpeg)
-                profile = client.evaluate("Boolean(document.querySelector('.material-copy')?.getClientRects().length && !document.querySelector('#material-profile').hidden)")
-                if profile:
-                    client.evaluate("document.querySelector('.material-copy').focus()")
-                    shown = client.evaluate("getComputedStyle(document.querySelector('#material-profile')).visibility === 'visible'")
+                tab = "document.querySelector('.chosen .index-tab')"
+                if client.evaluate(f"Boolean({tab}?.getClientRects().length)"):
+                    client.evaluate(f"{tab}.focus()")
+                    shown = client.evaluate("getComputedStyle(document.querySelector('.chosen .tool-tooltip')).visibility === 'visible'")
                     if not shown:
-                        errors.append(f"{state} at {width}px: Material profile is not visible on focus")
-                    tooltip = client.evaluate("(() => { const r=document.querySelector('#material-profile').getBoundingClientRect(); return {left:r.left,right:r.right,top:r.top}; })()")
+                        errors.append(f"{state} at {width}px: Toolhead details are not visible on focus")
+                    tooltip = client.evaluate("(() => { const r=document.querySelector('.chosen .tool-tooltip').getBoundingClientRect(); return {left:r.left,right:r.right,top:r.top}; })()")
                     if tooltip["left"] < 0 or tooltip["right"] > width or tooltip["top"] < 0:
-                        errors.append(f"{state} at {width}px: Material profile overflows the viewport")
+                        errors.append(f"{state} at {width}px: Toolhead details overflow the viewport")
                     row["profile"] = f"{state}-{width}-profile.png"
                     data = client.call("Page.captureScreenshot", {"format": "png"})["data"]
                     (output / row["profile"]).write_bytes(base64.b64decode(data))
-                    client.evaluate("document.querySelector('.material-copy').blur()")
+                    client.evaluate(f"{tab}.blur()")
                 client.screenshot(output / row["screenshot"])
                 client.evaluate("document.querySelector('#stop').scrollIntoView({block:'nearest'})")
                 stop = client.evaluate("(() => { const r=document.querySelector('#stop').getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2}; })()")
                 client.call("Input.dispatchMouseEvent", {"type": "mouseMoved", **stop})
-                client.evaluate("new Promise(resolve => setTimeout(resolve, 180))")
+                client.evaluate("new Promise(resolve => setTimeout(resolve, 280))")
                 row["viewport"] = f"{state}-{width}-viewport.png"
                 data = client.call("Page.captureScreenshot", {"format": "png"})["data"]
                 (output / row["viewport"]).write_bytes(base64.b64decode(data))
@@ -284,7 +413,7 @@ if __name__ == "__main__":
     parser.add_argument("--preview", type=Path, default=ROOT / "dist/screenshots")
     parser.add_argument("--output", type=Path, default=ROOT / "dist/preview-review")
     parser.add_argument("--states", nargs="+", choices=PREVIEW_LABELS, default=list(PREVIEW_LABELS))
-    parser.add_argument("--widths", nargs="+", type=positive_width, default=[1100, 390])
+    parser.add_argument("--widths", nargs="+", type=positive_width, default=[1100, 1051, 390])
     parser.add_argument("--gifs", action="store_true", help="Export active-state GIFs at the first width; requires ffmpeg")
     args = parser.parse_args()
     try:

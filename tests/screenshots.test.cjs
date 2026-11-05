@@ -14,6 +14,10 @@ const settle = () => new Promise((resolve) => setImmediate(resolve));
       runScripts: 'dangerously',
       virtualConsole: console,
       beforeParse(window) {
+        window.ResizeObserver = class {
+          observe() {}
+          disconnect() {}
+        };
         window.orca = {
           postMessage() {
             throw new Error('Screenshot contacted the host');
@@ -38,7 +42,7 @@ const settle = () => new Promise((resolve) => setImmediate(resolve));
           'data:',
           'The preview image is self-contained',
         );
-        assert.equal(visible(get('hotend-value')), true);
+        assert.equal(visible(get('hotend-value')), phase !== 'complete');
         assert.equal(
           visible(get('remaining-value')),
           phase === 'printing',
@@ -58,7 +62,7 @@ const settle = () => new Promise((resolve) => setImmediate(resolve));
           );
           assert.equal(get('elapsed-value').textContent, '01:36');
         }
-        assert.equal(visible(get('tool-value')), phase !== 'complete');
+        assert.equal(dom.window.document.querySelectorAll('[data-tool]').length, 4);
         if (phase === 'complete') {
           const bar = get('progress-bar');
           assert.equal(
@@ -98,6 +102,12 @@ const settle = () => new Promise((resolve) => setImmediate(resolve));
   const preview = new JSDOM(fs.readFileSync(`${directory}/index.html`, 'utf8'), {
     runScripts: 'dangerously',
     virtualConsole: previewConsole,
+    beforeParse(window) {
+      window.ResizeObserver = class {
+        observe() {}
+        disconnect() {}
+      };
+    },
   });
   try {
     await settle();
