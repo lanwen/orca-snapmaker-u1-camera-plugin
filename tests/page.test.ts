@@ -253,7 +253,13 @@ for (const state of ['complete', 'cancelled', 'error']) {
       'Heater off · cooling',
     );
     assert.equal(visible(progress()), true);
-    if (state === 'complete') assert.equal(Number(progress().getAttribute('aria-valuenow')), 100);
+    if (state === 'complete') {
+      assert.equal(Number(progress().getAttribute('aria-valuenow')), 100);
+      assert.equal(visible(element('.index-stack')), false);
+      assert.equal(visible(field('hotend-value')), false);
+      assert.equal(visible(field('bed-value')), true);
+      assert.equal(document.querySelector('.filament-traces'), null);
+    }
   });
 }
 

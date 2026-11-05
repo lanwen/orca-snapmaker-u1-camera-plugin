@@ -13,7 +13,7 @@
         : (stats?.tools?.[id] ?? { state: 'unknown' }),
     ),
   );
-  const showTabs = $derived(stats?.state !== 'standby');
+  const showTabs = $derived(stats?.state !== 'standby' && stats?.state !== 'complete');
   const connected = $derived(
     tools.filter((tool) => tool.state === 'connected').length === 1
       ? tools.findIndex((tool) => tool.state === 'connected')
@@ -103,7 +103,7 @@
   aria-label="Toolheads and temperatures"
 >
   <dl class="sheet">
-    <div class="current-temperature">{@render hotend()}</div>
+    <div class="current-temperature" hidden={stats?.state === 'complete'}>{@render hotend()}</div>
     <div class="bed-temperature">{@render bed()}</div>
   </dl>
   <div class="index-stack" hidden={!showTabs}>
@@ -244,6 +244,7 @@
     white-space: nowrap;
   }
   .bed-temperature {
+    margin-top: auto;
     position: relative;
     width: max-content;
     white-space: nowrap;

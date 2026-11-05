@@ -42,7 +42,7 @@ const settle = () => new Promise((resolve) => setImmediate(resolve));
           'data:',
           'The preview image is self-contained',
         );
-        assert.equal(visible(get('hotend-value')), true);
+        assert.equal(visible(get('hotend-value')), phase !== 'complete');
         assert.equal(
           visible(get('remaining-value')),
           phase === 'printing',

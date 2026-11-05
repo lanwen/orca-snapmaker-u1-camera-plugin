@@ -268,7 +268,7 @@ def review(directory, output, states, widths, gifs=False):
                 })()""")
                 if state in {"unavailable", "printer-unavailable"} and client.evaluate("Boolean(document.querySelector('#hardware-stat')?.getClientRects().length)"):
                     errors.append(f"{state} at {width}px: Hardware information is visible without status")
-                if state == "standby" and client.evaluate("Boolean(document.querySelector('.index-stack')?.getClientRects().length || document.querySelector('.filament-traces')?.getClientRects().length)"):
+                if state in {"standby", "complete"} and client.evaluate("Boolean(document.querySelector('.index-stack')?.getClientRects().length || document.querySelector('.filament-traces')?.getClientRects().length)"):
                     errors.append(f"{state} at {width}px: Toolhead tabs are visible without a running print")
                 row.update(state=state, width=width, screenshot=f"{state}-{width}.png")
                 rows.append(row)
@@ -332,7 +332,7 @@ def review(directory, output, states, widths, gifs=False):
                         row["gif"] = f"{state}.gif"
                         export_gif(client, output / row["gif"], style["duration"], ffmpeg)
                 tab = "document.querySelector('.chosen .index-tab')"
-                if client.evaluate(f"Boolean({tab})"):
+                if client.evaluate(f"Boolean({tab}?.getClientRects().length)"):
                     client.evaluate(f"{tab}.focus()")
                     shown = client.evaluate("getComputedStyle(document.querySelector('.chosen .tool-tooltip')).visibility === 'visible'")
                     if not shown:
