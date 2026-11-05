@@ -94,7 +94,7 @@ def browser():
 
 
 def seek(client, milliseconds):
-    client.evaluate(f"document.getAnimations().forEach(a => {{a.pause(); a.currentTime={milliseconds}}})")
+    client.evaluate(f"document.getAnimations().filter(a => a instanceof CSSAnimation).forEach(a => {{a.pause(); a.currentTime={milliseconds}}})")
 
 
 def motion_style(client):
@@ -169,6 +169,38 @@ def check_toolheads(client):
         raise ValueError('; '.join(result))
 
 
+def check_tooltip_hover(client):
+    tab = client.evaluate("(() => { const r=document.querySelector('.chosen .index-tab').getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2}; })()")
+    client.call("Input.dispatchMouseEvent", {"type":"mouseMoved", **tab})
+    client.evaluate("new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))")
+    position = client.evaluate("""(() => {
+      const tooltip=document.querySelector('.chosen .tool-tooltip');
+      const r=tooltip.getBoundingClientRect(), stats=document.querySelector('#stats').getBoundingClientRect();
+      return {left:r.left, top:r.top, bottom:r.bottom, x:r.left+12, y:r.top+15,
+        sectionTop:stats.top, cursor:getComputedStyle(document.querySelector('.chosen .index-tab')).cursor};
+    })()""")
+    if position["bottom"] > position["sectionTop"] - 7:
+        raise ValueError("Tooltip overlaps the statistics section")
+    if position["cursor"] == "pointer":
+        raise ValueError("Toolhead advertises a clickable action")
+    client.call("Input.dispatchMouseEvent", {"type":"mouseMoved", "x":position["x"], "y":position["bottom"]+4})
+    client.evaluate("new Promise(resolve => setTimeout(resolve, 80))")
+    client.call("Input.dispatchMouseEvent", {"type":"mouseMoved", "x":position["x"], "y":position["y"]})
+    client.evaluate("new Promise(resolve => setTimeout(resolve, 300))")
+    if not client.evaluate("getComputedStyle(document.querySelector('.chosen .tool-tooltip')).visibility === 'visible'"):
+        raise ValueError("Tooltip closes while moving the pointer into it")
+    client.call("Input.dispatchMouseEvent", {"type":"mousePressed", "button":"left", "clickCount":1, "x":position["x"], "y":position["y"]})
+    for step in range(1, 6):
+        client.call("Input.dispatchMouseEvent", {"type":"mouseMoved", "button":"left", "buttons":1, "x":position["x"]+step*20, "y":position["y"]})
+        client.evaluate("new Promise(resolve => requestAnimationFrame(resolve))")
+    client.call("Input.dispatchMouseEvent", {"type":"mouseReleased", "button":"left", "clickCount":1, "x":position["x"]+100, "y":position["y"]})
+    if not client.evaluate("Boolean(getSelection().toString().trim())"):
+        raise ValueError("Tooltip text cannot be selected")
+    client.evaluate("getSelection().removeAllRanges()")
+    client.call("Input.dispatchMouseEvent", {"type":"mouseMoved", "x":0, "y":0})
+    client.evaluate("new Promise(resolve => setTimeout(resolve, 280))")
+
+
 def export_gif(client, destination, duration, ffmpeg):
     with tempfile.TemporaryDirectory(prefix="u1-preview-frames-") as directory:
         for frame in range(16):
@@ -208,6 +240,7 @@ def review(directory, output, states, widths, gifs=False):
                 if state == "printing":
                     try:
                         check_toolheads(client)
+                        check_tooltip_hover(client)
                     except ValueError as error:
                         errors.append(f"Toolheads at {width}px: {error}")
                 row = client.evaluate("""(() => {
@@ -313,7 +346,7 @@ def review(directory, output, states, widths, gifs=False):
                 client.evaluate("document.querySelector('#stop').scrollIntoView({block:'nearest'})")
                 stop = client.evaluate("(() => { const r=document.querySelector('#stop').getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2}; })()")
                 client.call("Input.dispatchMouseEvent", {"type": "mouseMoved", **stop})
-                client.evaluate("new Promise(resolve => setTimeout(resolve, 180))")
+                client.evaluate("new Promise(resolve => setTimeout(resolve, 280))")
                 row["viewport"] = f"{state}-{width}-viewport.png"
                 data = client.call("Page.captureScreenshot", {"format": "png"})["data"]
                 (output / row["viewport"]).write_bytes(base64.b64decode(data))

@@ -45,10 +45,17 @@
         ? 'Layer height: ' + stats.layer_height + ' mm'
         : 'Layer height not reported',
     ].join(' · ');
+  let tooltipBottom = $state(0);
   let paths = $state<{ id: number; d: string; color: string; active: boolean }[]>([]);
   function measure() {
     if (!root) return;
     const origin = root.getBoundingClientRect();
+    const row = root.querySelector('.chosen');
+    if (row)
+      tooltipBottom =
+        row.getBoundingClientRect().bottom -
+        root.closest('#stats')!.getBoundingClientRect().top +
+        8;
     const temp = root.querySelector('.current-temperature')!.getBoundingClientRect();
     paths = tools.map((tool, id) => {
       const tab = root.querySelector(`[data-tool="${id}"]`)!.getBoundingClientRect();
@@ -77,6 +84,7 @@
   onMount(() => {
     const observer = new ResizeObserver(measure);
     observer.observe(root);
+    observer.observe(root.closest('#stats')!);
     observer.observe(root.querySelector('.current-temperature')!);
     return () => observer.disconnect();
   });
@@ -96,7 +104,7 @@
   <div class="index-stack">
     {#each tools as tool, id}
       {#snippet tabContents()}
-        {#if id === active}<span class="nozzle-size" title="Nozzle diameter"
+        {#if id === active}<span class="nozzle-size"
             >{tool.nozzle_diameter ?? '—'}<small>mm</small></span
           >{/if}
         <b>{id + 1}</b><span
@@ -174,7 +182,12 @@
             >
           </span>
         </div>
-        {#if id === active}<span class="tool-tooltip" id={'tool-details-' + id} role="tooltip">
+        {#if id === active}<span
+            class="tool-tooltip"
+            style:bottom={tooltipBottom + 'px'}
+            id={'tool-details-' + id}
+            role="tooltip"
+          >
             Toolhead {id + 1} · {status(tool)} · {material(tool)}{tool.material_vendor
               ? ' · ' + tool.material_vendor
               : ''}<br />
@@ -207,6 +220,9 @@
     grid-template-columns: 160px minmax(0, 1fr);
     height: 88px;
     min-width: 0;
+    border-left: 1px solid #ffffff28;
+    padding-left: 18px;
+    grid-template-rows: 88px;
   }
   .sheet {
     margin: 0;
@@ -258,6 +274,7 @@
     background: transparent;
     color: #a7b5c2;
     font: inherit;
+    cursor: default;
     box-shadow: none;
   }
   .index-tab::before {
@@ -389,15 +406,23 @@
     font-size: 11px;
     line-height: 1.5;
     visibility: hidden;
+    transition: visibility 0s linear 250ms;
+    cursor: text;
+    user-select: text;
     overflow-wrap: anywhere;
   }
-  .index-row:has(:focus-visible):not([data-dismissed='true']) .tool-tooltip,
+  .index-row:focus-within:not([data-dismissed='true']) .tool-tooltip,
   .index-row[data-open='true'] .tool-tooltip {
     visibility: visible;
+    transition-delay: 0s;
+  }
+  .index-row[data-dismissed='true'] .tool-tooltip {
+    transition: none;
   }
   @media (hover: hover) {
     .index-row:hover:not([data-dismissed='true']) .tool-tooltip {
       visibility: visible;
+      transition-delay: 0s;
     }
   }
   .filament-traces {
@@ -455,6 +480,10 @@
   @media (max-width: 850px) {
     #hardware-stat {
       grid-column: 1 / -1;
+      border-left: 0;
+      border-top: 1px solid #ffffff28;
+      padding: 12px 0 0;
+      height: 101px;
     }
   }
   @media (hover: none) {
