@@ -134,7 +134,7 @@ def check_toolheads(client):
         if (!trace || getComputedStyle(trace).animationName === 'none') errors.push('Tool change did not draw a path');
         const temperature = root.querySelector('.current-temperature').getBoundingClientRect();
         const origin = root.getBoundingClientRect();
-        const end = trace.getPointAtLength(trace.getTotalLength());
+        const end = trace.getPointAtLength(trace.getTotalLength() - 3);
         if (Math.abs(end.x - (temperature.right - origin.x + 4)) > 1 ||
             Math.abs(end.y - (temperature.y + temperature.height/2 - origin.y)) > 1) errors.push('Trace misses temperature');
         if (id === 0) {

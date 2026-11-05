@@ -72,7 +72,8 @@
         const start = nozzle.x - origin.x - 7;
         const end = temp.right - origin.x + 4;
         const elbow = (start + end) / 2;
-        d += ` M ${start} ${y} H ${elbow} V ${temp.y + temp.height / 2 - origin.y} H ${end}`;
+        const temperatureY = temp.y + temp.height / 2 - origin.y;
+        d += ` M ${start} ${y} H ${elbow} V ${temperatureY} H ${end} M ${end} ${temperatureY - 3} V ${temperatureY + 3}`;
       }
       return { id, d, color: color(tool) ?? '#a0aab4', active: id === connected };
     });
