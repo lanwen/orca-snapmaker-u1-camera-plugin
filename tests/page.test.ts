@@ -138,7 +138,7 @@ test('print statistics display incoming measurements while the camera is stopped
     metrics.material,
     'Reported material reaches the user',
   );
-  assert.deepEqual(numbers(element('.chosen .index-tab b')), [metrics.tool]);
+  assert.deepEqual(numbers(element('.chosen .index-tab b')), [metrics.tool + 1]);
   assert.deepEqual(numbers(field('bed-value')), [70]);
   assert.deepEqual(numbers(field('hotend-value')), [240, 235]);
   assert.equal(visible(element('.chosen .swatch')), true);
@@ -867,6 +867,14 @@ test('toolhead details preserve reported material and expose slicing and layer h
   assert.match(field('tool-details-2').textContent!, /Layer height: 0.2 mm/);
   assert.match(field('tool-details-2').textContent!, /Sliced with: Snapmaker PLA SnapSpeed @U1/);
   assert.match(tab.nextElementSibling!.textContent!, /PLA SnapSpeed/);
+  assert.deepEqual(
+    Array.from(document.querySelectorAll('.index-tab b'), (node) => node.textContent),
+    ['1', '2', '3', '4'],
+  );
+  for (const id of [0, 1, 3]) {
+    assert.equal(document.querySelector('#tool-details-' + id), null);
+    assert.equal(element('[data-tool="' + id + '"]').getAttribute('aria-describedby'), null);
+  }
   const before = sent.length;
   click(tab);
   assert.equal(tab.getAttribute('aria-expanded'), 'true');

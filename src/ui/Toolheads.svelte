@@ -95,50 +95,64 @@
   </dl>
   <div class="index-stack">
     {#each tools as tool, id}
+      {#snippet tabContents()}
+        {#if id === active}<span class="nozzle-size" title="Nozzle diameter"
+            >{tool.nozzle_diameter ?? '—'}<small>mm</small></span
+          >{/if}
+        <b>{id + 1}</b><span
+          class="head-state"
+          style:color={id === connected ? color(tool) : undefined}
+          aria-hidden="true"
+          >{tool.state === 'changing'
+            ? '↻'
+            : id === connected
+              ? '●'
+              : tool.state === 'unavailable'
+                ? '×'
+                : tool.state === 'parked'
+                  ? '○'
+                  : '?'}</span
+        >
+      {/snippet}
       <div
         class="index-row"
         class:chosen={id === active}
         data-open={open === id}
         data-dismissed={dismissed === id}
       >
-        <button
-          class="index-tab"
-          data-tool={id}
-          data-active={id === active}
-          aria-label={'T' + id + ' · ' + status(tool) + ' · ' + material(tool)}
-          aria-describedby={'tool-details-' + id}
-          aria-expanded={open === id}
-          onkeydown={(event) => {
-            if (event.key === 'Escape') {
-              open = null;
-              dismissed = id;
-            }
-          }}
-          onfocus={() => (dismissed = null)}
-          onpointerenter={() => (dismissed = null)}
-          onclick={() => {
-            dismissed = open === id ? id : null;
-            open = open === id ? null : id;
-          }}
-        >
-          {#if id === active}<span class="nozzle-size" title="Nozzle diameter"
-              >{tool.nozzle_diameter ?? '—'}<small>mm</small></span
-            >{/if}
-          <b>T{id}</b><span
-            class="head-state"
-            style:color={id === connected ? color(tool) : undefined}
-            aria-hidden="true"
-            >{tool.state === 'changing'
-              ? '↻'
-              : id === connected
-                ? '●'
-                : tool.state === 'unavailable'
-                  ? '×'
-                  : tool.state === 'parked'
-                    ? '○'
-                    : '?'}</span
+        {#if id === active}
+          <button
+            class="index-tab"
+            data-tool={id}
+            data-active={id === active}
+            aria-label={'Toolhead ' + (id + 1) + ' · ' + status(tool) + ' · ' + material(tool)}
+            aria-describedby={'tool-details-' + id}
+            aria-expanded={open === id}
+            onkeydown={(event) => {
+              if (event.key === 'Escape') {
+                open = null;
+                dismissed = id;
+              }
+            }}
+            onfocus={() => (dismissed = null)}
+            onpointerenter={() => (dismissed = null)}
+            onclick={() => {
+              dismissed = open === id ? id : null;
+              open = open === id ? null : id;
+            }}
           >
-        </button>
+            {@render tabContents()}
+          </button>
+        {:else}
+          <span
+            class="index-tab"
+            data-tool={id}
+            data-active="false"
+            role="img"
+            aria-label={'Toolhead ' + (id + 1) + ' · ' + status(tool) + ' · ' + material(tool)}
+            >{@render tabContents()}</span
+          >
+        {/if}
         <div class="filament">
           <span
             class="swatch"
@@ -160,15 +174,15 @@
             >
           </span>
         </div>
-        <span class="tool-tooltip" id={'tool-details-' + id} role="tooltip">
-          T{id} · {status(tool)} · {material(tool)}{tool.material_vendor
-            ? ' · ' + tool.material_vendor
-            : ''}<br />
-          {tool.filament_present === false ? 'No filament detected · ' : ''}{color(tool)
-            ? ''
-            : 'Color not reported · '}
-          Nozzle: {tool.nozzle_diameter ?? '—'} mm<br />{slicing(tool)}
-        </span>
+        {#if id === active}<span class="tool-tooltip" id={'tool-details-' + id} role="tooltip">
+            Toolhead {id + 1} · {status(tool)} · {material(tool)}{tool.material_vendor
+              ? ' · ' + tool.material_vendor
+              : ''}<br />
+            {tool.filament_present === false ? 'No filament detected · ' : ''}{color(tool)
+              ? ''
+              : 'Color not reported · '}
+            Nozzle: {tool.nozzle_diameter ?? '—'} mm<br />{slicing(tool)}
+          </span>{/if}
       </div>
     {/each}
   </div>
@@ -209,9 +223,8 @@
     white-space: nowrap;
   }
   .bed-temperature {
-    display: flex;
-    align-items: baseline;
-    gap: 8px;
+    position: relative;
+    width: max-content;
     white-space: nowrap;
   }
   .index-stack {
@@ -224,7 +237,7 @@
     display: grid;
     grid-template-columns: 34px minmax(0, 1fr);
     grid-template-rows: 22px;
-    gap: 14px;
+    gap: 18px;
     align-items: center;
     min-width: 0;
     min-height: 0;
@@ -257,9 +270,9 @@
     pointer-events: none;
   }
   .index-tab[data-active='true'] {
-    width: 64px;
+    width: 56px;
     height: 28px;
-    margin-left: -31px;
+    margin-left: -19px;
     z-index: 3;
     color: #fff;
   }
@@ -401,7 +414,7 @@
     stroke-width: 1.6;
     stroke-linecap: round;
     stroke-linejoin: round;
-    filter: drop-shadow(0 1px 1px #000) drop-shadow(0 0 2px #000);
+    filter: drop-shadow(0 1px 1px #0005) drop-shadow(0 0 2px #0003);
   }
   .trace-base {
     opacity: 0.45;

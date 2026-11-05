@@ -511,6 +511,14 @@
   .temperature-arrow {
     margin-right: 3px;
   }
+  #stats #bed-label {
+    position: absolute;
+    right: 0;
+    bottom: calc(100% + 1px);
+    margin: 0;
+    font-size: 8px;
+    line-height: 1;
+  }
   .temperature-target {
     display: inline-block;
     margin-right: 5px;
