@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.0
+
+- feat: show four toolheads as filament index tabs (#49) ([2348f4b](https://github.com/lanwen/orca-snapmaker-u1-camera-plugin/commit/2348f4b19ce46c61b07c9b05ab0f66717f91fc9b))
+- feat: show filament details and add U1 toolhead SVGs (#48) ([aec0e21](https://github.com/lanwen/orca-snapmaker-u1-camera-plugin/commit/aec0e21d16491c29f63d56806033b7d9c4943e1d))
+- fix: clarify stream status and printer feedback (#46) ([fa08506](https://github.com/lanwen/orca-snapmaker-u1-camera-plugin/commit/fa08506cca5ce25f7836179e6ba2b4f3b8fb1161))
+
 ## 0.6.0
 
 - fix: renew camera monitoring every sixty seconds (#44) ([1ef5e7c](https://github.com/lanwen/orca-snapmaker-u1-camera-plugin/commit/1ef5e7ce7f2f461a3945eb2f8d4a422d1f6ba7eb))
