@@ -117,6 +117,13 @@ const settle = () => new Promise((resolve) => setImmediate(resolve));
       'phase-unknown': 'printing',
       'plan-only': 'printing',
       'preparing-no-plan': 'preparing',
+      connecting: 'printing',
+      'stream-waiting': 'printing',
+      'stream-error': 'printing',
+      'light-error': 'printing',
+      'permission-denied': 'unavailable',
+      'config-missing': 'unavailable',
+      'printer-unavailable': 'unavailable',
     };
     assert.deepEqual(
       Array.from(
@@ -130,26 +137,47 @@ const settle = () => new Promise((resolve) => setImmediate(resolve));
       assert.equal(picker.getAttribute('aria-expanded'), 'true');
       doc.querySelector(`[data-preview-state="${state}"]`).click();
       await settle();
+      if (doc.getElementById('image').hasAttribute('src'))
+        doc.getElementById('image').dispatchEvent(new preview.window.Event('load'));
+      await settle();
       assert.equal(doc.getElementById('stats').dataset.state, rendered, state);
+      if (state === 'connecting') {
+        assert.equal(doc.getElementById('image').hidden, true);
+        assert.equal(doc.getElementById('empty').hidden, false);
+        assert.match(doc.getElementById('empty').textContent, /Connecting to camera/);
+      }
+      if (state === 'stream-waiting') {
+        assert.equal(doc.getElementById('camera').dataset.state, 'waiting');
+        assert.match(doc.getElementById('camera').textContent, /3s/);
+        assert.doesNotMatch(doc.getElementById('camera').textContent, /404/);
+      }
+      if (state === 'stream-error') {
+        assert.equal(doc.getElementById('camera').dataset.state, 'error');
+        assert.match(doc.getElementById('camera').textContent, /404.*8s/);
+      }
+      assert.equal(doc.getElementById('light-error').hidden, state !== 'light-error');
+      const blocked = ['permission-denied', 'config-missing'].includes(state);
+      assert.equal(doc.getElementById('warning').hidden, !blocked);
+      if (blocked) {
+        assert.equal(doc.getElementById('play').hidden, true);
+        assert.ok(doc.getElementById('warning-label').textContent.trim());
+        assert.equal(doc.getElementById('stats').hidden, true);
+      }
+      if (state === 'printer-unavailable') {
+        assert.equal(doc.getElementById('image').hidden, true);
+        assert.equal(doc.getElementById('camera').dataset.state, 'error');
+        assert.match(doc.getElementById('camera').textContent, /Cannot reach printer/);
+      }
       assert.equal(
         doc.querySelector('[data-preview-state][aria-pressed="true"]').dataset.previewState,
         state,
       );
       assert.equal(picker.getAttribute('aria-expanded'), 'false');
-      if (['phase-unknown', 'plan-only', 'preparing-no-plan'].includes(state))
+      if (['phase-unknown', 'plan-only'].includes(state))
         assert.equal(doc.getElementById('printer').textContent, 'Printing');
       assert.equal(
         doc.getElementById('progress-bar').hasAttribute('data-shimmer'),
-        [
-          'printing',
-          'preparing',
-          'preparing-warm',
-          'paused',
-          'finishing',
-          'phase-unknown',
-          'plan-only',
-          'preparing-no-plan',
-        ].includes(state),
+        ['printing', 'preparing', 'paused'].includes(rendered),
       );
       const bar = doc.getElementById('progress-bar');
       if (state === 'preparing') assert.equal(bar.hasAttribute('data-heating'), true);
@@ -173,7 +201,7 @@ const settle = () => new Promise((resolve) => setImmediate(resolve));
     await settle();
     assert.equal(
       doc.querySelector('[data-preview-state][aria-pressed="true"]').dataset.previewState,
-      'preparing-no-plan',
+      'printer-unavailable',
       'Previous wraps to the last state',
     );
     doc.querySelector('[data-preview-step="1"]').click();
@@ -197,7 +225,7 @@ const settle = () => new Promise((resolve) => setImmediate(resolve));
   } finally {
     preview.window.close();
   }
-  console.log('All 13 preview states render; the four showcase states retain keyboard switching.');
+  console.log('All 20 preview states render; the four showcase states retain keyboard switching.');
 })().catch((error) => {
   console.error(error);
   process.exitCode = 1;

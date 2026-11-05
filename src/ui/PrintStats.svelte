@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { Heater, PrintStats } from './types';
+  import PrintState from './PrintState.svelte';
   let { stats, receivedAt }: { stats: PrintStats | null; receivedAt: number } = $props();
   const number = (value: unknown): value is number =>
     typeof value === 'number' && Number.isFinite(value) && value >= 0;
@@ -68,19 +69,11 @@
       current,
       target,
       direction,
+      description:
+        value.target === 0 ? (direction ? 'Heater off · cooling' : 'Heater off') : undefined,
       visible: current !== null || (target !== null && target > 0),
     };
   }
-  const states: Record<string, string> = {
-    printing: 'Printing', // Active print, with progress and estimates.
-    preparing: 'Preparing', // Before the first model layer, including early purge.
-    paused: 'Paused', // Interrupted print, without a finish estimate.
-    complete: 'Complete', // Finished print, with cooling temperatures.
-    error: 'Error', // Failed job.
-    cancelled: 'Cancelled', // Job stopped by the user.
-    standby: 'Standby', // No job running.
-    unavailable: 'Status unavailable', // Status missing or older than ten seconds.
-  };
   const preparing = $derived(stats?.state === 'printing' && stats.phase === 'preparing');
   const printState = $derived(preparing ? 'preparing' : (stats?.state ?? 'unavailable'));
   const printing = $derived(printState === 'printing');
@@ -152,17 +145,22 @@
 
 {#snippet heaterTemperature(value: ReturnType<typeof temperature>)}
   {#if value.current !== null}
-    {#if value.direction}<span class="temperature-arrow {value.direction}" aria-hidden="true"
-        >{value.direction === 'heating' ? '↑' : '↓'}</span
-      >{/if}{value.current} °C<span class="temperature-target"
-      >{#if value.direction === 'heating'}<sup
-          class="heating"
-          aria-label={'Target ' + value.target + ' °C'}>{value.target} °C</sup
-        >{:else if value.direction === 'cooling'}<sub
-          class="cooling"
-          aria-label={'Target ' + value.target + ' °C'}>{value.target} °C</sub
-        >{/if}</span
+    <span
+      title={value.description}
+      aria-label={value.description ? value.current + ' °C · ' + value.description : undefined}
     >
+      {#if value.direction}<span class="temperature-arrow {value.direction}" aria-hidden="true"
+          >{value.direction === 'heating' ? '↑' : '↓'}</span
+        >{/if}{value.current} °C<span class="temperature-target"
+        >{#if value.direction === 'heating'}<sup
+            class="heating"
+            aria-label={'Target ' + value.target + ' °C'}>{value.target} °C</sup
+          >{:else if value.direction === 'cooling' && value.target !== 0}<sub
+            class="cooling"
+            aria-label={'Target ' + value.target + ' °C'}>{value.target} °C</sub
+          >{/if}</span
+      >
+    </span>
   {:else if value.visible}Target {value.target} °C{/if}
 {/snippet}
 
@@ -176,9 +174,7 @@
 >
   <h2 id="stats-title">Print statistics</h2>
   <div class="stats-gauge">
-    <span id="stats-state" hidden={!states[printState]}
-      >{printing && stats?.phase === 'finishing' ? 'Finishing' : (states[printState] ?? '')}</span
-    >
+    <PrintState id="stats-state" {stats} />
     <div class="stats-primary">
       <span id="stats-message" hidden={!message}>{message}</span>
       <strong id="progress-value" hidden={standby || preparing || missing || progress === null}
@@ -294,9 +290,9 @@
 
 <style>
   #stats {
-    grid-column: 1 / -1;
+    grid-column: 1;
     display: grid;
-    grid-template-columns: 132px minmax(0, 1fr) 185px;
+    grid-template-columns: 146px minmax(0, 1fr) 185px;
     gap: 18px;
     width: 720px;
     max-width: 100%;
@@ -344,37 +340,6 @@
     height: 1px;
     overflow: hidden;
     clip-path: inset(50%);
-  }
-  #stats-state {
-    grid-row: 1;
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    color: #d5dee7;
-    font-size: 11px;
-    font-weight: 500;
-  }
-  #stats-state::before {
-    content: '';
-    width: 5px;
-    height: 5px;
-    border-radius: 50%;
-    background: #96a4b3;
-  }
-  #stats[data-state='printing'] #stats-state::before {
-    background: #7abaff;
-  }
-  #stats[data-state='preparing'] #stats-state::before {
-    background: #a0cbff;
-  }
-  #stats[data-state='complete'] #stats-state::before {
-    background: #72dec2;
-  }
-  #stats[data-state='paused'] #stats-state::before {
-    background: #f1c675;
-  }
-  #stats[data-state='error'] #stats-state::before {
-    background: #ff9999;
   }
   #progress-value {
     font-size: 56px;
@@ -632,8 +597,12 @@
     line-height: 0;
   }
   #stats[data-state='standby'] {
-    width: 320px;
-    grid-template-columns: 1fr 1fr;
+    width: 400px;
+    grid-template-columns: max-content minmax(0, 1fr);
+  }
+  #stats[data-state='standby'] #stats-message {
+    font-size: 18px;
+    white-space: nowrap;
   }
   #stats[data-state='standby'] .stats-details {
     grid-template-rows: auto;
@@ -655,7 +624,7 @@
   @media (max-width: 650px) {
     #stats {
       width: 480px;
-      grid-template-columns: 108px minmax(0, 1fr);
+      grid-template-columns: 120px minmax(0, 1fr);
       gap: 12px;
     }
     #progress-value {

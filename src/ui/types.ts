@@ -35,6 +35,9 @@ export interface HostMessage {
   stats?: PrintStats | null;
   light?: boolean | null;
   camera?: string;
+  fps?: number;
+  frozen?: boolean;
+  light_error?: string;
   failed?: boolean;
   image?: string;
 }

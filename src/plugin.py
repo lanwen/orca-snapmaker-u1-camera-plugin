@@ -115,7 +115,6 @@ class Printer:
     def __init__(self, address, api_key=""):
         self.http = HttpClient(address, api_key)
         self.last_hash = None
-        self.changed_at = time.monotonic()
         self.frame_times = deque(maxlen=30)
         self.previous_run = None
         self.metadata = None
@@ -130,18 +129,13 @@ class Printer:
         digest = hashlib.sha256(data).digest()
         now = time.monotonic()
         if digest != self.last_hash:
-            self.changed_at, self.last_hash = now, digest
+            self.last_hash = digest
             self.frame_times.append(now)
         fps = ((len(self.frame_times) - 1) / (now - self.frame_times[0])
                if len(self.frame_times) > 1 else 0)
-        if snapshot.modified_at is not None:
-            age = time.time() - snapshot.modified_at
-            state = "Stale image — camera has not updated" if age > 15 else "Live · %.1f FPS" % fps
-        else:
-            state = ("Image unchanged — freshness unconfirmed" if now - self.changed_at > 20
-                     else "Receiving images · timestamp unavailable")
         return {"image": "data:image/jpeg;base64," + base64.b64encode(data).decode(),
-                "camera": state}
+                "fps": round(fps, 1),
+                "frozen": snapshot.modified_at is not None and time.time() - snapshot.modified_at > 5}
 
     def status(self):
         status = self.http.query_objects(ObjectQuery("webhooks"), ObjectQuery("print_stats"),
@@ -285,7 +279,10 @@ class Monitor:
                             continue
                         light, self.light = self.light, None
                     if light is not None:
-                        client.set_light(light)
+                        try:
+                            client.set_light(light)
+                        except Exception:
+                            self.emit(generation, {"light_error": "Could not change light — try again"})
                         status_at = 0
                     if not self.current(generation):
                         continue
@@ -306,7 +303,7 @@ class Monitor:
                         self.emit(generation, client.snapshot())
                 except Exception as error:
                     # Do not expose exception URLs/headers, which can contain credentials.
-                    message = str(error) if isinstance(error, RuntimeError) else "Cannot reach the printer. Check its address, API key, and connection."
+                    message = str(error) if isinstance(error, RuntimeError) else "Cannot reach printer — check its address, API key, and connection"
                     self.emit(generation, {"camera": message, "failed": True})
                     if client is not None:
                         client.close()
@@ -379,11 +376,11 @@ class U1Page(orca.pages.PagesPluginCapabilityBase):
             allowed = choice == "yes"
             if not self.save_config(json.dumps(dict(config, allow_preset_connection=allowed))):
                 self.preset_connection_save_failed = True
-                raise ValueError('Cannot save preset permission. Set "host" manually or reload the plugin to retry.')
+                raise ValueError('Could not save your preset access choice. Set "host" manually or reload the plugin to retry.')
             effective = json.loads(self.get_config()).get("allow_preset_connection")
             if effective is not allowed:
                 self.preset_connection_save_failed = True
-                raise ValueError('Cannot save effective preset permission. Check Config or set "host" manually.')
+                raise ValueError('Could not confirm your preset access choice. Check Config or set "host" manually.')
             return allowed
         finally:
             self.preset_connection_prompt_open = False
