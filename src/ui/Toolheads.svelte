@@ -55,7 +55,7 @@
       const swatch = root.querySelector(`[data-swatch="${id}"]`)!.getBoundingClientRect();
       const y = tab.y + tab.height / 2 - origin.y;
       let d = `M ${swatch.x - origin.x - 4} ${y} H ${tab.right - origin.x + 4}`;
-      if (id === active) {
+      if (id === active && root.querySelector('.current-temperature dd:not([hidden])')) {
         const nozzle = root.querySelector('.nozzle-size')!.getBoundingClientRect();
         const start = nozzle.x - origin.x - 4;
         const end = temp.right - origin.x + 4;
@@ -82,7 +82,13 @@
   });
 </script>
 
-<div id="hardware-stat" bind:this={root} role="group" aria-label="Toolheads and temperatures">
+<div
+  id="hardware-stat"
+  hidden={!stats || stats.state === 'unavailable'}
+  bind:this={root}
+  role="group"
+  aria-label="Toolheads and temperatures"
+>
   <dl class="sheet">
     <div class="current-temperature">{@render hotend()}</div>
     <div class="bed-temperature">{@render bed()}</div>

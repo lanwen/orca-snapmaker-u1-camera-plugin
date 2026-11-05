@@ -442,7 +442,8 @@ test('idle and missing status never present old job details as current', () => {
     'Missing progress is not announced as zero',
   );
   publish({ generation: 1, stats: null });
-  assert.equal(field('hotend-value').textContent, '—');
+  assert.equal(visible(field('hardware-stat')), false);
+  assert.equal(visible(field('hotend-value')), false);
   assert.equal(visible(field('elapsed-value')), false);
   assert.equal(visible(field('stats-message')), true);
   assert.ok(field('stats-message').textContent?.trim(), 'Missing status has an explanation');
@@ -450,7 +451,7 @@ test('idle and missing status never present old job details as current', () => {
   assert.equal(visible(field('hotend-value')), true);
   assert.equal(visible(field('elapsed-value')), true);
   advance(11000);
-  assert.equal(field('hotend-value').textContent, '—', 'Status expires even without playback');
+  assert.equal(visible(field('hardware-stat')), false, 'Status expires even without playback');
   assert.equal(visible(field('elapsed-value')), false);
 });
 
@@ -492,8 +493,8 @@ test('a known heater target is shown without inventing a current temperature', (
   assert.equal(field('hotend-value').textContent, 'Target 210 °C');
   assert.equal(visible(field('hotend-value')), true);
   publish({ generation: 1, stats: { ...metrics, state: 'complete', bed: {}, hotend: {} } });
-  assert.equal(field('bed-value').textContent, '—');
-  assert.equal(field('hotend-value').textContent, '—');
+  assert.equal(visible(field('bed-value')), false);
+  assert.equal(visible(field('hotend-value')), false);
 });
 
 test('light toggles are host-confirmed and work without starting playback', () => {
@@ -897,8 +898,13 @@ test('four toolheads follow physical status and never display another head tempe
     stats: { ...metrics, tools: tools.map((tool) => ({ ...tool, state: 'parked' })) },
   });
   assert.equal(document.querySelector('.index-tab[data-active="true"]'), null);
-  assert.equal(field('hotend-value').textContent, '—');
-  publish({ generation: 1, stats: { state: 'unavailable', tools } });
-  assert.equal(document.querySelectorAll('[data-tool]').length, 4);
+  assert.equal(visible(field('hotend-value')), false);
+  publish({
+    generation: 1,
+    stats: { state: 'unavailable', tools, bed: { temperature: 60, target: 60 } },
+  });
+  assert.equal(visible(field('hardware-stat')), false);
+  assert.equal(visible(field('bed-value')), false);
+  assert.equal(visible(element('[data-tool="0"]')), false);
   assert.equal(document.querySelector('.index-tab[data-active="true"]'), null);
 });

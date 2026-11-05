@@ -261,12 +261,16 @@
     </dl>
   </div>
   <Toolheads {stats}>
-    {#snippet hotend()}<dd id="hotend-value" aria-label="Current toolhead temperature">
-        {#if hotendTemperature.visible}{@render heaterTemperature(hotendTemperature)}{:else}—{/if}
+    {#snippet hotend()}<dd
+        id="hotend-value"
+        hidden={!hotendTemperature.visible}
+        aria-label="Current toolhead temperature"
+      >
+        {@render heaterTemperature(hotendTemperature)}
       </dd>{/snippet}
-    {#snippet bed()}<dt id="bed-label">Bed</dt>
-      <dd id="bed-value">
-        {#if bedTemperature.visible}{@render heaterTemperature(bedTemperature)}{:else}—{/if}
+    {#snippet bed()}<dt id="bed-label" hidden={!bedTemperature.visible}>Bed</dt>
+      <dd id="bed-value" hidden={!bedTemperature.visible}>
+        {@render heaterTemperature(bedTemperature)}
       </dd>{/snippet}
   </Toolheads>
 </section>
@@ -515,6 +519,10 @@
   sub {
     font-size: 0.75em;
     line-height: 0;
+  }
+  #stats[data-state='unavailable'] {
+    width: 360px;
+    grid-template-columns: 1fr;
   }
   #stats[data-state='standby'] #stats-message {
     font-size: 18px;

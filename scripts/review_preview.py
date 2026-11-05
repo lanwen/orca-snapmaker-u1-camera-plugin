@@ -161,7 +161,7 @@ def check_toolheads(client):
         if (root.querySelector('.trace-shimmer')) errors.push('Changing head is shown as connected');
       }
       await update({state:'unavailable'});
-      if (root.querySelectorAll('.index-tab').length !== 4 || root.querySelector('.chosen')) errors.push('Offline head state is stale');
+      if (root.getClientRects().length) errors.push('Offline hardware information is visible');
       screenshotFixtures[screenshotState] = fixture; publishScreenshot(); await wait();
       return errors;
     })()""")
@@ -233,6 +233,8 @@ def review(directory, output, states, widths, gifs=False):
                     overflow:[...document.querySelectorAll('#stats,#plan-stat,#remaining-stat,#finish-value,#camera,.light-area,#warning-label,.printer-meta')]
                       .filter(e => e.getClientRects().length && e.scrollWidth > e.clientWidth+1).map(e => e.id)};
                 })()""")
+                if state in {"unavailable", "printer-unavailable"} and client.evaluate("Boolean(document.querySelector('#hardware-stat')?.getClientRects().length)"):
+                    errors.append(f"{state} at {width}px: Hardware information is visible without status")
                 row.update(state=state, width=width, screenshot=f"{state}-{width}.png")
                 rows.append(row)
                 results.append(row)
