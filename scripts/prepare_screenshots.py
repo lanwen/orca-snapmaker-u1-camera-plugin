@@ -68,12 +68,12 @@ def screenshot_page(camera=None):
                      "hotend": {"temperature": 209, "target": 210}},
     }
     # Layer zero can include extrusion; show a plan-based after-time and activity bar.
-    fixtures["preparing"] = dict(fixtures["printing"], progress=0, current_layer=0,
+    fixtures["preparing"] = dict(fixtures["printing"], tool=0, progress=0, current_layer=0,
                                   phase="preparing", planned_total=2081,
                                   elapsed=96, printing_duration=30, remaining=None,
                                   bed={"temperature": 42, "target": 60},
                                   hotend={"temperature": 157, "target": 210})
-    fixtures["paused"] = dict(fixtures["printing"], state="paused", progress=.67, current_layer=58, remaining=None,
+    fixtures["paused"] = dict(fixtures["printing"], tool=1, state="paused", progress=.67, current_layer=58, remaining=None,
                                material="PETG", material_vendor="Polymaker", material_subtype="",
                                material_profile="Polymaker PolyLite PETG @Snapmaker U1 (0.4 nozzle)",
                                bed={"temperature": 60, "target": 60},
@@ -105,6 +105,21 @@ def screenshot_page(camera=None):
         fixtures[state] = dict(fixtures["printing"])
     for state in ("permission-denied", "config-missing", "printer-unavailable"):
         fixtures[state] = {"state": "unavailable"}
+    for fixture in fixtures.values():
+        active = fixture.get("tool")
+        fixture["tools"] = [
+            {"state": "connected" if tool == active else "parked" if tool < 3 else "unavailable",
+             "material": ["PLA", "PETG", "PLA", None][tool],
+             "material_vendor": ["Polymaker", "Prusament", "Snapmaker", None][tool],
+             "color": ["#FFB387", "#83CEE5", "#DAE3B9", None][tool],
+             "nozzle_diameter": .6 if tool == 1 else .4,
+             "heater": {"temperature": 25, "target": 0}}
+            for tool in range(4)]
+        if active is not None:
+            fixture["tools"][active].update({key: fixture.get(key) for key in
+                ("material", "material_vendor", "material_subtype", "material_profile", "color")})
+            fixture["tools"][active].update(state="connected", heater=fixture["hotend"])
+        fixture["layer_height"] = .2 if active is not None else None
     bootstrap = r'''
 <script>
 // Screenshot-only transport. No messages or commands reach the real printer.

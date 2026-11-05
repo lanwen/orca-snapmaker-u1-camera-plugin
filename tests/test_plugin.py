@@ -420,6 +420,31 @@ class ClientTests(unittest.TestCase):
         self.assertEqual(plugin.print_metrics(status)["progress"], 1)
         self.assertEqual(plugin.print_metrics(status)["remaining"], 0)
 
+    def test_four_toolheads_use_physical_status_and_live_nozzle_sizes(self):
+        status = {"toolhead": {"extruder": "extruder"},
+                  "extruder": {"state": "PARKED", "temperature": 25, "target": 0, "nozzle_diameter": .4},
+                  "extruder1": {"state": "ACTIVATE", "temperature": 180, "target": 240, "nozzle_diameter": .6},
+                  "extruder2": {"state": "UNKNOWN", "nozzle_diameter": float("nan")},
+                  "print_task_config": {"filament_type": ["PLA", "PETG", "NONE"],
+                                        "filament_color_rgba": ["FFFFFFFF", "invalid"],
+                                        "filament_exist": [True, False], "extruder_map_table": [1]}}
+        result = plugin.print_metrics(status, {"slicer": "OrcaSlicer", "filament_name": "PETG profile", "layer_height": .2})
+        self.assertEqual([tool["state"] for tool in result["tools"]], ["parked", "connected", "unknown", "unavailable"])
+        self.assertEqual(result["tools"][1]["nozzle_diameter"], .6)
+        self.assertEqual(result["tools"][1]["heater"], {"temperature": 180, "target": 240})
+        self.assertIsNone(result["tools"][1]["color"])
+        self.assertFalse(result["tools"][1]["filament_present"])
+        self.assertEqual(result["tools"][1]["material_profile"], "PETG profile")
+        self.assertIsNone(result["tools"][2]["material"])
+        self.assertIsNone(result["tools"][2]["nozzle_diameter"])
+        self.assertEqual(result["layer_height"], .2)
+        status["extruder1"]["activating_move"] = True
+        self.assertEqual(plugin.print_metrics(status)["tools"][1]["state"], "changing")
+        empty = plugin.print_metrics({})
+        self.assertEqual(len(empty["tools"]), 4)
+        self.assertTrue(all(tool["state"] == "unavailable" for tool in empty["tools"]))
+        self.assertIsNone(plugin.print_metrics({}, {"layer_height": -1})["layer_height"])
+
     def test_filament_details_follow_physical_tool_and_sliced_mapping(self):
         status = {"toolhead": {"extruder": "extruder2"},
                   "print_task_config": {"filament_type": ["PLA", "PLA", "PETG"],

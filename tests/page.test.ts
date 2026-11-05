@@ -10,6 +10,13 @@ let sent: Parameters<OrcaBridge['postMessage']>[0][];
 
 beforeEach(() => {
   vi.useFakeTimers();
+  vi.stubGlobal(
+    'ResizeObserver',
+    class {
+      observe() {}
+      disconnect() {}
+    },
+  );
   vi.spyOn(document, 'hidden', 'get').mockReturnValue(false);
   sent = [];
   window.orca = {
@@ -25,6 +32,7 @@ beforeEach(() => {
 afterEach(async () => {
   await unmount(app);
   vi.useRealTimers();
+  vi.unstubAllGlobals();
   vi.restoreAllMocks();
   document.body.replaceChildren();
 });
@@ -43,7 +51,28 @@ const light = () => element('[role="switch"]') as HTMLButtonElement;
 const image = () => element('img[alt]') as HTMLImageElement;
 const progress = () => element('[role="progressbar"]');
 const numbers = (node: HTMLElement) => (node.textContent?.match(/\d+\.\d+|\d+/g) ?? []).map(Number);
-const publish = (data: HostMessage) => flushSync(() => receive(data));
+const publish = (data: HostMessage) => {
+  if (data.stats && !data.stats.tools) {
+    const stats = { ...data.stats };
+    data = { ...data, stats };
+    stats.tools = Array.from({ length: 4 }, (_, id) => ({
+      state: id === stats.tool ? 'connected' : 'unknown',
+      ...(id === stats.tool
+        ? {
+            material: stats.material,
+            material_vendor: stats.material_vendor,
+            material_subtype: stats.material_subtype,
+            material_profile: stats.material_profile,
+            color: stats.color,
+            heater: stats.hotend,
+          }
+        : {}),
+    }));
+    if (stats.tool === undefined && stats.hotend)
+      stats.tools[0] = { state: 'connected', heater: stats.hotend };
+  }
+  flushSync(() => receive(data));
+};
 const click = (node: HTMLElement) => flushSync(() => node.click());
 const advance = (milliseconds: number) => flushSync(() => vi.advanceTimersByTime(milliseconds));
 const settleFrame = (outcome: 'load' | 'error' = 'load') =>
@@ -105,18 +134,18 @@ test('print statistics display incoming measurements while the camera is stopped
   assert.equal(field('elapsed-value').textContent, '1:10:00');
   assert.deepEqual(numbers(field('remaining-value')), [1, 40]);
   assert.equal(
-    field('material-value').textContent,
+    element('.chosen .material-copy strong').textContent,
     metrics.material,
     'Reported material reaches the user',
   );
-  assert.deepEqual(numbers(field('tool-value')), [metrics.tool]);
+  assert.deepEqual(numbers(element('.chosen .index-tab b')), [metrics.tool]);
   assert.deepEqual(numbers(field('bed-value')), [70]);
-  assert.deepEqual(numbers(field('hotend-value')), [235, 240]);
-  assert.equal(visible(field('material-swatch')), true);
-  const swatch = field('material-swatch').style.backgroundColor;
+  assert.deepEqual(numbers(field('hotend-value')), [240, 235]);
+  assert.equal(visible(element('.chosen .swatch')), true);
+  const swatch = element('.chosen .swatch').style.backgroundColor;
   publish({ generation: 1, stats: { ...metrics, color: '#ffffff' } });
   assert.notEqual(
-    field('material-swatch').style.backgroundColor,
+    element('.chosen .swatch').style.backgroundColor,
     swatch,
     'The swatch follows the reported material color',
   );
@@ -195,7 +224,7 @@ test('pausing hides moving estimates and resuming restores them', () => {
   assert.equal(visible(field('finish-value')), false);
   assert.equal(progress().hasAttribute('data-shimmer'), true);
   assert.equal(visible(progress()), true, 'Pausing retains completed progress');
-  assert.equal(visible(field('tool-value')), true);
+  assert.equal(visible(element('.chosen .index-tab b')), true);
   publish({ generation: 1, stats: metrics });
   assert.equal(visible(field('remaining-value')), true);
   assert.equal(visible(field('finish-value')), true);
@@ -215,7 +244,7 @@ for (const state of ['complete', 'cancelled', 'error']) {
     });
     assert.equal(visible(field('remaining-value')), false);
     assert.equal(visible(field('finish-value')), false);
-    assert.equal(visible(field('tool-value')), false);
+    assert.equal(document.querySelectorAll('[data-tool]').length, 4);
     assert.equal(progress().hasAttribute('data-shimmer'), false);
     assert.deepEqual(numbers(field('hotend-value')), [235]);
     assert.equal(field('hotend-value').querySelector('sub'), null);
@@ -231,9 +260,9 @@ for (const state of ['complete', 'cancelled', 'error']) {
 test('heater targets show the direction only outside the temperature tolerance', () => {
   selectPrinter();
   for (const [temperature, target, displayed] of [
-    [230, 240, [230, 240]],
+    [230, 240, [240, 230]],
     [238, 240, [238]],
-    [250, 240, [250, 240]],
+    [250, 240, [240, 250]],
     [242, 240, [242]],
     [90, 0, [90]],
   ] as const) {
@@ -403,17 +432,17 @@ test('idle and missing status never present old job details as current', () => {
   selectPrinter();
   publish({ generation: 1, stats: metrics });
   publish({ generation: 1, stats: { state: 'standby', color: 'url(untrusted)' } });
-  assert.equal(visible(field('material-value')), false);
+  assert.equal(document.querySelector('.chosen .material-copy'), null);
   assert.equal(visible(field('layers-value')), false);
   assert.equal(visible(progress()), false);
-  assert.equal(visible(field('material-swatch')), false);
+  assert.equal(document.querySelector('.chosen .swatch'), null);
   assert.equal(
     progress().hasAttribute('aria-valuenow'),
     false,
     'Missing progress is not announced as zero',
   );
   publish({ generation: 1, stats: null });
-  assert.equal(visible(field('hotend-value')), false);
+  assert.equal(field('hotend-value').textContent, '—');
   assert.equal(visible(field('elapsed-value')), false);
   assert.equal(visible(field('stats-message')), true);
   assert.ok(field('stats-message').textContent?.trim(), 'Missing status has an explanation');
@@ -421,7 +450,7 @@ test('idle and missing status never present old job details as current', () => {
   assert.equal(visible(field('hotend-value')), true);
   assert.equal(visible(field('elapsed-value')), true);
   advance(11000);
-  assert.equal(visible(field('hotend-value')), false, 'Status expires even without playback');
+  assert.equal(field('hotend-value').textContent, '—', 'Status expires even without playback');
   assert.equal(visible(field('elapsed-value')), false);
 });
 
@@ -438,13 +467,13 @@ test('unknown or invalid measurements stay unknown rather than becoming NaN or z
     },
   });
   assert.equal(progress().hasAttribute('aria-valuenow'), false);
-  for (const id of ['layers-value', 'tool-value', 'hotend-value', 'remaining-value']) {
+  for (const id of ['layers-value', 'remaining-value']) {
     assert.equal(visible(field(id)), false, `${id} hides missing measurements`);
     assert.deepEqual(numbers(field(id)), [], `${id} does not invent a measurement`);
     assert.doesNotMatch(field(id).textContent!, /NaN|undefined|null/);
   }
-  assert.equal(visible(field('material-swatch')), false);
-  assert.equal(visible(field('material-value')), false);
+  assert.equal(document.querySelector('.chosen .swatch'), null);
+  assert.equal(document.querySelector('.chosen .material-copy'), null);
   assert.equal(visible(field('elapsed-value')), false);
   assert.equal(visible(field('progress-value')), false);
   assert.equal(progress().hasAttribute('data-shimmer'), true);
@@ -463,8 +492,8 @@ test('a known heater target is shown without inventing a current temperature', (
   assert.equal(field('hotend-value').textContent, 'Target 210 °C');
   assert.equal(visible(field('hotend-value')), true);
   publish({ generation: 1, stats: { ...metrics, state: 'complete', bed: {}, hotend: {} } });
-  assert.equal(visible(field('bed-value')), false);
-  assert.equal(visible(field('hotend-value')), false);
+  assert.equal(field('bed-value').textContent, '—');
+  assert.equal(field('hotend-value').textContent, '—');
 });
 
 test('light toggles are host-confirmed and work without starting playback', () => {
@@ -819,29 +848,57 @@ test('the connecting view disappears when the first camera image displays', () =
   assert.equal(visible(field('empty')), false);
 });
 
-test('material details show brand and subtype with the sliced profile available on focus', () => {
+test('toolhead details preserve reported material and expose slicing and layer height on focus or tap', () => {
   selectPrinter();
   publish({
     generation: 1,
     stats: {
       ...metrics,
+      layer_height: 0.2,
       material: 'PLA',
       material_vendor: 'Snapmaker',
       material_subtype: 'SnapSpeed',
       material_profile: 'Snapmaker PLA SnapSpeed @U1',
     },
   });
-  assert.equal(field('material-value').textContent, 'PLA SnapSpeed');
-  assert.equal(field('material-vendor').textContent, 'Snapmaker');
-  const details = field('material-value').parentElement!;
-  assert.equal(details.tabIndex, 0);
-  assert.equal(details.getAttribute('aria-describedby'), 'material-profile');
-  assert.match(field('material-profile').textContent!, /Sliced with: Snapmaker PLA SnapSpeed @U1/);
-  details.focus();
-  assert.equal(document.activeElement, details);
-  publish({ generation: 1, stats: { ...metrics, tool: 1 } });
-  assert.equal(field('material-value').textContent, metrics.material);
-  assert.equal(visible(field('material-vendor')), false);
-  assert.equal(visible(field('material-profile')), false);
-  assert.equal(details.hasAttribute('tabindex'), false);
+  const tab = element('[data-tool="2"]');
+  assert.match(tab.getAttribute('aria-label')!, /Connected · PLA SnapSpeed/);
+  assert.match(field('tool-details-2').textContent!, /Layer height: 0.2 mm/);
+  assert.match(field('tool-details-2').textContent!, /Sliced with: Snapmaker PLA SnapSpeed @U1/);
+  assert.match(tab.nextElementSibling!.textContent!, /PLA SnapSpeed/);
+  const before = sent.length;
+  click(tab);
+  assert.equal(tab.getAttribute('aria-expanded'), 'true');
+  assert.equal(sent.length, before, 'Inspecting a tab never sends a tool-change command');
+  tab.focus();
+  assert.equal(document.activeElement, tab);
+});
+
+test('four toolheads follow physical status and never display another head temperature', () => {
+  selectPrinter();
+  const tools = [
+    { state: 'parked' as const, material: 'PLA', heater: { temperature: 25, target: 0 } },
+    {
+      state: 'connected' as const,
+      material: 'PETG',
+      nozzle_diameter: 0.6,
+      heater: { temperature: 180, target: 240 },
+    },
+    { state: 'unknown' as const },
+    { state: 'unavailable' as const },
+  ];
+  publish({ generation: 1, stats: { ...metrics, tools } });
+  assert.equal(document.querySelectorAll('[data-tool]').length, 4);
+  assert.equal(element('[data-active="true"]').getAttribute('data-tool'), '1');
+  assert.deepEqual(numbers(field('hotend-value')), [240, 180]);
+  assert.match(element('[data-tool="3"]').getAttribute('aria-label')!, /unavailable/);
+  publish({
+    generation: 1,
+    stats: { ...metrics, tools: tools.map((tool) => ({ ...tool, state: 'parked' })) },
+  });
+  assert.equal(document.querySelector('.index-tab[data-active="true"]'), null);
+  assert.equal(field('hotend-value').textContent, '—');
+  publish({ generation: 1, stats: { state: 'unavailable', tools } });
+  assert.equal(document.querySelectorAll('[data-tool]').length, 4);
+  assert.equal(document.querySelector('.index-tab[data-active="true"]'), null);
 });

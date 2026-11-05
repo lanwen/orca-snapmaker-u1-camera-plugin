@@ -114,6 +114,61 @@ def check_alignment(rows):
                 raise ValueError(f"{field} {axis} differs between states")
 
 
+def check_toolheads(client):
+    result = client.evaluate("""(async () => {
+      const wait = () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      const errors = [];
+      const root = document.querySelector('#hardware-stat');
+      const tabs = root.querySelectorAll('.index-tab');
+      if (tabs.length !== 4) errors.push('Four toolhead tabs are required');
+      const fixture = structuredClone(screenshotFixtures[screenshotState]);
+      const generation = screenshotStates.indexOf(screenshotState) + 1;
+      const update = async stats => { screenshotFixtures[screenshotState] = stats; screenshotHandler({generation, stats}); await wait(); };
+      for (const id of [0, 1, 2, 3]) {
+        const stats = structuredClone(fixture);
+        stats.tools.forEach((tool, i) => { tool.state = i === id ? 'connected' : 'parked'; });
+        stats.tools[id].heater = {temperature:157, target:210};
+        await update(stats);
+        if (root.querySelector('.chosen .index-tab')?.dataset.tool !== String(id)) errors.push('Wrong active tab');
+        const trace = root.querySelector('.trace-draw');
+        if (!trace || getComputedStyle(trace).animationName === 'none') errors.push('Tool change did not draw a path');
+        const temperature = root.querySelector('.current-temperature').getBoundingClientRect();
+        const origin = root.getBoundingClientRect();
+        const end = trace.getPointAtLength(trace.getTotalLength());
+        if (Math.abs(end.x - (temperature.right - origin.x + 4)) > 1 ||
+            Math.abs(end.y - (temperature.y + temperature.height/2 - origin.y)) > 1) errors.push('Trace misses temperature');
+        if (id === 0) {
+          const nozzle = root.querySelector('.nozzle-size').getBoundingClientRect();
+          if (Math.abs(nozzle.y + nozzle.height/2 - temperature.y - temperature.height/2) > 1) errors.push('T0 route is not horizontal');
+        }
+        const before = trace.getAttribute('d');
+        stats.tools[id].heater = {temperature:9, target:0};
+        await update(stats);
+        if (before === root.querySelector('.trace-draw').getAttribute('d')) errors.push('Temperature width did not update route');
+        if (id === 1) {
+          const tab = root.querySelector('.chosen .index-tab');
+          tab.focus(); await wait();
+          if (getComputedStyle(root.querySelector('[data-tool="0"] + .filament')).visibility !== 'visible') errors.push('Focus did not reveal parked filament');
+          tab.click(); await wait();
+          if (tab.getAttribute('aria-expanded') !== 'true') errors.push('Tap did not open tool details');
+          tab.dispatchEvent(new KeyboardEvent('keydown', {key:'Escape', bubbles:true})); await wait();
+          if (getComputedStyle(root.querySelector('.chosen .tool-tooltip')).visibility !== 'hidden') errors.push('Escape did not dismiss tool details');
+          tab.blur();
+        }
+        stats.tools[id].state = 'changing';
+        await update(stats);
+        if (!root.querySelector('.chosen .head-state')?.textContent.includes('↻')) errors.push('Missing change indicator');
+        if (root.querySelector('.trace-shimmer')) errors.push('Changing head is shown as connected');
+      }
+      await update({state:'unavailable'});
+      if (root.querySelectorAll('.index-tab').length !== 4 || root.querySelector('.chosen')) errors.push('Offline head state is stale');
+      screenshotFixtures[screenshotState] = fixture; publishScreenshot(); await wait();
+      return errors;
+    })()""")
+    if result:
+        raise ValueError('; '.join(result))
+
+
 def export_gif(client, destination, duration, ffmpeg):
     with tempfile.TemporaryDirectory(prefix="u1-preview-frames-") as directory:
         for frame in range(16):
@@ -150,6 +205,11 @@ def review(directory, output, states, widths, gifs=False):
                   document.querySelector('[data-preview-state=' + CSS.escape(%s) + ']').click();
                   await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
                 })()""" % json.dumps(state))
+                if state == "printing":
+                    try:
+                        check_toolheads(client)
+                    except ValueError as error:
+                        errors.append(f"Toolheads at {width}px: {error}")
                 row = client.evaluate("""(() => {
                   const rect = e => {
                     if (!e || !e.getClientRects().length) return null;
@@ -234,19 +294,19 @@ def review(directory, output, states, widths, gifs=False):
                     if gifs and width == widths[0]:
                         row["gif"] = f"{state}.gif"
                         export_gif(client, output / row["gif"], style["duration"], ffmpeg)
-                profile = client.evaluate("Boolean(document.querySelector('.material-copy')?.getClientRects().length && !document.querySelector('#material-profile').hidden)")
-                if profile:
-                    client.evaluate("document.querySelector('.material-copy').focus()")
-                    shown = client.evaluate("getComputedStyle(document.querySelector('#material-profile')).visibility === 'visible'")
+                tab = "document.querySelector('.chosen .index-tab')"
+                if client.evaluate(f"Boolean({tab})"):
+                    client.evaluate(f"{tab}.focus()")
+                    shown = client.evaluate("getComputedStyle(document.querySelector('.chosen .tool-tooltip')).visibility === 'visible'")
                     if not shown:
-                        errors.append(f"{state} at {width}px: Material profile is not visible on focus")
-                    tooltip = client.evaluate("(() => { const r=document.querySelector('#material-profile').getBoundingClientRect(); return {left:r.left,right:r.right,top:r.top}; })()")
+                        errors.append(f"{state} at {width}px: Toolhead details are not visible on focus")
+                    tooltip = client.evaluate("(() => { const r=document.querySelector('.chosen .tool-tooltip').getBoundingClientRect(); return {left:r.left,right:r.right,top:r.top}; })()")
                     if tooltip["left"] < 0 or tooltip["right"] > width or tooltip["top"] < 0:
-                        errors.append(f"{state} at {width}px: Material profile overflows the viewport")
+                        errors.append(f"{state} at {width}px: Toolhead details overflow the viewport")
                     row["profile"] = f"{state}-{width}-profile.png"
                     data = client.call("Page.captureScreenshot", {"format": "png"})["data"]
                     (output / row["profile"]).write_bytes(base64.b64decode(data))
-                    client.evaluate("document.querySelector('.material-copy').blur()")
+                    client.evaluate(f"{tab}.blur()")
                 client.screenshot(output / row["screenshot"])
                 client.evaluate("document.querySelector('#stop').scrollIntoView({block:'nearest'})")
                 stop = client.evaluate("(() => { const r=document.querySelector('#stop').getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2}; })()")
