@@ -523,6 +523,27 @@
       opacity: 0;
     }
   }
+  #hardware-stat.standby {
+    grid-column: 2;
+    grid-template-columns: max-content;
+    grid-template-rows: auto;
+    height: auto;
+    min-height: 44px;
+    border-top: 0;
+    border-left: 1px solid #ffffff28;
+    padding: 0 0 0 12px;
+  }
+  .standby .sheet {
+    padding: 9px 0 0;
+    justify-content: center;
+    gap: 12px;
+  }
+  .standby .current-temperature:has(:global(dd[hidden])) {
+    display: none;
+  }
+  .standby .bed-temperature {
+    margin-top: 0;
+  }
   @media (max-width: 850px) {
     #hardware-stat {
       grid-column: 1 / -1;
@@ -530,27 +551,6 @@
       border-top: 1px solid #ffffff28;
       padding: 12px 0 0;
       height: 101px;
-    }
-    #hardware-stat.standby {
-      grid-column: 2;
-      grid-template-columns: max-content;
-      grid-template-rows: auto;
-      height: auto;
-      min-height: 44px;
-      border-top: 0;
-      border-left: 1px solid #ffffff28;
-      padding: 0 0 0 12px;
-    }
-    .standby .sheet {
-      padding: 9px 0 0;
-      justify-content: center;
-      gap: 12px;
-    }
-    .standby .current-temperature:has(:global(dd[hidden])) {
-      display: none;
-    }
-    .standby .bed-temperature {
-      margin-top: 0;
     }
   }
   @media (hover: none) {

@@ -528,8 +528,12 @@
     font-size: 0.75em;
     line-height: 0;
   }
+  #stats[data-state='standby'] {
+    width: fit-content;
+    grid-template-columns: max-content max-content;
+  }
   #stats[data-state='unavailable'] {
-    width: 360px;
+    width: fit-content;
     grid-template-columns: 1fr;
   }
   #stats[data-state='standby'] #stats-message {
