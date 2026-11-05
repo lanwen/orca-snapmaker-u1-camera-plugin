@@ -29,6 +29,7 @@ PREVIEW_LABELS = {
     "phase-unknown": "Unknown phase",  # Active print without reliable layers.
     "plan-only": "Estimate unavailable",  # Original plan without a current estimate.
     "preparing-no-plan": "Preparation without plan",  # Missing slicer metadata during preparation.
+    "connecting": "Connecting to camera",  # Startup before the first camera image.
     "stream-waiting": "Camera retry (3s)",  # Temporary interruption without error prose.
     "stream-error": "Camera error (8s)",  # Persistent interruption with error details.
     "light-error": "Light command failed",  # Action feedback beside the light control.
@@ -95,7 +96,7 @@ def screenshot_page(camera=None):
                                      remaining=None)
     fixtures["plan-only"] = dict(fixtures["printing"], progress=.56, current_layer=48, remaining=None)
     fixtures["preparing-no-plan"] = dict(fixtures["preparing"], planned_total=None)
-    for state in ("stream-waiting", "stream-error", "light-error"):
+    for state in ("connecting", "stream-waiting", "stream-error", "light-error"):
         fixtures[state] = dict(fixtures["printing"])
     for state in ("permission-denied", "config-missing", "printer-unavailable"):
         fixtures[state] = {"state": "unavailable"}
@@ -138,7 +139,7 @@ function publishScreenshot() {
   screenshotHandler({generation, printer:screenshotLabels[screenshotFixtures[screenshotState].state],
     light:offline ? null : screenshotLight, light_error:screenshotState === 'light-error' ? 'Could not change light — try again' : '',
     stats:screenshotFixtures[screenshotState],
-    image:offline || (interrupted && !changed) ? undefined : screenshotImage, fps:4.4, frozen:false});
+    image:offline || screenshotState === 'connecting' || (interrupted && !changed) ? undefined : screenshotImage, fps:4.4, frozen:false});
   if (offline) {
     screenshotHandler({generation, failed:true, camera:'Cannot reach printer — check its address and connection'});
     screenshotOffset = 8000;

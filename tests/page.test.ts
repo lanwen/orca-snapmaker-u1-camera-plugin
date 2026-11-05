@@ -755,6 +755,7 @@ test('startup errors wait five seconds and Stop clears the stream status', () =>
   advance(1000);
   assert.equal(field('camera').dataset.state, 'error');
   assert.match(field('camera').textContent!, /Camera not responding/);
+  assert.match(field('empty').textContent!, /Retrying connection/);
   click(button('stop'));
   assert.equal(visible(field('camera')), false);
   click(button('play'));
@@ -784,4 +785,36 @@ test('configuration warnings separate the title from advice and mark config prop
   assert.equal(field('warning-title').textContent, 'Printer address missing.');
   assert.match(field('warning-recommendation').textContent!, /Set host in plugin Config/);
   assert.equal(field('warning-recommendation').querySelector('code')?.textContent, 'host');
+});
+
+test('the header repeats the print-state label and dot beside the address', () => {
+  selectPrinter();
+  publish({ generation: 1, printer: 'printing' });
+  assert.equal(field('printer').textContent, 'Printing');
+  assert.equal(field('printer').parentElement, field('target').parentElement);
+  for (const [state, phase, label] of [
+    ['printing', 'printing', 'Printing'],
+    ['printing', 'preparing', 'Preparing'],
+    ['printing', 'finishing', 'Finishing'],
+    ['paused', 'printing', 'Paused'],
+    ['complete', 'printing', 'Complete'],
+    ['error', 'printing', 'Error'],
+    ['cancelled', 'printing', 'Cancelled'],
+    ['standby', 'printing', 'Standby'],
+    ['unavailable', 'printing', 'Status unavailable'],
+  ] as const) {
+    publish({ generation: 1, stats: { ...metrics, state, phase } });
+    assert.equal(field('printer').textContent, label);
+    assert.equal(field('printer').textContent, field('stats-state').textContent);
+    assert.equal(field('printer').dataset.state, field('stats-state').dataset.state);
+  }
+});
+
+test('the connecting view disappears when the first camera image displays', () => {
+  start();
+  assert.equal(visible(field('empty')), true);
+  assert.match(field('empty').textContent!, /Connecting to camera/);
+  publish({ generation: 1, image: 'first-frame', fps: 4 });
+  settleFrame();
+  assert.equal(visible(field('empty')), false);
 });

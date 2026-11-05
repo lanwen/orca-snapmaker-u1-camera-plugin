@@ -117,6 +117,7 @@ const settle = () => new Promise((resolve) => setImmediate(resolve));
       'phase-unknown': 'printing',
       'plan-only': 'printing',
       'preparing-no-plan': 'preparing',
+      connecting: 'printing',
       'stream-waiting': 'printing',
       'stream-error': 'printing',
       'light-error': 'printing',
@@ -136,9 +137,15 @@ const settle = () => new Promise((resolve) => setImmediate(resolve));
       assert.equal(picker.getAttribute('aria-expanded'), 'true');
       doc.querySelector(`[data-preview-state="${state}"]`).click();
       await settle();
-      doc.getElementById('image').dispatchEvent(new preview.window.Event('load'));
+      if (doc.getElementById('image').hasAttribute('src'))
+        doc.getElementById('image').dispatchEvent(new preview.window.Event('load'));
       await settle();
       assert.equal(doc.getElementById('stats').dataset.state, rendered, state);
+      if (state === 'connecting') {
+        assert.equal(doc.getElementById('image').hidden, true);
+        assert.equal(doc.getElementById('empty').hidden, false);
+        assert.match(doc.getElementById('empty').textContent, /Connecting to camera/);
+      }
       if (state === 'stream-waiting') {
         assert.equal(doc.getElementById('camera').dataset.state, 'waiting');
         assert.match(doc.getElementById('camera').textContent, /3s/);
@@ -166,7 +173,7 @@ const settle = () => new Promise((resolve) => setImmediate(resolve));
         state,
       );
       assert.equal(picker.getAttribute('aria-expanded'), 'false');
-      if (['phase-unknown', 'plan-only', 'preparing-no-plan'].includes(state))
+      if (['phase-unknown', 'plan-only'].includes(state))
         assert.equal(doc.getElementById('printer').textContent, 'Printing');
       assert.equal(
         doc.getElementById('progress-bar').hasAttribute('data-shimmer'),
@@ -218,7 +225,7 @@ const settle = () => new Promise((resolve) => setImmediate(resolve));
   } finally {
     preview.window.close();
   }
-  console.log('All 19 preview states render; the four showcase states retain keyboard switching.');
+  console.log('All 20 preview states render; the four showcase states retain keyboard switching.');
 })().catch((error) => {
   console.error(error);
   process.exitCode = 1;

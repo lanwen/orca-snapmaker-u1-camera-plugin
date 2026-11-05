@@ -161,9 +161,15 @@ def review(directory, output, states, widths, gifs=False):
                     active:['printing','paused'].includes(screenshotFixtures[screenshotState].state),
                     pill:rect(document.querySelector('#camera')),
                     dot:rect(document.querySelector('.stream-dot')),
+                    headerStatus:rect(document.querySelector('#printer')),
+                    address:rect(document.querySelector('#target')),
+                    heading:rect(document.querySelector('h1')),
+                    labelsMatch:!document.querySelector('#stats').getClientRects().length ||
+                      document.querySelector('#printer').textContent === document.querySelector('#stats-state').textContent,
+                    connecting:!document.querySelector('#empty').hidden,
                     lightError:document.querySelector('.light-area').dataset.error === 'true',
                     warning:!document.querySelector('#warning').hidden,
-                    overflow:[...document.querySelectorAll('#stats,#plan-stat,#remaining-stat,#finish-value,#camera,.light-area,#warning-label')]
+                    overflow:[...document.querySelectorAll('#stats,#plan-stat,#remaining-stat,#finish-value,#camera,.light-area,#warning-label,.printer-meta')]
                       .filter(e => e.getClientRects().length && e.scrollWidth > e.clientWidth+1).map(e => e.id)};
                 })()""")
                 row.update(state=state, width=width, screenshot=f"{state}-{width}.png")
@@ -172,6 +178,27 @@ def review(directory, output, states, widths, gifs=False):
                 try:
                     if row["overflow"]:
                         raise ValueError("Overflow: " + ", ".join(row["overflow"]))
+                    header, address, heading = row["headerStatus"], row["address"], row["heading"]
+                    if header and address:
+                        if abs(header["y"] + header["height"] / 2 - address["y"] - address["height"] / 2) > 1:
+                            raise ValueError("Header status is not beside the address")
+                        if header["y"] < heading["y"] + heading["height"]:
+                            raise ValueError("Header status is not below the title")
+                    if not row["labelsMatch"]:
+                        raise ValueError("Header and statistics status labels differ")
+                    if row["connecting"]:
+                        sweep = "getComputedStyle(document.querySelector('.connection-sweep'))"
+                        if client.evaluate(sweep + ".animationName") == "none":
+                            raise ValueError("Connecting lens does not animate")
+                        seek(client, 0)
+                        before = client.evaluate(sweep + ".transform")
+                        seek(client, 700)
+                        if before == client.evaluate(sweep + ".transform"):
+                            raise ValueError("Connecting lens does not move")
+                        client.call("Emulation.setEmulatedMedia", {"features": [{"name": "prefers-reduced-motion", "value": "reduce"}]})
+                        if client.evaluate(sweep + ".animationName") != "none":
+                            raise ValueError("Reduced motion still animates the connecting lens")
+                        client.call("Emulation.setEmulatedMedia", {"features": []})
                     if row["pill"] and row["dot"]:
                         pill, dot = row["pill"], row["dot"]
                         if abs(pill["y"] + pill["height"] / 2 - dot["y"] - dot["height"] / 2) > 1:

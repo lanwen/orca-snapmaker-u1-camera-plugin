@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { Camera } from './camera.svelte';
   import PrintStats from './PrintStats.svelte';
+  import PrintState from './PrintState.svelte';
   import LightControl from './LightControl.svelte';
 
   let image: HTMLImageElement;
@@ -24,8 +25,15 @@
   <img bind:this={image} id="image" alt="Snapmaker U1 camera" hidden={!camera?.imageVisible} />
   <header>
     <div>
-      <h1>Snapmaker U1 <span id="printer">{camera?.printer ?? 'Connecting'}</span></h1>
-      <div id="target">{camera?.target ?? 'Selected printer'}</div>
+      <h1>Snapmaker U1</h1>
+      <div class="printer-meta">
+        <span id="target" title={camera?.target}>{camera?.target ?? 'Selected printer'}</span>
+        <PrintState
+          id="printer"
+          stats={camera?.stats ?? null}
+          fallback={camera?.printer ?? 'Connecting'}
+        />
+      </div>
     </div>
     <div class="light-area" data-error={Boolean(camera?.lightError) || undefined}>
       <LightControl
@@ -60,8 +68,26 @@
       {/if}
     </div>
   </div>
-  <div id="empty" hidden={!camera?.playing || camera?.imageVisible}>
-    {camera?.streamState === 'error' ? 'Waiting for camera…' : 'Connecting to camera…'}
+  <div
+    id="empty"
+    hidden={!camera?.playing || camera?.imageVisible}
+    data-retrying={camera?.streamState === 'error' || undefined}
+  >
+    <div class="connection-pending">
+      <svg viewBox="0 0 56 40" fill="none" stroke-linecap="round" aria-hidden="true">
+        <path
+          class="viewfinder"
+          d="M15 4H8a4 4 0 0 0-4 4v6M41 4h7a4 4 0 0 1 4 4v6M52 26v6a4 4 0 0 1-4 4h-7M15 36H8a4 4 0 0 1-4-4v-6"
+        />
+        <circle class="connection-lens" cx="28" cy="20" r="8" />
+        <g class="connection-sweep">
+          <circle cx="28" cy="20" r="8" stroke-dasharray="12 39" />
+        </g>
+      </svg>
+      <span role="status">
+        {camera?.streamState === 'error' ? 'Retrying connection…' : 'Connecting to camera…'}
+      </span>
+    </div>
   </div>
   <footer>
     <PrintStats stats={camera?.stats ?? null} receivedAt={camera?.statsAt ?? 0} />
@@ -132,16 +158,22 @@
     margin: 0 0 5px;
     letter-spacing: -0.3px;
   }
+  header > div:first-child {
+    min-width: 0;
+  }
   #target {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
     font-size: 12px;
     color: #ffffffa0;
-    overflow-wrap: anywhere;
   }
-  #printer {
-    margin-left: 10px;
-    font-size: 12px;
-    font-weight: 400;
-    color: #ffffffb0;
+  .printer-meta {
+    --print-state-font-size: 12px;
+    display: flex;
+    align-items: center;
+    gap: 6px 12px;
   }
   #play,
   #warning {
@@ -227,8 +259,49 @@
     inset: 0;
     display: grid;
     place-items: center;
-    color: #ffffff80;
     pointer-events: none;
+  }
+  .connection-pending {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 14px;
+    width: 220px;
+    color: #c0cbd5;
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 20px;
+  }
+  .connection-pending svg {
+    width: 56px;
+    height: 40px;
+    overflow: visible;
+    stroke-width: 1.5;
+  }
+  .viewfinder {
+    stroke: #748493;
+  }
+  .connection-lens {
+    stroke: #ffbb7738;
+  }
+  .connection-sweep {
+    stroke: #ffbb77;
+    filter: drop-shadow(0 0 4px #ffbb7750);
+    transform-origin: 28px 20px;
+    animation: connection-search 2.4s linear infinite;
+  }
+  #empty[data-retrying] .connection-sweep {
+    animation-duration: 4s;
+  }
+  @keyframes connection-search {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .connection-sweep {
+      animation: none;
+    }
   }
   footer {
     position: absolute;
