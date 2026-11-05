@@ -6,7 +6,7 @@
 
 A dedicated Snapmaker U1 tab with a full-viewport camera, printer status, and a chamber light toggle.
 
-![Snapmaker U1 camera tab in Printing, with enlarged Preparing, Paused, and Complete statistics](docs/images/snapmaker-u1-states.png)
+![Snapmaker U1 camera tab in Printing, with Preparing, Paused, and Complete statistics](docs/images/snapmaker-u1-states.png)
 
 *Simulated Orca views with fixed sample data.*
 
@@ -47,8 +47,12 @@ Elapsed time uses a stopwatch format with seconds from the latest printer update
 Supported OrcaSlicer jobs show approximate time left and finish time once model printing is confirmed at normal speed.
 When the inputs cannot support a finish estimate, the original plan remains visible without a finish forecast.
 
-The material label shows the active toolhead's material, subtype, and brand when the printer reports them.
-Hover over or focus the material to see its slicer filament profile when the file metadata can be mapped to that toolhead.
+During a print, four index tabs show toolheads 1–4, with the connected head linked to its temperature by a filament-colored path.
+Hover over or focus the statistics block to reveal the other heads' reported materials and colors.
+Hover over, focus, or tap the active tab to see its slicing profile and layer height when file metadata provides them.
+The tooltip stays above the statistics block and its text can be selected.
+Tabs are hidden in Standby and Complete, and all hardware details are hidden while printer status is unavailable.
+The bed temperature remains visible when the printer reports it.
 
 Leaving the tab stops playback.
 Returning shows the play overlay.

@@ -322,7 +322,7 @@ h2 { margin:0; font-size:20px; line-height:24px; font-weight:550; }
 iframe { display:block; border:0; background:#0b0e12; }
 .hero iframe { width:100%; height:480px; border:1px solid #ffffff20; border-radius:12px; }
 .crop { position:relative; height:180px; overflow:hidden; border:1px solid #ffffff20; border-radius:12px; }
-.crop iframe { position:absolute; width:80%; height:650px; left:0; bottom:-10px; transform:scale(1.25); transform-origin:bottom left; }
+.crop iframe { position:absolute; width:1100px; height:650px; left:-20px; bottom:-10px; }
 @media(max-width:650px) { body { padding:16px; } .crop { height:420px; } }
 </style></head><body><section class="hero"><h2>Camera view</h2><iframe title="Simulated Orca camera tab" src="printing.html"></iframe></section>''' + tiles + '</body></html>')
     return entry

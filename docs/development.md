@@ -124,5 +124,5 @@ Build first with `mise run build` when calling `prepare_screenshots.py` directly
 The screenshot tool loads the compiled production UI with an offline Orca bridge.
 
 PNG export uses an installed Chrome or Chromium with an isolated temporary profile.
-The generated `dist/screenshots/showcase.html` shows Printing in one full camera view, followed by enlarged Preparing, Paused, and Complete strips.
+The generated `dist/screenshots/showcase.html` shows Printing in one full camera view, followed by desktop Preparing, Paused, and Complete statistics strips.
 This keeps the tab visible while making the statistics readable at README width.
