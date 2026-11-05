@@ -58,9 +58,12 @@ def format_changes(commits):
 
 
 def source_pr_suggestions(commits, previous=""):
-    """Append source PR summaries as data; keep existing suggestions and human edits."""
-    suggestions = previous
-    seen = set(re.findall(r"<!-- orca:source-pr:(\d+) -->", previous))
+    """Keep suggestions and human edits only for PRs in the current release range."""
+    sections = re.split(r"(?=<!-- orca:source-pr:\d+ -->)", previous)
+    suggestions = sections[0].strip()
+    existing = {re.match(r"<!-- orca:source-pr:(\d+) -->", section)[1]: section.strip()
+                for section in sections[1:]}
+    seen = set()
     repo = repository()
     for sha, _, _ in commits:
         for pr in api(f"commits/{sha}/pulls?per_page=100"):
@@ -69,6 +72,9 @@ def source_pr_suggestions(commits, previous=""):
                     or pr["base"]["repo"]["full_name"] != repo):
                 continue
             seen.add(number)
+            if number in existing:
+                suggestions = (suggestions + "\n\n" + existing[number]).strip()
+                continue
             try:
                 why = tagged_section(pr.get("body") or "", "why")
             except ReleaseNotesError:
