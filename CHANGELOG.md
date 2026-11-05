@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.1
+
+- fix: normalize release notes and scope commit checks (#54) ([57bab87](https://github.com/lanwen/orca-snapmaker-u1-camera-plugin/commit/57bab87dd7171e22d21d4464b8c84922908224d2))
+- fix: compact idle printer statistics (#52) ([cdcd4b0](https://github.com/lanwen/orca-snapmaker-u1-camera-plugin/commit/cdcd4b0103aad3274beb101a5d05bccf899cf799))
+- fix: refresh release notes after publication (#53) ([52f3e29](https://github.com/lanwen/orca-snapmaker-u1-camera-plugin/commit/52f3e29a8c0bb1e608c28e61245f390fe50c3ce3))
+
 ## 0.7.0
 
 - feat: show four toolheads as filament index tabs (#49) ([2348f4b](https://github.com/lanwen/orca-snapmaker-u1-camera-plugin/commit/2348f4b19ce46c61b07c9b05ab0f66717f91fc9b))
