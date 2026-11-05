@@ -69,7 +69,7 @@
       let d = `M ${swatch.x - origin.x - 4} ${y} H ${tab.right - origin.x + 4}`;
       if (id === active && root.querySelector('.current-temperature dd:not([hidden])')) {
         const nozzle = root.querySelector('.nozzle-size')!.getBoundingClientRect();
-        const start = nozzle.x - origin.x - 4;
+        const start = nozzle.x - origin.x - 7;
         const end = temp.right - origin.x + 4;
         const elbow = (start + end) / 2;
         d += ` M ${start} ${y} H ${elbow} V ${temp.y + temp.height / 2 - origin.y} H ${end}`;
@@ -364,6 +364,11 @@
     box-shadow:
       0 2px 4px #0005,
       inset 0 1px 1px #ffffff50;
+  }
+  .chosen .swatch {
+    flex-basis: 15px;
+    width: 15px;
+    height: 15px;
   }
   .swatch.unknown {
     background: repeating-linear-gradient(135deg, transparent 0 3px, #a0aab4 3px 4px);
