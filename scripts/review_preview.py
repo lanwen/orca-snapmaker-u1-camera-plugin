@@ -138,6 +138,7 @@ def review(directory, output, states, widths, gifs=False):
     output.mkdir(parents=True, exist_ok=True)
     results, errors = [], []
     with browser() as client:
+        client.call("Emulation.setFocusEmulationEnabled", {"enabled": True})
         client.call("Page.navigate", {"url": entry.as_uri()})
         client.wait_for("Boolean(document.querySelector('#preview-state') && document.querySelector('#stats'))")
         for width in widths:
@@ -233,6 +234,19 @@ def review(directory, output, states, widths, gifs=False):
                     if gifs and width == widths[0]:
                         row["gif"] = f"{state}.gif"
                         export_gif(client, output / row["gif"], style["duration"], ffmpeg)
+                profile = client.evaluate("Boolean(document.querySelector('.material-copy')?.getClientRects().length && !document.querySelector('#material-profile').hidden)")
+                if profile:
+                    client.evaluate("document.querySelector('.material-copy').focus()")
+                    shown = client.evaluate("getComputedStyle(document.querySelector('#material-profile')).visibility === 'visible'")
+                    if not shown:
+                        errors.append(f"{state} at {width}px: Material profile is not visible on focus")
+                    tooltip = client.evaluate("(() => { const r=document.querySelector('#material-profile').getBoundingClientRect(); return {left:r.left,right:r.right,top:r.top}; })()")
+                    if tooltip["left"] < 0 or tooltip["right"] > width or tooltip["top"] < 0:
+                        errors.append(f"{state} at {width}px: Material profile overflows the viewport")
+                    row["profile"] = f"{state}-{width}-profile.png"
+                    data = client.call("Page.captureScreenshot", {"format": "png"})["data"]
+                    (output / row["profile"]).write_bytes(base64.b64decode(data))
+                    client.evaluate("document.querySelector('.material-copy').blur()")
                 client.screenshot(output / row["screenshot"])
                 client.evaluate("document.querySelector('#stop').scrollIntoView({block:'nearest'})")
                 stop = client.evaluate("(() => { const r=document.querySelector('#stop').getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2}; })()")

@@ -121,8 +121,13 @@
   const showTool = $derived(
     !terminal && !standby && Number.isInteger(stats?.tool) && number(stats?.tool) && stats.tool < 4,
   );
+  const materialName = $derived(
+    [...new Set([stats?.material, stats?.material_subtype].filter(Boolean))].join(' '),
+  );
   const showMaterial = $derived(
-    !standby && printState !== 'error' && Boolean(showTool || stats?.material || color),
+    !standby &&
+      printState !== 'error' &&
+      Boolean(showTool || materialName || stats?.material_vendor || color),
   );
   const bedTemperature = $derived(temperature(stats?.bed, settled.bed));
   const hotendTemperature = $derived(temperature(stats?.hotend, settled.hotend));
@@ -268,7 +273,24 @@
             ? 'T' + stats.tool
             : '—'}</span
         ></span
-      ><span id="material-value" hidden={!stats?.material}>{stats?.material ?? ''}</span><span
+      >
+      <!-- svelte-ignore a11y_no_noninteractive_tabindex (Focus reveals the sliced filament profile.) -->
+      <span
+        class="material-copy"
+        role="group"
+        tabindex={stats?.material_profile ? 0 : undefined}
+        aria-describedby={stats?.material_profile ? 'material-profile' : undefined}
+        title={[stats?.material_vendor, materialName].filter(Boolean).join(' · ') || undefined}
+      >
+        <span id="material-value" hidden={!materialName}>{materialName}</span>
+        <span id="material-vendor" hidden={!stats?.material_vendor}
+          >{stats?.material_vendor ?? ''}</span
+        >
+        <span id="material-profile" role="tooltip" hidden={!stats?.material_profile}>
+          Sliced with: {stats?.material_profile ?? ''}
+        </span>
+      </span>
+      <span
         id="material-swatch"
         aria-hidden="true"
         hidden={!color}
@@ -524,6 +546,7 @@
     padding-left: 18px;
   }
   .material {
+    position: relative;
     grid-area: 1 / 1;
     align-self: center;
     display: flex;
@@ -541,8 +564,45 @@
     font-size: 11px;
     font-weight: 600;
   }
-  #material-value {
+  .material-copy {
+    flex: 1;
+    display: grid;
+    gap: 2px;
+    min-width: 0;
+  }
+  .material-copy:focus-visible {
+    outline: 2px solid #7abaff;
+    outline-offset: 3px;
+    border-radius: 3px;
+  }
+  #material-value,
+  #material-vendor {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  #material-vendor {
+    color: #c0cbd5;
+    font-size: 10px;
+  }
+  #material-profile {
+    position: absolute;
+    right: 0;
+    bottom: calc(100% + 8px);
+    width: max-content;
+    max-width: min(300px, calc(100vw - 68px));
+    padding: 8px 10px;
+    border: 1px solid #ffffff38;
+    border-radius: 8px;
+    background: #111820f5;
+    color: #edf3f9;
+    visibility: hidden;
+    white-space: normal;
     overflow-wrap: anywhere;
+  }
+  .material-copy:hover #material-profile,
+  .material-copy:focus #material-profile {
+    visibility: visible;
   }
   #material-swatch {
     flex: 0 0 10px;

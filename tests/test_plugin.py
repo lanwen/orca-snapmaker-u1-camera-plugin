@@ -420,6 +420,70 @@ class ClientTests(unittest.TestCase):
         self.assertEqual(plugin.print_metrics(status)["progress"], 1)
         self.assertEqual(plugin.print_metrics(status)["remaining"], 0)
 
+    def test_filament_details_follow_physical_tool_and_sliced_mapping(self):
+        status = {"toolhead": {"extruder": "extruder2"},
+                  "print_task_config": {"filament_type": ["PLA", "PLA", "PETG"],
+                                        "filament_vendor": ["Snapmaker", "Generic", " Polymaker "],
+                                        "filament_sub_type": ["SnapSpeed", "Basic", " HF "],
+                                        "extruder_map_table": [2, 0]}}
+        metadata = {"slicer": "OrcaSlicer", "filament_name": 'PETG profile";"PLA profile',
+                    "filament_used_mm": [100, 200]}
+        result = plugin.print_metrics(status, metadata)
+        self.assertEqual((result["material_vendor"], result["material_subtype"], result["material_profile"]),
+                         ("Polymaker", "HF", "PETG profile"))
+        status["toolhead"]["extruder"] = "extruder"
+        self.assertEqual(plugin.print_metrics(status, metadata)["material_profile"], "PLA profile")
+        status["print_task_config"]["extruder_map_table"] = [0, 2]
+        self.assertEqual(plugin.print_metrics(status, metadata)["material_profile"], "PETG profile")
+        status["toolhead"]["extruder"] = "unknown"
+        result = plugin.print_metrics(status, metadata)
+        for key in ("material", "material_vendor", "material_subtype", "material_profile"):
+            self.assertIsNone(result[key])
+
+    def test_sliced_profiles_handle_quotes_and_hide_ambiguous_or_missing_details(self):
+        status = {"toolhead": {"extruder": "extruder"},
+                  "print_task_config": {"filament_type": ["PLA"], "filament_vendor": ["NONE"],
+                                        "filament_sub_type": [42], "extruder_map_table": [0, 0]}}
+        for raw, used, expected in [
+            ('PLA profile;PETG profile', [100, 200], None),
+            ('PLA profile;PLA profile', [100, 200], 'PLA profile'),
+            ('PLA profile;Unused profile', [100, 0], 'PLA profile'),
+            ('PLA profile;Unused profile', [100, 200, 300], None),
+            ('Custom; PLA', [100], 'Custom; PLA'),
+            ('Custom; PLA";"PETG profile', [100, 200], None),
+            ('"PLA profile";"PLA profile"', [100, 200], 'PLA profile'),
+            ('NONE', [100], None),
+            ('', [100], None),
+        ]:
+            with self.subTest(raw=raw, used=used):
+                metadata = {"slicer": "SnapmakerOrca", "filament_name": raw, "filament_used_mm": used}
+                result = plugin.print_metrics(status, metadata)
+                self.assertEqual(result["material_profile"], expected)
+                self.assertIsNone(result["material_vendor"])
+                self.assertIsNone(result["material_subtype"])
+        metadata = {"slicer": "OrcaSlicer", "filament_name": 'PLA profile', "filament_used_mm": [100]}
+        for mapping in (None, [], [True], ["0"], [1]):
+            status["print_task_config"]["extruder_map_table"] = mapping
+            self.assertIsNone(plugin.print_metrics(status, metadata)["material_profile"])
+
+    def test_filament_profile_metadata_does_not_require_a_time_estimate(self):
+        printer = plugin.Printer("http://printer.local")
+        status = self.estimate_status()
+        status.update({"toolhead": {"extruder": "extruder"},
+                       "print_task_config": {"extruder_map_table": [0]}})
+        printer.http.query_objects = Mock(return_value=status)
+        printer.http.file_metadata = Mock(return_value={"slicer": "OrcaSlicer", "filament_name": "PLA profile"})
+        result = printer.status()["stats"]
+        self.assertEqual(result["material_profile"], "PLA profile")
+        self.assertIsNone(result["planned_total"])
+        fields = next(query.fields for query in printer.http.query_objects.call_args.args
+                      if query.name == "print_task_config")
+        self.assertTrue({"filament_vendor", "filament_sub_type", "extruder_map_table"}.issubset(fields))
+        printer.http.file_metadata.return_value["size"] = 2000
+        status["virtual_sdcard"]["file_size"] = 1000
+        printer.metadata_retry_at = 0
+        self.assertIsNone(printer.status()["stats"]["material_profile"])
+
     def test_print_metrics_missing_or_invalid_values_remain_unknown(self):
         result = plugin.print_metrics({"display_status": {"progress": float("nan")},
                                        "virtual_sdcard": {"progress": .25},

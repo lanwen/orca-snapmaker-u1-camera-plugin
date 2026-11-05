@@ -20,6 +20,9 @@ export interface PrintStats {
     | 'unknown'; // Missing or contradictory phase evidence.
   tool?: number;
   material?: string;
+  material_vendor?: string | null;
+  material_subtype?: string | null;
+  material_profile?: string | null;
   color?: string;
   bed?: Heater;
   hotend?: Heater;

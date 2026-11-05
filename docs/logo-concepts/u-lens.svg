@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 72 64" color="#249b7c" fill="none" role="img" aria-labelledby="title">
+  <title id="title">U1 Lens, a camera lens inside a U with a half-height 1</title>
+  <path d="M13 13v21a19 19 0 0 0 38 0V13" stroke="currentColor" stroke-width="7" stroke-linecap="round"/>
+  <circle cx="32" cy="25" r="10" stroke="currentColor" stroke-width="6"/>
+  <path d="M60 12V30.5" stroke="currentColor" stroke-width="5" stroke-linecap="round"/>
+</svg>

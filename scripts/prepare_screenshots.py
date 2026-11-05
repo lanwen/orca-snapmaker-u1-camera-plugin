@@ -62,6 +62,8 @@ def screenshot_page(camera=None):
         "printing": {"state": "printing", "phase": "printing", "planned_total": 5200, "progress": .42, "current_layer": 36,
                      "total_layer": 86, "elapsed": 2160, "printing_duration": 2100,
                      "remaining": 3000, "tool": 3, "material": "PLA", "color": "#FFFFFF",
+                     "material_vendor": "Snapmaker", "material_subtype": "SnapSpeed",
+                     "material_profile": "Snapmaker PLA SnapSpeed @Snapmaker U1 (0.4 nozzle)",
                      "bed": {"temperature": 59, "target": 60},
                      "hotend": {"temperature": 209, "target": 210}},
     }
@@ -72,10 +74,12 @@ def screenshot_page(camera=None):
                                   bed={"temperature": 42, "target": 60},
                                   hotend={"temperature": 157, "target": 210})
     fixtures["paused"] = dict(fixtures["printing"], state="paused", progress=.67, current_layer=58, remaining=None,
+                               material="PETG", material_vendor="Polymaker", material_subtype="",
+                               material_profile="Polymaker PolyLite PETG @Snapmaker U1 (0.4 nozzle)",
                                bed={"temperature": 60, "target": 60},
                                hotend={"temperature": 170, "target": 170})
     # Captured completed-job values from the U1; camera image remains illustrative.
-    fixtures["complete"] = dict(fixtures["printing"], state="complete", progress=1,
+    fixtures["complete"] = dict(fixtures["printing"], state="complete", progress=1, material_profile=None,
                                  current_layer=86, elapsed=5118, printing_duration=4950,
                                  remaining=0, bed={"temperature": 42, "target": 0},
                                  hotend={"temperature": 41, "target": 0})
@@ -95,7 +99,8 @@ def screenshot_page(camera=None):
     fixtures["phase-unknown"] = dict(fixtures["printing"], phase="unknown", progress=.09, current_layer=None,
                                      remaining=None)
     fixtures["plan-only"] = dict(fixtures["printing"], progress=.56, current_layer=48, remaining=None)
-    fixtures["preparing-no-plan"] = dict(fixtures["preparing"], planned_total=None)
+    fixtures["preparing-no-plan"] = dict(fixtures["preparing"], planned_total=None,
+                                         material_vendor=None, material_subtype=None, material_profile=None)
     for state in ("connecting", "stream-waiting", "stream-error", "light-error"):
         fixtures[state] = dict(fixtures["printing"])
     for state in ("permission-denied", "config-missing", "printer-unavailable"):

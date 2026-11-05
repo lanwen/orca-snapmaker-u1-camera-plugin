@@ -818,3 +818,30 @@ test('the connecting view disappears when the first camera image displays', () =
   settleFrame();
   assert.equal(visible(field('empty')), false);
 });
+
+test('material details show brand and subtype with the sliced profile available on focus', () => {
+  selectPrinter();
+  publish({
+    generation: 1,
+    stats: {
+      ...metrics,
+      material: 'PLA',
+      material_vendor: 'Snapmaker',
+      material_subtype: 'SnapSpeed',
+      material_profile: 'Snapmaker PLA SnapSpeed @U1',
+    },
+  });
+  assert.equal(field('material-value').textContent, 'PLA SnapSpeed');
+  assert.equal(field('material-vendor').textContent, 'Snapmaker');
+  const details = field('material-value').parentElement!;
+  assert.equal(details.tabIndex, 0);
+  assert.equal(details.getAttribute('aria-describedby'), 'material-profile');
+  assert.match(field('material-profile').textContent!, /Sliced with: Snapmaker PLA SnapSpeed @U1/);
+  details.focus();
+  assert.equal(document.activeElement, details);
+  publish({ generation: 1, stats: { ...metrics, tool: 1 } });
+  assert.equal(field('material-value').textContent, metrics.material);
+  assert.equal(visible(field('material-vendor')), false);
+  assert.equal(visible(field('material-profile')), false);
+  assert.equal(details.hasAttribute('tabindex'), false);
+});
