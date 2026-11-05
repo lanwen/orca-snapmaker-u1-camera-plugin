@@ -1,6 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" color="#249b7c" fill="none" role="img" aria-labelledby="title">
-  <title id="title">Chamber Eye — a camera and light inside a printer chamber</title>
-  <rect x="9" y="9" width="46" height="46" rx="8" stroke="currentColor" stroke-width="6"/>
-  <path d="M26 18h12" stroke="currentColor" stroke-width="4" stroke-linecap="round"/>
-  <circle cx="32" cy="36" r="9" stroke="currentColor" stroke-width="6"/>
-</svg>
