@@ -548,6 +548,9 @@
       grid-template-columns: 120px minmax(0, 1fr);
       gap: 12px;
     }
+    #stats[data-state='standby'] {
+      grid-template-columns: minmax(0, 1fr) max-content;
+    }
     #progress-value {
       font-size: 46px;
     }
