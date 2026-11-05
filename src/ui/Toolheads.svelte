@@ -14,6 +14,7 @@
     ),
   );
   const showTabs = $derived(stats?.state !== 'standby' && stats?.state !== 'complete');
+  const flowing = $derived(stats?.state === 'printing' && stats.phase === 'printing');
   const connected = $derived(
     tools.filter((tool) => tool.state === 'connected').length === 1
       ? tools.findIndex((tool) => tool.state === 'connected')
@@ -75,7 +76,12 @@
         const temperatureY = temp.y + temp.height / 2 - origin.y;
         d += ` M ${start} ${y} H ${elbow} V ${temperatureY} H ${end} M ${end} ${temperatureY - 3} V ${temperatureY + 3}`;
       }
-      return { id, d, color: color(tool) ?? '#a0aab4', active: id === connected };
+      return {
+        id,
+        d,
+        color: flowing ? (color(tool) ?? '#a0aab4') : '#a0aab4',
+        active: id === connected,
+      };
     });
   }
   $effect(() => {
@@ -206,10 +212,10 @@
       </div>
     {/each}
   </div>
-  {#if showTabs}<svg class="filament-traces" aria-hidden="true">
+  {#if showTabs}<svg class="filament-traces" class:flowing aria-hidden="true">
       {#each paths as path}
         <path class="trace-base" data-active={path.id === active} d={path.d} stroke={path.color} />
-        {#if path.active}
+        {#if path.active && flowing}
           {#key connected}
             <path class="trace-draw" d={path.d} stroke={path.color} pathLength="1" />
             <path class="trace-shimmer" d={path.d} stroke={path.color} pathLength="1" />
@@ -456,6 +462,10 @@
   }
   .trace-base {
     opacity: 0.45;
+  }
+  .filament-traces:not(.flowing) .trace-base[data-active='true'] {
+    opacity: 1;
+    stroke-width: 2.5;
   }
   .trace-draw {
     stroke-width: 2.5;

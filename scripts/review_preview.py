@@ -270,6 +270,10 @@ def review(directory, output, states, widths, gifs=False):
                     errors.append(f"{state} at {width}px: Hardware information is visible without status")
                 if state in {"standby", "complete"} and client.evaluate("Boolean(document.querySelector('.index-stack')?.getClientRects().length || document.querySelector('.filament-traces')?.getClientRects().length)"):
                     errors.append(f"{state} at {width}px: Toolhead tabs are visible without a running print")
+                flow = client.evaluate("Boolean(document.querySelector('.trace-shimmer'))")
+                expected_flow = client.evaluate("screenshotFixtures[screenshotState].state === 'printing' && screenshotFixtures[screenshotState].phase === 'printing' && Boolean(document.querySelector('.chosen')?.getClientRects().length)")
+                if flow != expected_flow:
+                    errors.append(f"{state} at {width}px: Filament animation does not match confirmed printing")
                 row.update(state=state, width=width, screenshot=f"{state}-{width}.png")
                 rows.append(row)
                 results.append(row)

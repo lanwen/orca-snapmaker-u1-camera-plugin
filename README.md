@@ -47,7 +47,8 @@ Elapsed time uses a stopwatch format with seconds from the latest printer update
 Supported OrcaSlicer jobs show approximate time left and finish time once model printing is confirmed at normal speed.
 When the inputs cannot support a finish estimate, the original plan remains visible without a finish forecast.
 
-During a print, four index tabs show toolheads 1–4, with the connected head linked to its temperature by a filament-colored path.
+During a print, four index tabs show toolheads 1–4, with the connected head linked to its temperature.
+The filament path uses the filament color and animates only during confirmed model printing; preparation and other non-printing phases use a neutral, static line.
 Hover over or focus the statistics block to reveal the other heads' reported materials and colors.
 Hover over, focus, or tap the active tab to see its slicing profile and layer height when file metadata provides them.
 The tooltip stays above the statistics block and its text can be selected.

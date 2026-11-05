@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, test, vi } from 'vitest';
-import { flushSync, mount, unmount } from 'svelte';
+import { flushSync, mount, tick, unmount } from 'svelte';
 import App from '../src/ui/App.svelte';
 import type { HostMessage, OrcaBridge } from '../src/ui/types';
 
@@ -927,4 +927,26 @@ test('four toolheads follow physical status and never display another head tempe
   assert.equal(visible(field('bed-value')), false);
   assert.equal(visible(element('[data-tool="0"]')), false);
   assert.equal(document.querySelector('.index-tab[data-active="true"]'), null);
+});
+
+test('filament paths show flow only during confirmed model printing', async () => {
+  selectPrinter();
+  for (const [state, phase, flowing] of [
+    ['printing', 'preparing', false],
+    ['printing', 'printing', true],
+    ['paused', 'printing', false],
+    ['printing', 'unknown', false],
+    ['printing', 'finishing', false],
+    ['printing', 'printing', true],
+  ] as const) {
+    publish({ generation: 1, stats: { ...metrics, state, phase } });
+    await tick();
+    flushSync();
+    assert.equal(Boolean(document.querySelector('.trace-shimmer')), flowing);
+    assert.equal(Boolean(document.querySelector('.trace-draw')), flowing);
+    assert.equal(
+      element('.trace-base[data-active="true"]').getAttribute('stroke'),
+      flowing ? metrics.color : '#a0aab4',
+    );
+  }
 });
