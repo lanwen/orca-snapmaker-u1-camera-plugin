@@ -48,6 +48,7 @@
         : 'Layer height not reported',
     ].join(' · ');
   let tooltipBottom = $state(0);
+  let hoverBridge = $state({ height: 0, left: 0, right: 0 });
   let paths = $state<{ id: number; d: string; color: string; active: boolean }[]>([]);
   function measure() {
     if (!root) return;
@@ -57,11 +58,17 @@
     }
     const origin = root.getBoundingClientRect();
     const row = root.querySelector('.chosen');
-    if (row)
-      tooltipBottom =
-        row.getBoundingClientRect().bottom -
-        root.closest('#stats')!.getBoundingClientRect().top +
-        8;
+    if (row) {
+      const rowBounds = row.getBoundingClientRect();
+      const tab = row.querySelector('.index-tab')!.getBoundingClientRect();
+      const tooltip = row.querySelector('.tool-tooltip')!.getBoundingClientRect();
+      tooltipBottom = rowBounds.bottom - root.closest('#stats')!.getBoundingClientRect().top + 8;
+      hoverBridge = {
+        height: tooltipBottom - rowBounds.height + 2,
+        left: tab.left - tooltip.left - 6,
+        right: tab.right - tooltip.left + 6,
+      };
+    }
     const temp = root.querySelector('.current-temperature')!.getBoundingClientRect();
     paths = tools.map((tool, id) => {
       const tab = root.querySelector(`[data-tool="${id}"]`)!.getBoundingClientRect();
@@ -101,6 +108,15 @@
     return () => observer.disconnect();
   });
 </script>
+
+<svelte:window
+  onkeydown={(event) => {
+    if (event.key === 'Escape') {
+      open = null;
+      dismissed = active;
+    }
+  }}
+/>
 
 <div
   id="hardware-stat"
@@ -149,12 +165,6 @@
             aria-label={'Toolhead ' + (id + 1) + ' · ' + status(tool) + ' · ' + material(tool)}
             aria-describedby={'tool-details-' + id}
             aria-expanded={open === id}
-            onkeydown={(event) => {
-              if (event.key === 'Escape') {
-                open = null;
-                dismissed = id;
-              }
-            }}
             onfocus={() => (dismissed = null)}
             onpointerenter={() => (dismissed = null)}
             onclick={() => {
@@ -198,6 +208,9 @@
         {#if id === active}<span
             class="tool-tooltip"
             style:bottom={tooltipBottom + 'px'}
+            style:--bridge-height={hoverBridge.height + 'px'}
+            style:--bridge-left={hoverBridge.left + 'px'}
+            style:--bridge-right={hoverBridge.right + 'px'}
             id={'tool-details-' + id}
             role="tooltip"
           >
@@ -429,6 +442,16 @@
     cursor: text;
     user-select: text;
     overflow-wrap: anywhere;
+  }
+  .tool-tooltip::after {
+    content: '';
+    position: absolute;
+    top: calc(100% - 1px);
+    left: 0;
+    width: 100%;
+    height: var(--bridge-height);
+    clip-path: polygon(0 0, 100% 0, var(--bridge-right) 100%, var(--bridge-left) 100%);
+    cursor: default;
   }
   .index-row:focus-within:not([data-dismissed='true']) .tool-tooltip,
   .index-row[data-open='true'] .tool-tooltip {

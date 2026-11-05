@@ -169,7 +169,27 @@ def check_toolheads(client):
         raise ValueError('; '.join(result))
 
 
+def check_hover_escape(client):
+    client.evaluate("document.activeElement?.blur()")
+    client.call("Input.dispatchMouseEvent", {"type":"mouseMoved", "x":0, "y":0})
+    client.evaluate("new Promise(resolve => setTimeout(resolve, 280))")
+    tab = client.evaluate("(() => { const r=document.querySelector('.chosen .index-tab').getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2}; })()")
+    client.call("Input.dispatchMouseEvent", {"type":"mouseMoved", **tab})
+    client.wait_for("getComputedStyle(document.querySelector('.chosen .tool-tooltip')).visibility === 'visible'")
+    client.call("Input.dispatchKeyEvent", {"type":"keyDown", "key":"Escape", "code":"Escape"})
+    client.call("Input.dispatchKeyEvent", {"type":"keyUp", "key":"Escape", "code":"Escape"})
+    client.evaluate("new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))")
+    hidden = client.evaluate("getComputedStyle(document.querySelector('.chosen .tool-tooltip')).visibility === 'hidden'")
+    client.call("Input.dispatchMouseEvent", {"type":"mouseMoved", "x":0, "y":0})
+    client.evaluate("new Promise(resolve => setTimeout(resolve, 280))")
+    if not hidden:
+        raise ValueError("Escape does not dismiss a hover-only tooltip")
+
+
 def check_tooltip_hover(client):
+    client.evaluate("document.activeElement?.blur()")
+    client.call("Input.dispatchMouseEvent", {"type":"mouseMoved", "x":0, "y":0})
+    client.evaluate("new Promise(resolve => setTimeout(resolve, 280))")
     tab = client.evaluate("(() => { const r=document.querySelector('.chosen .index-tab').getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2}; })()")
     client.call("Input.dispatchMouseEvent", {"type":"mouseMoved", **tab})
     client.evaluate("new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))")
@@ -183,9 +203,12 @@ def check_tooltip_hover(client):
         raise ValueError("Tooltip overlaps the statistics section")
     if position["cursor"] == "pointer":
         raise ValueError("Toolhead advertises a clickable action")
-    client.call("Input.dispatchMouseEvent", {"type":"mouseMoved", "x":position["x"], "y":position["bottom"]+4})
-    client.evaluate("new Promise(resolve => setTimeout(resolve, 80))")
-    client.call("Input.dispatchMouseEvent", {"type":"mouseMoved", "x":position["x"], "y":position["y"]})
+    for step in range(1, 13):
+        fraction = step / 12
+        client.call("Input.dispatchMouseEvent", {"type":"mouseMoved",
+            "x":tab["x"] + (position["x"] - tab["x"]) * fraction,
+            "y":tab["y"] + (position["y"] - tab["y"]) * fraction})
+        client.evaluate("new Promise(resolve => setTimeout(resolve, 50))")
     client.evaluate("new Promise(resolve => setTimeout(resolve, 300))")
     if not client.evaluate("getComputedStyle(document.querySelector('.chosen .tool-tooltip')).visibility === 'visible'"):
         raise ValueError("Tooltip closes while moving the pointer into it")
@@ -238,11 +261,11 @@ def review(directory, output, states, widths, gifs=False):
                   await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
                 })()""" % json.dumps(state))
                 if state == "printing":
-                    try:
-                        check_toolheads(client)
-                        check_tooltip_hover(client)
-                    except ValueError as error:
-                        errors.append(f"Toolheads at {width}px: {error}")
+                    for check in (check_toolheads, check_hover_escape, check_tooltip_hover):
+                        try:
+                            check(client)
+                        except ValueError as error:
+                            errors.append(f"Toolheads at {width}px: {error}")
                 row = client.evaluate("""(() => {
                   const rect = e => {
                     if (!e || !e.getClientRects().length) return null;
@@ -253,6 +276,9 @@ def review(directory, output, states, widths, gifs=False):
                     estimate:rect([...document.querySelectorAll('#remaining-value,#plan-value')]
                       .find(e => e.getClientRects().length)),
                     active:['printing','paused'].includes(screenshotFixtures[screenshotState].state),
+                    fpsWrapped:document.querySelector('#camera').dataset.state === 'live' &&
+                      document.querySelector('#camera > span').getBoundingClientRect().height >
+                        parseFloat(getComputedStyle(document.querySelector('#camera')).lineHeight) + 1,
                     pill:rect(document.querySelector('#camera')),
                     dot:rect(document.querySelector('.stream-dot')),
                     headerStatus:rect(document.querySelector('#printer')),
@@ -278,6 +304,8 @@ def review(directory, output, states, widths, gifs=False):
                 rows.append(row)
                 results.append(row)
                 try:
+                    if row["fpsWrapped"]:
+                        raise ValueError("Camera FPS label wraps")
                     if row["overflow"]:
                         raise ValueError("Overflow: " + ", ".join(row["overflow"]))
                     header, address, heading = row["headerStatus"], row["address"], row["heading"]
@@ -385,7 +413,7 @@ if __name__ == "__main__":
     parser.add_argument("--preview", type=Path, default=ROOT / "dist/screenshots")
     parser.add_argument("--output", type=Path, default=ROOT / "dist/preview-review")
     parser.add_argument("--states", nargs="+", choices=PREVIEW_LABELS, default=list(PREVIEW_LABELS))
-    parser.add_argument("--widths", nargs="+", type=positive_width, default=[1100, 390])
+    parser.add_argument("--widths", nargs="+", type=positive_width, default=[1100, 1051, 390])
     parser.add_argument("--gifs", action="store_true", help="Export active-state GIFs at the first width; requires ffmpeg")
     args = parser.parse_args()
     try:

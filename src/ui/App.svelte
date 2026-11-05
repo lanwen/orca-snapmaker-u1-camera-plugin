@@ -416,7 +416,7 @@
       opacity: 1;
     }
   }
-  @media (max-width: 1050px) {
+  @media (max-width: 1080px) {
     footer {
       grid-template-columns: minmax(0, 1fr) auto;
     }

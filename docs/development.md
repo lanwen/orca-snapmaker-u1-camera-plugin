@@ -94,7 +94,7 @@ Use the maintained headless review command with prepared HTML and installed depe
 mise run screenshots:review -- --states printing preparing paused
 ```
 
-Omit `--states` for a final review of all states at 1100px and 390px widths.
+Omit `--states` for a final review of all states at 1100px, 1051px, and 390px widths.
 Use `--widths 1440 390` to choose other widths.
 The command reuses local Chrome or Chromium with a temporary profile, opens local files without a server, and checks alignment, overflow, shimmer movement, and reduced motion.
 It writes state screenshots, a review gallery, and measured results to `dist/preview-review/`.
