@@ -268,6 +268,8 @@ def review(directory, output, states, widths, gifs=False):
                 })()""")
                 if state in {"unavailable", "printer-unavailable"} and client.evaluate("Boolean(document.querySelector('#hardware-stat')?.getClientRects().length)"):
                     errors.append(f"{state} at {width}px: Hardware information is visible without status")
+                if state == "standby" and client.evaluate("Boolean(document.querySelector('.index-stack')?.getClientRects().length || document.querySelector('.filament-traces')?.getClientRects().length)"):
+                    errors.append(f"{state} at {width}px: Toolhead tabs are visible without a running print")
                 row.update(state=state, width=width, screenshot=f"{state}-{width}.png")
                 rows.append(row)
                 results.append(row)

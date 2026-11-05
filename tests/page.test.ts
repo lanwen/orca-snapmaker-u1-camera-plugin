@@ -431,6 +431,12 @@ for (const phase of ['printing', 'unknown', 'finishing'] as const) {
 test('idle and missing status never present old job details as current', () => {
   selectPrinter();
   publish({ generation: 1, stats: metrics });
+  publish({ generation: 1, stats: { ...metrics, state: 'standby' } });
+  assert.equal(visible(element('.index-stack')), false);
+  assert.equal(document.querySelector('.filament-traces'), null);
+  assert.equal(visible(field('bed-value')), true);
+  publish({ generation: 1, stats: metrics });
+  assert.equal(visible(element('.index-stack')), true);
   publish({ generation: 1, stats: { state: 'standby', color: 'url(untrusted)' } });
   assert.equal(document.querySelector('.chosen .material-copy'), null);
   assert.equal(visible(field('layers-value')), false);

@@ -13,6 +13,7 @@
         : (stats?.tools?.[id] ?? { state: 'unknown' }),
     ),
   );
+  const showTabs = $derived(stats?.state !== 'standby');
   const connected = $derived(
     tools.filter((tool) => tool.state === 'connected').length === 1
       ? tools.findIndex((tool) => tool.state === 'connected')
@@ -49,6 +50,10 @@
   let paths = $state<{ id: number; d: string; color: string; active: boolean }[]>([]);
   function measure() {
     if (!root) return;
+    if (!showTabs) {
+      paths = [];
+      return;
+    }
     const origin = root.getBoundingClientRect();
     const row = root.querySelector('.chosen');
     if (row)
@@ -101,7 +106,7 @@
     <div class="current-temperature">{@render hotend()}</div>
     <div class="bed-temperature">{@render bed()}</div>
   </dl>
-  <div class="index-stack">
+  <div class="index-stack" hidden={!showTabs}>
     {#each tools as tool, id}
       {#snippet tabContents()}
         {#if id === active}<span class="nozzle-size"
@@ -199,17 +204,17 @@
       </div>
     {/each}
   </div>
-  <svg class="filament-traces" aria-hidden="true">
-    {#each paths as path}
-      <path class="trace-base" data-active={path.id === active} d={path.d} stroke={path.color} />
-      {#if path.active}
-        {#key connected}
-          <path class="trace-draw" d={path.d} stroke={path.color} pathLength="1" />
-          <path class="trace-shimmer" d={path.d} stroke={path.color} pathLength="1" />
-        {/key}
-      {/if}
-    {/each}
-  </svg>
+  {#if showTabs}<svg class="filament-traces" aria-hidden="true">
+      {#each paths as path}
+        <path class="trace-base" data-active={path.id === active} d={path.d} stroke={path.color} />
+        {#if path.active}
+          {#key connected}
+            <path class="trace-draw" d={path.d} stroke={path.color} pathLength="1" />
+            <path class="trace-shimmer" d={path.d} stroke={path.color} pathLength="1" />
+          {/key}
+        {/if}
+      {/each}
+    </svg>{/if}
 </div>
 
 <style>
