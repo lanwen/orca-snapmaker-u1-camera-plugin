@@ -90,6 +90,15 @@ class ReleaseReviewTests(ReleaseFixture):
         self.assertEqual(release.public_notes(refreshed), self.public)
         self.check(refreshed, self.first)
 
+    def test_crlf_notes_pass_policy_and_preserve_review_on_refresh(self):
+        with patch.object(release, "api", return_value=[self.source()]):
+            reviewed = self.reviewed(self.prepare(self.additional))
+            windows_body = reviewed.replace("\n", "\r\n")
+            self.check(windows_body, self.additional)
+            refreshed = self.prepare(self.additional, windows_body)
+        self.assertEqual(refreshed, reviewed)
+        self.check(refreshed, self.additional)
+
     def test_adding_public_notes_cannot_be_bypassed_by_a_checked_task(self):
         body = self.reviewed(self.prepare(self.first)).replace(self.public, release.PUBLIC_PLACEHOLDER)
         with self.assertRaises(ValueError):
