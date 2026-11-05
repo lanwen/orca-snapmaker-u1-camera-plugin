@@ -13,13 +13,16 @@
   The plugin does not send a global camera-stop command, which could interrupt another viewer.
   The printer stops producing images after its own monitoring timeout unless another viewer keeps it awake.
 - A 3.5-second activity lease stops abandoned monitoring if the webview loses its connection to the plugin.
-- Old image timestamps produce a visible stale-image warning.
-  Without timestamps, an unchanged image is labelled as having unconfirmed freshness.
-- A failed snapshot request, including HTTP 404, keeps the last frame visible with an error or waiting message.
+- Image timestamps older than five seconds mark the stream as frozen.
+  Without timestamps, receiving identical images does not by itself establish that the camera is frozen.
+- The stream indicator shows a blue dot with FPS while fresh images arrive and an orange elapsed-seconds counter during interruptions.
+  Interruptions lasting more than five seconds show a red outline and the latest error.
+  A failed snapshot request, including HTTP 404, keeps the last frame visible.
   Stop and printer selection changes still clear the frame.
 - The only light command is `SET_LED LED=cavity_led WHITE=0|1 SYNC=0`.
   Light status is read back from `led cavity_led`.
   The toggle also works before Play and after Stop, without starting camera monitoring.
+  Failed light commands show feedback beside the toggle without interrupting camera playback.
 - HTTP redirects and environment proxies are disabled, requests have short timeouts, and HTTP response sizes are bounded.
   API keys stay in Python memory and are used to obtain a short-lived WebSocket token.
   The stock HTTP connection is unencrypted.

@@ -39,6 +39,7 @@ For custom ports or printers that require an API key, see [connection configurat
 Click the play overlay to start the camera.
 Hover over the player to reveal Stop.
 Keyboard focus and touch also reveal the control.
+The indicator above Stop shows FPS while images arrive, an orange counter during interruptions, and a red outline with the error after five seconds.
 The light toggle works with playback started or stopped.
 
 During preparation, statistics show the slicer’s original print plan and an approximate “after” finish time, with a moving gradient to indicate activity.

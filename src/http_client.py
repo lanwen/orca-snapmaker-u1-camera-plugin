@@ -32,7 +32,7 @@ class CameraSnapshot:
 def printer_url(value):
     value = str(value or "").strip().strip('"')
     if not value:
-        raise ValueError('Set the selected printer address, or set "host" in plugin Config.')
+        raise ValueError('Printer address missing. Set "host" in plugin Config or add an address to the selected U1 preset.')
     if "://" not in value:
         value = "http://" + value
     parts = urlsplit(value)
@@ -145,7 +145,7 @@ class HttpClient:
             if response.status in (401, 403):
                 raise RuntimeError("Printer denied access. Check its API key and LAN permissions.")
             if response.status != 200:
-                raise RuntimeError("Printer returned HTTP %s." % response.status)
+                raise RuntimeError("Printer returned HTTP %s" % response.status)
             data = response.read(limit + 1)
             if len(data) > limit:
                 raise RuntimeError("Printer response is too large.")

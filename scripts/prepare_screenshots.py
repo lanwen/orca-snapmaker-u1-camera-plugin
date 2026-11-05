@@ -29,6 +29,12 @@ PREVIEW_LABELS = {
     "phase-unknown": "Unknown phase",  # Active print without reliable layers.
     "plan-only": "Estimate unavailable",  # Original plan without a current estimate.
     "preparing-no-plan": "Preparation without plan",  # Missing slicer metadata during preparation.
+    "stream-waiting": "Camera retry (3s)",  # Temporary interruption without error prose.
+    "stream-error": "Camera error (8s)",  # Persistent interruption with error details.
+    "light-error": "Light command failed",  # Action feedback beside the light control.
+    "permission-denied": "Preset access denied",  # Consent rejected; playback is blocked.
+    "config-missing": "Printer address missing",  # No usable address in plugin Config or the preset.
+    "printer-unavailable": "Printer unreachable",  # Connection failure before receiving any camera image.
 }
 
 
@@ -64,7 +70,7 @@ def screenshot_page(camera=None):
                                   elapsed=96, printing_duration=30, remaining=None,
                                   bed={"temperature": 42, "target": 60},
                                   hotend={"temperature": 157, "target": 210})
-    fixtures["paused"] = dict(fixtures["printing"], state="paused", remaining=None,
+    fixtures["paused"] = dict(fixtures["printing"], state="paused", progress=.67, current_layer=58, remaining=None,
                                bed={"temperature": 60, "target": 60},
                                hotend={"temperature": 170, "target": 170})
     # Captured completed-job values from the U1; camera image remains illustrative.
@@ -74,54 +80,94 @@ def screenshot_page(camera=None):
                                  hotend={"temperature": 41, "target": 0})
     fixtures["preparing-warm"] = dict(fixtures["preparing"],
                                      bed={"temperature": 60, "target": 60},
-                                     hotend={"temperature": 210, "target": 210})
+                                     hotend={"temperature": 210, "target": 130})
     fixtures["finishing"] = dict(fixtures["printing"], phase="finishing", progress=1,
                                  current_layer=86, remaining=None)
     for state in ("cancelled", "error"):
-        fixtures[state] = dict(fixtures["printing"], state=state, remaining=None,
+        fixtures[state] = dict(fixtures["printing"], state=state, progress=.23 if state == "cancelled" else .81,
+                               current_layer=20 if state == "cancelled" else 70, remaining=None,
                                bed={"temperature": 45, "target": 0},
                                hotend={"temperature": 95, "target": 0})
     fixtures["standby"] = {"state": "standby", "bed": {"temperature": 24, "target": 0},
                            "hotend": {"temperature": 25, "target": 0}}
     fixtures["unavailable"] = {"state": "unavailable"}
-    fixtures["phase-unknown"] = dict(fixtures["printing"], phase="unknown", current_layer=None,
+    fixtures["phase-unknown"] = dict(fixtures["printing"], phase="unknown", progress=.09, current_layer=None,
                                      remaining=None)
-    fixtures["plan-only"] = dict(fixtures["printing"], remaining=None)
+    fixtures["plan-only"] = dict(fixtures["printing"], progress=.56, current_layer=48, remaining=None)
     fixtures["preparing-no-plan"] = dict(fixtures["preparing"], planned_total=None)
+    for state in ("stream-waiting", "stream-error", "light-error"):
+        fixtures[state] = dict(fixtures["printing"])
+    for state in ("permission-denied", "config-missing", "printer-unavailable"):
+        fixtures[state] = {"state": "unavailable"}
     bootstrap = r'''
 <script>
 // Screenshot-only transport. No messages or commands reach the real printer.
 const NativeDate = window.Date;
+let screenshotOffset = 0;
 window.Date = class extends NativeDate {
   constructor(...args) { super(...(args.length ? args : ['2026-11-02T12:00:00Z'])); }
-  static now() { return new NativeDate('2026-11-02T12:00:00Z').getTime(); }
+  static now() { return new NativeDate('2026-11-02T12:00:00Z').getTime() + screenshotOffset; }
 };
 Object.defineProperty(document, 'hidden', {get: () => false});
 const screenshotFixtures = __FIXTURES__;
 const screenshotLabels = __LABELS__;
 const screenshotStates = Object.keys(screenshotFixtures);
 const screenshotImage = __IMAGE__;
-let screenshotState = __SCREENSHOT_STATE__, screenshotHandler, screenshotLight = true, screenshotStarted = false;
+let screenshotState = __SCREENSHOT_STATE__, screenshotHandler, screenshotLight = true;
+let screenshotAppliedState;
 function publishScreenshot() {
+  const changed = screenshotAppliedState !== screenshotState;
+  if (changed) { screenshotOffset = 0; screenshotAppliedState = screenshotState; }
+  const generation = screenshotStates.indexOf(screenshotState) + 1;
+  const interrupted = screenshotState.startsWith('stream-');
   const trigger = document.getElementById('preview-state');
   if (trigger) trigger.title = 'Preview state: ' + screenshotLabels[screenshotState];
   document.querySelectorAll('[data-preview-state]').forEach(button => {
     button.setAttribute('aria-pressed', String(button.dataset.previewState === screenshotState));
   });
-  screenshotHandler({type:'target', generation:1, target:'Workshop · Snapmaker U1'});
-  screenshotHandler({generation:1, printer:screenshotLabels[screenshotFixtures[screenshotState].state],
-    light:screenshotLight, stats:screenshotFixtures[screenshotState],
-    image:screenshotImage, camera:'Live · 4.4 FPS'});
+  const blocked = {
+    'permission-denied': 'Preset access is off. Set "host" in plugin Config, or reset "allow_preset_connection" to null to ask again.',
+    'config-missing': 'Printer address missing. Set "host" in plugin Config or add an address to the selected U1 preset.'
+  }[screenshotState];
+  if (blocked) {
+    screenshotHandler({error:blocked, supported:true});
+    return;
+  }
+  const offline = screenshotState === 'printer-unavailable';
+  screenshotHandler({type:'target', generation, target:'Workshop · Snapmaker U1'});
+  screenshotHandler({generation, printer:screenshotLabels[screenshotFixtures[screenshotState].state],
+    light:offline ? null : screenshotLight, light_error:screenshotState === 'light-error' ? 'Could not change light — try again' : '',
+    stats:screenshotFixtures[screenshotState],
+    image:offline || (interrupted && !changed) ? undefined : screenshotImage, fps:4.4, frozen:false});
+  if (offline) {
+    screenshotHandler({generation, failed:true, camera:'Cannot reach printer — check its address and connection'});
+    screenshotOffset = 8000;
+  }
+  if (interrupted && !changed) screenshotHandler({generation, failed:true, camera:'Printer returned HTTP 404'});
+  if (changed && offline) queueMicrotask(() => window.dispatchEvent(new Event('pageshow')));
+  if (changed && interrupted) {
+    const state = screenshotState;
+    document.getElementById('image').addEventListener('load', () => {
+      if (screenshotState !== state) return;
+      screenshotHandler({generation, failed:true, camera:'Printer returned HTTP 404'});
+      screenshotOffset = state === 'stream-waiting' ? 3000 : 8000;
+      window.dispatchEvent(new Event('pageshow'));
+    }, {once:true});
+  }
+  if (changed) queueMicrotask(() => {
+    const play = document.getElementById('play');
+    if (play && !play.hidden && !play.disabled) {
+      screenshotAppliedState = undefined;
+      screenshotOffset = 0;
+      play.click();
+    }
+  });
 }
 window.orca = {
   onMessage(callback) { screenshotHandler = callback; },
   postMessage(message) {
     if (message.type === 'activity' && message.active) {
       publishScreenshot();
-      if (!screenshotStarted) {
-        screenshotStarted = true;
-        queueMicrotask(() => document.getElementById('play').click());
-      }
     }
     if (message.type === 'light') { screenshotLight = message.enabled; publishScreenshot(); }
   }
@@ -202,7 +248,11 @@ body { --viewer-top:calc(100vw * .05231144); }
     output = Path(output_dir)
     output.mkdir(parents=True, exist_ok=True)
     for state in STATES:
-        (output / (state + ".html")).write_text(page.replace("__SCREENSHOT_STATE__", json.dumps(state)))
+        view = page.replace("__SCREENSHOT_STATE__", json.dumps(state))
+        (output / (state + ".html")).write_text(view)
+        if state != "printing":
+            (output / (state + "-stats.html")).write_text(view.replace(
+                "</head>", "<style>.stream-controls { display:none !important; }</style></head>"))
     options = "".join('<button type="button" data-preview-state="' + state +
                       '" aria-pressed="' + str(state == "preparing").lower() + '">' + label + '</button>'
                       for state, label in PREVIEW_LABELS.items())
@@ -240,7 +290,7 @@ body { --viewer-top:calc(100vw * .05231144); }
     entry = output / "index.html"
     entry.write_text(index)
     tiles = "".join('<section><h2>' + state.title() + '</h2><div class="crop"><iframe title="' +
-                    state.title() + ' statistics" src="' + state + '.html"></iframe></div></section>'
+                    state.title() + ' statistics" src="' + state + '-stats.html"></iframe></div></section>'
                     for state in STATES[1:])
     (output / "showcase.html").write_text('''<!doctype html><html lang="en"><head><meta charset="utf-8">
 <title>Snapmaker U1 · Camera and print states</title><style>
@@ -250,7 +300,7 @@ section { display:flex; flex-direction:column; gap:10px; flex:none; }
 h2 { margin:0; font-size:20px; line-height:24px; font-weight:550; }
 iframe { display:block; border:0; background:#0b0e12; }
 .hero iframe { width:100%; height:480px; border:1px solid #ffffff20; border-radius:12px; }
-.crop { position:relative; height:300px; overflow:hidden; border:1px solid #ffffff20; border-radius:12px; }
+.crop { position:relative; height:180px; overflow:hidden; border:1px solid #ffffff20; border-radius:12px; }
 .crop iframe { position:absolute; width:80%; height:650px; left:0; bottom:-10px; transform:scale(1.25); transform-origin:bottom left; }
 @media(max-width:650px) { body { padding:16px; } .crop { height:420px; } }
 </style></head><body><section class="hero"><h2>Camera view</h2><iframe title="Simulated Orca camera tab" src="printing.html"></iframe></section>''' + tiles + '</body></html>')
@@ -276,7 +326,7 @@ def export_showcase(directory, destination):
         result = subprocess.run([
             browser, "--headless", "--no-first-run", "--no-default-browser-check",
             "--disable-background-networking", "--disable-sync", "--hide-scrollbars",
-            "--user-data-dir=" + profile, "--window-size=960,1628", "--force-device-scale-factor=1",
+            "--user-data-dir=" + profile, "--window-size=960,1268", "--force-device-scale-factor=1",
             "--virtual-time-budget=4000", "--screenshot=" + str(destination),
             (Path(directory).resolve() / "showcase.html").as_uri(),
         ], capture_output=True, text=True, timeout=45)

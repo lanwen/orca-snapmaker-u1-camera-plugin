@@ -48,7 +48,8 @@ class DevTools:
 
     def screenshot(self, path):
         clip = self.evaluate("""(() => {
-          const r = document.querySelector('#stats').getBoundingClientRect();
+          const stats = document.querySelector('#stats');
+          const r = (stats.getClientRects().length ? stats : document.querySelector('.viewer')).getBoundingClientRect();
           return {x:r.x, y:r.y, width:r.width, height:r.height, scale:1};
         })()""")
         data = self.call("Page.captureScreenshot", {"format": "png", "clip": clip})["data"]
@@ -158,7 +159,11 @@ def review(directory, output, states, widths, gifs=False):
                     estimate:rect([...document.querySelectorAll('#remaining-value,#plan-value')]
                       .find(e => e.getClientRects().length)),
                     active:['printing','paused'].includes(screenshotFixtures[screenshotState].state),
-                    overflow:[...document.querySelectorAll('#stats,#plan-stat,#remaining-stat,#finish-value')]
+                    pill:rect(document.querySelector('#camera')),
+                    dot:rect(document.querySelector('.stream-dot')),
+                    lightError:document.querySelector('.light-area').dataset.error === 'true',
+                    warning:!document.querySelector('#warning').hidden,
+                    overflow:[...document.querySelectorAll('#stats,#plan-stat,#remaining-stat,#finish-value,#camera,.light-area,#warning-label')]
                       .filter(e => e.getClientRects().length && e.scrollWidth > e.clientWidth+1).map(e => e.id)};
                 })()""")
                 row.update(state=state, width=width, screenshot=f"{state}-{width}.png")
@@ -167,6 +172,14 @@ def review(directory, output, states, widths, gifs=False):
                 try:
                     if row["overflow"]:
                         raise ValueError("Overflow: " + ", ".join(row["overflow"]))
+                    if row["pill"] and row["dot"]:
+                        pill, dot = row["pill"], row["dot"]
+                        if abs(pill["y"] + pill["height"] / 2 - dot["y"] - dot["height"] / 2) > 1:
+                            raise ValueError("Stream dot is not vertically centered")
+                        if pill["x"] + pill["width"] - dot["x"] - dot["width"] > 12:
+                            raise ValueError("Stream dot is not on the right")
+                    if row["warning"] != (state in {"permission-denied", "config-missing"}):
+                        raise ValueError("Configuration warning visibility is incorrect")
                     style = motion_style(client)
                     if row["active"]:
                         if style["animation"] == "none" or not style["clipped"]:
@@ -194,6 +207,13 @@ def review(directory, output, states, widths, gifs=False):
                         row["gif"] = f"{state}.gif"
                         export_gif(client, output / row["gif"], style["duration"], ffmpeg)
                 client.screenshot(output / row["screenshot"])
+                client.evaluate("document.querySelector('#stop').scrollIntoView({block:'nearest'})")
+                stop = client.evaluate("(() => { const r=document.querySelector('#stop').getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2}; })()")
+                client.call("Input.dispatchMouseEvent", {"type": "mouseMoved", **stop})
+                client.evaluate("new Promise(resolve => setTimeout(resolve, 180))")
+                row["viewport"] = f"{state}-{width}-viewport.png"
+                data = client.call("Page.captureScreenshot", {"format": "png"})["data"]
+                (output / row["viewport"]).write_bytes(base64.b64decode(data))
             try:
                 check_alignment(rows)
             except ValueError as error:
@@ -202,7 +222,7 @@ def review(directory, output, states, widths, gifs=False):
     (output / "report.json").write_text(json.dumps(report, indent=2) + "\n")
     images = "".join(f'<figure><figcaption>{html.escape(row["state"])} · {row["width"]}px '
                      + (f'<a href="{row["gif"]}">Animation</a>' if "gif" in row else '') + '</figcaption>'
-                     f'<img src="{row["screenshot"]}" alt="{html.escape(row["state"])}"></figure>' for row in results)
+                     f'<a href="{row["viewport"]}"><img src="{row["screenshot"]}" alt="{html.escape(row["state"])}"></a></figure>' for row in results)
     (output / "index.html").write_text('<!doctype html><meta charset="utf-8"><title>Print state review</title>'
         '<style>body{background:#10151b;color:#edf3f9;font:16px system-ui}figure{margin:24px}img{max-width:100%}</style>'
         '<h1>Print state review</h1><p>Offline sample data. Geometry and motion results: <a href="report.json">report.json</a>.</p>' + images)

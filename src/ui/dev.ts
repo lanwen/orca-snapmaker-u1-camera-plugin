@@ -20,7 +20,8 @@ window.orca = {
         generation: 1,
         printer: 'Printing',
         light,
-        camera: 'Preview',
+        fps: 4.4,
+        frozen: false,
         image: message.playing ? image : undefined,
         stats: {
           state: 'printing',

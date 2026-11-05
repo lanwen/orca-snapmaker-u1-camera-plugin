@@ -97,7 +97,7 @@ class ClientTests(unittest.TestCase):
     def test_snapshot_marks_old_timestamp_stale(self):
         printer = plugin.Printer(self.address, "secret")
         frame = printer.snapshot()
-        self.assertIn("Stale", frame["camera"])
+        self.assertTrue(frame["frozen"])
         self.assertTrue(frame["image"].startswith("data:image/jpeg;base64,"))
         first_request = Endpoint.requests[-1][0]
         printer.snapshot()
@@ -112,10 +112,20 @@ class ClientTests(unittest.TestCase):
                                         plugin.CameraSnapshot(b'\xff\xd8second', 1_000_000_000)])
         with patch.object(plugin.time, "monotonic", side_effect=[10, 10.1, 10.2]), \
                 patch.object(plugin.time, "time", return_value=1_000_000_000):
-            displayed_rates = [float(re.search(r"([\d.]+)\s*FPS", printer.snapshot()["camera"])[1])
+            displayed_rates = [printer.snapshot()["fps"]
                                for _ in range(3)]
             self.assertEqual(displayed_rates, [0, 0, 5],
                              "Downloading an identical image must not increase the displayed frame rate")
+
+    def test_stream_freshness_uses_timestamp_instead_of_identical_image_content(self):
+        printer = plugin.Printer(self.address)
+        printer.http.camera_snapshot = Mock(return_value=plugin.CameraSnapshot(b'\xff\xd8still', 100))
+        with patch.object(plugin.time, "time", return_value=105):
+            self.assertFalse(printer.snapshot()["frozen"])
+        with patch.object(plugin.time, "time", return_value=106):
+            self.assertTrue(printer.snapshot()["frozen"])
+        printer.http.camera_snapshot.return_value = plugin.CameraSnapshot(b'\xff\xd8still', None)
+        self.assertFalse(printer.snapshot()["frozen"])
 
     def test_http_does_not_follow_redirect_or_accept_oversized_data(self):
         client = plugin.HttpClient(self.address)
@@ -580,6 +590,19 @@ class WorkerTests(unittest.TestCase):
         client.start_monitor.assert_not_called()
         client.snapshot.assert_not_called()
 
+    def test_light_failure_does_not_interrupt_camera_or_expose_exception_details(self):
+        generation = self.monitor.update(("printer", ""), playing=True)
+        eventually(lambda: any("image" in m for m in self.messages))
+        client = self.clients[0]
+        client.set_light.side_effect = OSError("http://printer?token=secret")
+        self.monitor.update(("printer", ""), True, playing=True)
+        eventually(lambda: any("light_error" in m for m in self.messages))
+        self.monitor.frame_loaded(generation)
+        eventually(lambda: client.snapshot.call_count == 2)
+        self.assertFalse(any(m.get("failed") for m in self.messages))
+        self.assertNotIn("secret", str(self.messages))
+        self.assertFalse(client.close.called)
+
     def test_explicit_stop_closes_camera_but_keeps_status_available(self):
         generation = self.monitor.update(("printer", ""), playing=True)
         eventually(lambda: any("image" in m for m in self.messages))
@@ -702,7 +725,7 @@ class TargetTests(unittest.TestCase):
         page.save_config.side_effect = None
         page.save_config.return_value = False
         orca.host.ui.message.return_value = "yes"
-        with self.assertRaisesRegex(ValueError, "save.*permission"):
+        with self.assertRaisesRegex(ValueError, "(?:save|confirm).*access choice"):
             page.selected_target()
         preset = orca.host.preset_bundle().current_printer_preset()
         self.assertNotIn("print_host", [call.args[0] for call in preset.config_value.call_args_list])
@@ -712,7 +735,7 @@ class TargetTests(unittest.TestCase):
         # A preset override can hide a successful global save from get_config().
         page.get_config = lambda: "{}"
         orca.host.ui.message.return_value = "yes"
-        with self.assertRaisesRegex(ValueError, "save.*permission"):
+        with self.assertRaisesRegex(ValueError, "(?:save|confirm).*access choice"):
             page.selected_target()
         with self.assertRaisesRegex(ValueError, "access is disabled"):
             page.selected_target()

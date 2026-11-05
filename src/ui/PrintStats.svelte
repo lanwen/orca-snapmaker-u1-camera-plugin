@@ -68,6 +68,8 @@
       current,
       target,
       direction,
+      description:
+        value.target === 0 ? (direction ? 'Heater off · cooling' : 'Heater off') : undefined,
       visible: current !== null || (target !== null && target > 0),
     };
   }
@@ -152,17 +154,22 @@
 
 {#snippet heaterTemperature(value: ReturnType<typeof temperature>)}
   {#if value.current !== null}
-    {#if value.direction}<span class="temperature-arrow {value.direction}" aria-hidden="true"
-        >{value.direction === 'heating' ? '↑' : '↓'}</span
-      >{/if}{value.current} °C<span class="temperature-target"
-      >{#if value.direction === 'heating'}<sup
-          class="heating"
-          aria-label={'Target ' + value.target + ' °C'}>{value.target} °C</sup
-        >{:else if value.direction === 'cooling'}<sub
-          class="cooling"
-          aria-label={'Target ' + value.target + ' °C'}>{value.target} °C</sub
-        >{/if}</span
+    <span
+      title={value.description}
+      aria-label={value.description ? value.current + ' °C · ' + value.description : undefined}
     >
+      {#if value.direction}<span class="temperature-arrow {value.direction}" aria-hidden="true"
+          >{value.direction === 'heating' ? '↑' : '↓'}</span
+        >{/if}{value.current} °C<span class="temperature-target"
+        >{#if value.direction === 'heating'}<sup
+            class="heating"
+            aria-label={'Target ' + value.target + ' °C'}>{value.target} °C</sup
+          >{:else if value.direction === 'cooling' && value.target !== 0}<sub
+            class="cooling"
+            aria-label={'Target ' + value.target + ' °C'}>{value.target} °C</sub
+          >{/if}</span
+      >
+    </span>
   {:else if value.visible}Target {value.target} °C{/if}
 {/snippet}
 
@@ -294,9 +301,9 @@
 
 <style>
   #stats {
-    grid-column: 1 / -1;
+    grid-column: 1;
     display: grid;
-    grid-template-columns: 132px minmax(0, 1fr) 185px;
+    grid-template-columns: 146px minmax(0, 1fr) 185px;
     gap: 18px;
     width: 720px;
     max-width: 100%;
@@ -632,8 +639,12 @@
     line-height: 0;
   }
   #stats[data-state='standby'] {
-    width: 320px;
-    grid-template-columns: 1fr 1fr;
+    width: 400px;
+    grid-template-columns: max-content minmax(0, 1fr);
+  }
+  #stats[data-state='standby'] #stats-message {
+    font-size: 18px;
+    white-space: nowrap;
   }
   #stats[data-state='standby'] .stats-details {
     grid-template-rows: auto;
@@ -655,7 +666,7 @@
   @media (max-width: 650px) {
     #stats {
       width: 480px;
-      grid-template-columns: 108px minmax(0, 1fr);
+      grid-template-columns: 120px minmax(0, 1fr);
       gap: 12px;
     }
     #progress-value {

@@ -1,5 +1,10 @@
 import type { HostMessage, OrcaBridge, PrintStats } from './types';
 
+type StreamState =
+  | 'live' // Fresh images are arriving; show FPS with a blue dot.
+  | 'waiting' // Connecting or interrupted for at most five seconds; show an orange counter.
+  | 'error'; // Interrupted for more than five seconds; show the reason with a red outline.
+
 export class Camera {
   playing = $state(false);
   supported = $state(false);
@@ -7,12 +12,30 @@ export class Camera {
   target = $state('Selected printer');
   printer = $state('Connecting');
   warning = $state('Set the printer address in plugin Config.');
-  status = $state('');
+  imageVisible = $state(false);
+  fps = $state(0);
+  now = $state(Date.now());
+  issueAt = $state<number | null>(null);
+  issue = $state('');
+  notice = $state('');
+  lightError = $state('');
+  private noticeAt: number | null = null;
+  seconds = $derived(this.issueAt === null ? 0 : Math.floor((this.now - this.issueAt) / 1000));
+  streamState: StreamState = $derived(
+    this.issueAt === null ? 'live' : this.seconds > 5 ? 'error' : 'waiting',
+  );
+  status = $derived(
+    this.issueAt === null
+      ? this.fps.toFixed(1) + ' FPS'
+      : this.seconds > 5
+        ? this.issue + ' · ' + this.seconds + 's'
+        : (this.imageVisible ? '' : 'Connecting · ') + this.seconds + 's',
+  );
   light = $state<boolean | null>(null);
   lightDisabled = $state(true);
-  imageVisible = $state(false);
   stats = $state<PrintStats | null>(null);
   statsAt = $state(0);
+  private pendingNotice = '';
   private active = false;
   private generation = -1;
   private lastFrame = 0;
@@ -35,33 +58,48 @@ export class Camera {
   stop = () => {
     this.playing = false;
     this.clearImage();
-    this.status = '';
+    this.issueAt = null;
+    this.issue = '';
+    this.fps = 0;
   };
 
   play = () => {
     if (document.hidden || !this.supported) return;
     this.playing = true;
+    this.notice = '';
+    this.noticeAt = null;
+    this.pendingNotice = '';
     this.lastFrame = Date.now();
-    this.status = 'Connecting…';
+    this.issueAt = this.now = Date.now();
+    this.issue = 'Camera not responding';
     this.tick();
   };
 
   setLight = (enabled: boolean) => {
-    if (this.active && !document.hidden && this.light !== null)
+    if (this.active && !document.hidden && this.light !== null) {
+      this.lightError = '';
       this.bridge.postMessage({ type: 'light', enabled });
+    }
   };
 
+  private interrupt(message: string) {
+    this.issueAt ??= Date.now();
+    this.now = Date.now();
+    this.issue = message.replace(/\.$/, '');
+  }
+
   tick = () => {
+    this.now = Date.now();
+    if (this.noticeAt !== null && this.now - this.noticeAt > 5000) this.notice = this.pendingNotice;
     if (this.statsAt && Date.now() - this.statsAt > 10000) this.setStats(null, true);
     if (document.hidden) {
       if (this.active) this.hide();
       return;
     }
     this.active = true;
-    if (this.playing && Date.now() - this.lastFrame > 6000) {
-      this.status = this.imageVisible
-        ? 'Waiting for camera — showing last frame'
-        : 'Waiting for camera — no recent image';
+    if (this.playing && this.imageVisible && this.now - this.lastFrame > 1000) {
+      this.issueAt ??= this.lastFrame;
+      if (!this.issue) this.issue = 'Camera not updating';
     }
     this.bridge.postMessage({ type: 'activity', active: true, playing: this.playing });
   };
@@ -78,6 +116,8 @@ export class Camera {
     if (data.type === 'selection_changed') {
       this.setStats();
       this.stop();
+      this.notice = this.lightError = '';
+      this.noticeAt = null;
       this.supported = false;
       this.lightDisabled = true;
       this.tick();
@@ -85,14 +125,24 @@ export class Camera {
     }
     if (data.type === 'target' && data.generation !== undefined && data.target !== undefined) {
       this.supported = true;
+      if (this.targetUnavailable) {
+        this.warning = '';
+        this.notice = '';
+        this.noticeAt = null;
+      }
       this.targetUnavailable = false;
       if (this.generation !== data.generation) {
         this.clearImage();
-        this.lastFrame = Date.now();
+        this.lastFrame = this.now = Date.now();
+        this.issueAt = this.playing ? this.lastFrame : null;
+        this.issue = this.playing ? 'Camera not responding' : '';
+        this.fps = 0;
       }
       if (this.target !== data.target) {
         this.setStats();
         this.printer = 'Connecting';
+        this.notice = this.lightError = '';
+        this.noticeAt = null;
         this.light = null;
         this.lightDisabled = true;
       }
@@ -104,6 +154,8 @@ export class Camera {
     if (data.error) {
       this.setStats();
       if (typeof data.supported === 'boolean') {
+        this.lightError = this.notice = '';
+        this.noticeAt = null;
         this.targetUnavailable = true;
         this.stop();
         this.supported = false;
@@ -111,20 +163,34 @@ export class Camera {
         this.printer = 'Unavailable';
         this.warning = data.error;
       }
-      this.clearImage();
       this.lightDisabled = true;
-      this.status = data.error;
+      if (!this.targetUnavailable) {
+        if (this.playing) this.interrupt(data.error);
+        else {
+          this.noticeAt ??= Date.now();
+          this.pendingNotice = data.error;
+        }
+      }
       return;
     }
+    if ('light_error' in data) this.lightError = data.light_error ?? '';
     if (data.printer) this.printer = data.printer;
     if ('stats' in data) this.setStats(data.stats, true);
     if ('light' in data) {
       this.light = data.light ?? null;
       this.lightDisabled = this.light === null;
+      if (this.light !== null) {
+        this.notice = '';
+        this.noticeAt = null;
+      }
     }
-    if (data.camera && (this.playing || data.failed))
-      this.status =
-        data.failed && this.imageVisible ? data.camera + ' — showing last frame' : data.camera;
+    if (data.failed && data.camera) {
+      if (this.playing) this.interrupt(data.camera);
+      else {
+        this.noticeAt ??= Date.now();
+        this.pendingNotice = data.camera.replace(/\.$/, '');
+      }
+    }
     if (!this.playing) return;
     if (data.image) {
       const frameGeneration = data.generation;
@@ -137,12 +203,20 @@ export class Camera {
         if (this.active && this.playing && this.generation === frameGeneration) {
           this.lastFrame = Date.now();
           this.imageVisible = true;
+          this.now = Date.now();
+          this.fps = data.fps ?? 0;
+          if (data.frozen) this.interrupt('Camera not updating');
+          else {
+            this.issueAt = null;
+            this.issue = '';
+          }
         }
         acknowledge();
       };
       this.image.onerror = () => {
+        if (!this.active || !this.playing || this.generation !== frameGeneration) return;
         this.clearImage();
-        this.status = 'Could not display camera image';
+        this.interrupt('Could not display camera image');
         acknowledge();
       };
       this.image.src = data.image;
@@ -152,7 +226,7 @@ export class Camera {
   start() {
     this.bridge.onMessage(this.receive);
     const error = (event: ErrorEvent) => {
-      this.status = 'Player error: ' + event.message;
+      this.notice = 'Player error: ' + event.message;
     };
     document.addEventListener('visibilitychange', this.tick);
     window.addEventListener('pageshow', this.tick);

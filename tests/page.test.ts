@@ -217,8 +217,12 @@ for (const state of ['complete', 'cancelled', 'error']) {
     assert.equal(visible(field('finish-value')), false);
     assert.equal(visible(field('tool-value')), false);
     assert.equal(progress().hasAttribute('data-shimmer'), false);
-    assert.deepEqual(numbers(field('hotend-value')), [235, 0]);
-    assert.equal(field('hotend-value').querySelector('sub')?.textContent, '0 °C');
+    assert.deepEqual(numbers(field('hotend-value')), [235]);
+    assert.equal(field('hotend-value').querySelector('sub'), null);
+    assert.equal(
+      field('hotend-value').querySelector('[title]')?.getAttribute('title'),
+      'Heater off · cooling',
+    );
     assert.equal(visible(progress()), true);
     if (state === 'complete') assert.equal(Number(progress().getAttribute('aria-valuenow')), 100);
   });
@@ -231,7 +235,7 @@ test('heater targets show the direction only outside the temperature tolerance',
     [238, 240, [238]],
     [250, 240, [250, 240]],
     [242, 240, [242]],
-    [90, 0, [90, 0]],
+    [90, 0, [90]],
   ] as const) {
     publish({ generation: 1, stats: { ...metrics, hotend: { temperature, target } } });
     assert.deepEqual(numbers(field('hotend-value')), displayed);
@@ -239,7 +243,7 @@ test('heater targets show the direction only outside the temperature tolerance',
     const tag = temperature < target ? 'sup' : 'sub';
     assert.equal(
       field('hotend-value').querySelector(tag)?.textContent ?? null,
-      changing ? target + ' °C' : null,
+      changing && target > 0 ? target + ' °C' : null,
     );
     assert.equal(
       field('hotend-value').querySelector('.temperature-arrow')?.textContent ?? null,
@@ -263,8 +267,11 @@ test('off heaters hide cooling indicators after a minute within one degree and r
   for (let seconds = 5; seconds <= 60; seconds += 5) {
     advance(5000);
     update(seconds % 10 === 0 ? 24 : 25, 90 - seconds / 5);
-    assert.equal(field('bed-value').querySelector('sub') === null, seconds === 60);
-    assert.ok(field('hotend-value').querySelector('sub'), 'Falling temperatures keep cooling');
+    assert.equal(field('bed-value').querySelector('.temperature-arrow') === null, seconds === 60);
+    assert.ok(
+      field('hotend-value').querySelector('.temperature-arrow'),
+      'Falling temperatures keep cooling',
+    );
   }
   assert.deepEqual(numbers(field('bed-value')), [24]);
   advance(5000);
@@ -275,13 +282,16 @@ test('off heaters hide cooling indicators after a minute within one degree and r
     update(26, 77);
   }
   assert.equal(field('bed-value').querySelector('.temperature-arrow'), null);
-  assert.equal(field('hotend-value').querySelector('sub'), null);
+  assert.equal(field('hotend-value').querySelector('.temperature-arrow'), null);
   advance(5000);
   update(26, 77, 20);
   assert.equal(field('bed-value').querySelector('sub')?.textContent, '20 °C');
   advance(5000);
   update(26, 77);
-  assert.ok(field('bed-value').querySelector('sub'), 'Changing the target resets stability');
+  assert.ok(
+    field('bed-value').querySelector('.temperature-arrow'),
+    'Changing the target resets stability',
+  );
 });
 
 test('missing readings and printer changes cannot establish cooling stability', () => {
@@ -299,18 +309,24 @@ test('missing readings and printer changes cannot establish cooling stability', 
   update({ temperature: NaN, target: 0 });
   advance(5000);
   update();
-  assert.ok(field('hotend-value').querySelector('sub'));
+  assert.ok(field('hotend-value').querySelector('.temperature-arrow'));
   advance(11000);
   update();
-  assert.ok(field('hotend-value').querySelector('sub'), 'A status gap resets observations');
+  assert.ok(
+    field('hotend-value').querySelector('.temperature-arrow'),
+    'A status gap resets observations',
+  );
   for (let seconds = 5; seconds <= 60; seconds += 5) {
     advance(5000);
     update();
   }
-  assert.equal(field('hotend-value').querySelector('sub'), null);
+  assert.equal(field('hotend-value').querySelector('.temperature-arrow'), null);
   selectPrinter(2, 'Other printer');
   update(undefined, 2);
-  assert.ok(field('hotend-value').querySelector('sub'), 'A different printer starts fresh');
+  assert.ok(
+    field('hotend-value').querySelector('.temperature-arrow'),
+    'A different printer starts fresh',
+  );
 });
 
 test('the preparation bar is warm only while a reported heater is below target', () => {
@@ -462,8 +478,20 @@ test('light toggles are host-confirmed and work without starting playback', () =
   click(light());
   assert.deepEqual(lastMessage(), { type: 'light', enabled: false });
   const failure = 'The printer rejected the light command';
-  publish({ generation: 1, failed: true, camera: failure });
-  assert.equal(field('camera').textContent, failure, 'Host failures remain visible while stopped');
+  publish({ generation: 1, light_error: failure });
+  assert.equal(
+    field('light-error').textContent,
+    failure,
+    'Light failures appear beside the control',
+  );
+  publish({ generation: 1, light: false });
+  assert.equal(
+    field('light-error').textContent,
+    failure,
+    'Polling does not dismiss a failed action',
+  );
+  click(light());
+  assert.equal(visible(field('light-error')), false, 'Retry clears the previous action error');
   assert.equal(
     sent.some((message) => message.type === 'activity' && message.playing),
     false,
@@ -513,20 +541,28 @@ for (const outcome of ['load', 'error'] as const) {
 
 test('a camera 404 retains the last frame through retries and recovers on the next image', () => {
   start();
-  publish({ generation: 1, image: 'last-good-frame', camera: 'Live · 4 FPS' });
+  publish({ generation: 1, image: 'last-good-frame', fps: 4 });
   settleFrame();
   publish({ generation: 1, failed: true, camera: 'Printer returned HTTP 404.' });
   assert.equal(visible(image()), true);
   assert.equal(image().getAttribute('src'), 'last-good-frame');
-  assert.match(field('camera').textContent!, /404.*showing last frame/);
+  assert.equal(field('camera').dataset.state, 'waiting');
+  assert.doesNotMatch(field('camera').textContent!, /404/);
+  advance(5000);
+  assert.equal(field('camera').dataset.state, 'waiting');
+  publish({ generation: 1, failed: true, camera: 'Printer returned HTTP 404.' });
   advance(7000);
   assert.equal(visible(image()), true);
   assert.equal(image().getAttribute('src'), 'last-good-frame');
-  assert.match(field('camera').textContent!, /showing last frame/);
-  publish({ generation: 1, image: 'recovered-frame', camera: 'Live · 4 FPS' });
+  assert.equal(field('camera').dataset.state, 'error');
+  assert.match(field('camera').textContent!, /404/);
+  assert.doesNotMatch(field('camera').textContent!, /404\./);
+  publish({ generation: 1, image: 'recovered-frame', fps: 4 });
   settleFrame();
   assert.equal(image().getAttribute('src'), 'recovered-frame');
-  assert.equal(field('camera').textContent, 'Live · 4 FPS');
+  assert.equal(field('camera').dataset.state, 'live');
+  assert.match(field('camera').textContent!, /4.0 FPS/);
+  assert.doesNotMatch(field('camera').textContent!, /404/);
 });
 
 test('Stop removes the current frame and late images cannot restart playback', () => {
@@ -612,7 +648,8 @@ test('window focus does not control playback, but a stale image is no longer pre
   assert.equal(visible(image()), true);
   advance(6000);
   assert.equal(visible(image()), true, 'A stalled feed retains its last frame');
-  assert.match(field('camera').textContent!, /showing last frame/);
+  assert.equal(field('camera').dataset.state, 'error');
+  assert.match(field('camera').textContent!, /Camera not updating/);
 });
 
 test('selection changes stop playback, explain unavailable targets, and allow later recovery', () => {
@@ -670,4 +707,81 @@ test('unmount ends monitoring and later browser events or host messages cannot r
   });
   publish({ type: 'target', generation: 2, target: 'After unmount' });
   assert.equal(sent.length, messageCount);
+});
+
+test('resolved consent clears its warning before playback starts', () => {
+  publish({ error: 'Reset allow_preset_connection to null', supported: true });
+  assert.equal(visible(field('warning')), true);
+  selectPrinter();
+  assert.equal(visible(field('warning')), false);
+  assert.equal(field('warning-label').textContent, '');
+  assert.equal(visible(field('notice')), false);
+  assert.equal(visible(button('play')), true);
+});
+
+test('brief stream failures recover without exposing error text', () => {
+  start();
+  publish({ generation: 1, image: 'good', fps: 4 });
+  settleFrame();
+  publish({ generation: 1, failed: true, camera: 'HTTP 404.' });
+  advance(4000);
+  assert.equal(field('camera').dataset.state, 'waiting');
+  assert.doesNotMatch(field('camera').textContent!, /404/);
+  publish({ generation: 1, image: 'recovered', fps: 3.2 });
+  settleFrame();
+  assert.equal(field('camera').dataset.state, 'live');
+  assert.match(field('camera').textContent!, /3.2 FPS/);
+});
+
+test('downloaded stale images do not reset the interruption timer', () => {
+  start();
+  publish({ generation: 1, image: 'stale', frozen: true });
+  settleFrame();
+  advance(4000);
+  publish({ generation: 1, image: 'still-stale', frozen: true });
+  settleFrame();
+  advance(2000);
+  assert.equal(field('camera').dataset.state, 'error');
+  assert.match(field('camera').textContent!, /Camera not updating/);
+  publish({ generation: 1, image: 'fresh', frozen: false, fps: 2 });
+  settleFrame();
+  assert.equal(field('camera').dataset.state, 'live');
+});
+
+test('startup errors wait five seconds and Stop clears the stream status', () => {
+  start();
+  advance(5000);
+  assert.equal(field('camera').dataset.state, 'waiting');
+  advance(1000);
+  assert.equal(field('camera').dataset.state, 'error');
+  assert.match(field('camera').textContent!, /Camera not responding/);
+  click(button('stop'));
+  assert.equal(visible(field('camera')), false);
+  click(button('play'));
+  assert.equal(field('camera').dataset.state, 'waiting');
+  assert.doesNotMatch(field('camera').textContent!, /not responding/);
+});
+
+test('starting playback moves a connection failure into the stream pill without a duplicate notice', () => {
+  selectPrinter();
+  publish({ generation: 1, failed: true, camera: 'Cannot reach printer' });
+  advance(6000);
+  assert.equal(visible(field('notice')), true);
+  click(button('play'));
+  assert.equal(visible(field('notice')), false);
+  publish({ generation: 1, failed: true, camera: 'Cannot reach printer' });
+  advance(6000);
+  assert.equal(field('camera').dataset.state, 'error');
+  assert.equal(visible(field('notice')), false);
+});
+
+test('configuration warnings separate the title from advice and mark config properties as code', () => {
+  publish({
+    error:
+      'Printer address missing. Set "host" in plugin Config or add an address to the selected U1 preset.',
+    supported: true,
+  });
+  assert.equal(field('warning-title').textContent, 'Printer address missing.');
+  assert.match(field('warning-recommendation').textContent!, /Set host in plugin Config/);
+  assert.equal(field('warning-recommendation').querySelector('code')?.textContent, 'host');
 });
