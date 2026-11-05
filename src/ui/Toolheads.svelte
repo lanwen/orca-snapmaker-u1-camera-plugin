@@ -465,7 +465,7 @@
   }
   .filament-traces:not(.flowing) .trace-base[data-active='true'] {
     opacity: 1;
-    stroke-width: 2.5;
+    stroke-width: 1.2;
   }
   .trace-draw {
     stroke-width: 2.5;
