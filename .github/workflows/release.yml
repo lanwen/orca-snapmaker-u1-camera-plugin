@@ -55,7 +55,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
 
   next-snapshot:
-    needs: validate
+    needs: [validate, publish]
     if: github.ref == 'refs/heads/main' && needs.validate.outputs.final == 'true'
     permissions:
       contents: read

@@ -145,6 +145,23 @@ class ReleaseReviewTests(ReleaseFixture):
         with self.assertRaises(ValueError):
             self.check(refreshed, self.additional)
 
+    def test_refresh_removes_released_sources_and_preserves_current_edits(self):
+        with patch.object(release, "api", return_value=[self.source(), self.source(13, "Control the chamber light.")]):
+            first = self.reviewed(self.prepare(self.additional))
+        first = first.replace("Control the chamber light.", "Hand-edited light suggestion.")
+        with patch.object(release, "api", return_value=[self.source(13, "Control the chamber light.")]), \
+                patch.object(release, "history", return_value=("0.3.0", self.additional[:1])):
+            self.write_version("0.3.1.dev0")
+            release.prepare_pr("release", previous_body=first)
+        refreshed = (self.root / "dist/automation-pr-body.md").read_text()
+        self.assertNotIn("<!-- orca:source-pr:12 -->", refreshed)
+        self.assertNotIn("Playback recovers after an interruption.", refreshed)
+        self.assertNotIn(self.first[0][1], refreshed)
+        self.assertIn("<!-- orca:source-pr:13 -->", refreshed)
+        self.assertIn("Hand-edited light suggestion.", refreshed)
+        self.assertEqual(release.public_notes(refreshed), self.public)
+        self.assertFalse(release.notes_reviewed(refreshed))
+
     def test_legacy_unmerged_foreign_and_malformed_sources_are_ignored(self):
         legacy = self.source(1)
         legacy["body"] = "Old PR without markers."
