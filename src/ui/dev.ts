@@ -4,8 +4,8 @@ import type { HostMessage } from './types';
 let receive: (message: HostMessage) => void;
 let light = true;
 const image =
-  'data:image/svg+xml,' +
-  encodeURIComponent(
+  'data:image/svg+xml;base64,' +
+  btoa(
     '<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720"><rect width="100%" height="100%" fill="#0b0e12"/><text x="50%" y="50%" text-anchor="middle" fill="#778899" font-family="sans-serif" font-size="24">Camera preview</text></svg>',
   );
 window.orca = {

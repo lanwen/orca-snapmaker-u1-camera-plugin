@@ -260,6 +260,11 @@ def review(directory, output, states, widths, gifs=False):
                   document.querySelector('[data-preview-state=' + CSS.escape(%s) + ']').click();
                   await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
                 })()""" % json.dumps(state))
+                if state not in {"connecting", "printer-unavailable", "permission-denied", "config-missing"}:
+                    client.wait_for("""(() => {
+                      const image = document.querySelector('#image');
+                      return !image.hidden && image.complete && image.naturalWidth > 0;
+                    })()""")
                 if state == "printing":
                     for check in (check_toolheads, check_hover_escape, check_tooltip_hover):
                         try:
