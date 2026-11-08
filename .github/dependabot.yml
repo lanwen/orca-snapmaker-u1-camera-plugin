@@ -16,3 +16,11 @@ updates:
       default-days: 30
     commit-message:
       prefix: deps
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: monthly
+    cooldown:
+      default-days: 30
+    commit-message:
+      prefix: deps
