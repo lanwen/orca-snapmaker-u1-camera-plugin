@@ -70,7 +70,7 @@ class ReleaseFixture(unittest.TestCase):
         config.write_text("")
         # Exercise the real tools without inheriting developer config, caches, or signing.
         settings = {key: value for key, value in os.environ.items()
-                    if not key.startswith(("UV_", "GIT_"))}
+                    if not key.startswith(("UV_", "GIT_")) and key != "GITHUB_SHA"}
         settings.update(GH_REPO="example/plugin", UV_CACHE_DIR=str(self.root / "uv-cache"),
                         UV_CONFIG_FILE=str(config), UV_PYTHON=sys.executable,
                         UV_PYTHON_DOWNLOADS="never",
@@ -426,38 +426,84 @@ class PublicationTests(ReleaseFixture):
         for target, value in [
             ("gh", self.github),
             ("git", lambda *args: "" if args[0] == "status" else self.github.sha),
-            ("build", lambda **kwargs: builder.build(self.root / "dist", **kwargs)),
         ]:
             context = patch.object(release, target, value)
             context.start()
             self.addCleanup(context.stop)
 
+        builder.build(self.root / "dist", release_tag="v0.3.0")
+        release.prepare_artifact(self.root / "dist")
+
+    def test_publication_uses_prepared_bytes_without_running_the_builder(self):
+        with patch.object(builder, "build", side_effect=AssertionError("Publish must not rebuild")):
+            release.publish(self.root / "dist")
+        self.assertEqual(self.github.assets["orca-snapmaker-u1-camera-plugin_any.py"],
+                         (self.root / "dist/orca-snapmaker-u1-camera-plugin_any.py").read_bytes())
+
+    def test_wrong_commit_version_or_digest_is_rejected_before_github_access(self):
+        path = self.root / "dist/release-manifest.json"
+        original = json.loads(path.read_text())
+        for key, value in [("commit", "b" * 40), ("version", "0.4.0"), ("sha256", {})]:
+            with self.subTest(key=key):
+                path.write_text(json.dumps(dict(original, **{key: value})))
+                with self.assertRaisesRegex(ValueError, "release commit, version, and bytes"):
+                    release.publish(self.root / "dist")
+                self.assertEqual(self.github.calls, [])
+        path.write_text(json.dumps(original))
+
+    def test_modified_artifact_and_rewritten_checksum_still_fail_manifest(self):
+        artifact = self.root / "dist/orca-snapmaker-u1-camera-plugin_any.py"
+        artifact.write_bytes(b"raise RuntimeError('must never execute')\n")
+        checksum = release.hashlib.sha256(artifact.read_bytes()).hexdigest()
+        (self.root / "dist/SHA256SUMS").write_text(checksum + "  " + artifact.name + "\n")
+        with self.assertRaisesRegex(ValueError, "release commit, version, and bytes"):
+            release.publish(self.root / "dist")
+        self.assertEqual(self.github.calls, [])
+
+    def test_corrupt_checksum_is_rejected_before_github_access(self):
+        (self.root / "dist/SHA256SUMS").write_text("incorrect checksum\n")
+        with self.assertRaisesRegex(ValueError, "SHA256SUMS"):
+            release.publish(self.root / "dist")
+        self.assertEqual(self.github.calls, [])
+
+    def test_workflow_checkout_must_match_expected_commit(self):
+        with patch.dict(os.environ, GITHUB_SHA="b" * 40):
+            with self.assertRaisesRegex(ValueError, "workflow commit"):
+                release.publish(self.root / "dist")
+        self.assertEqual(self.github.calls, [])
+
+    def test_missing_manifest_does_not_fall_back_to_building(self):
+        (self.root / "dist/release-manifest.json").unlink()
+        with self.assertRaises(FileNotFoundError):
+            release.publish(self.root / "dist")
+        self.assertEqual(self.github.calls, [])
+
     def test_draft_is_verified_before_publication_and_reruns_do_not_write(self):
-        self.assertEqual(release.publish(), "v0.3.0")
+        self.assertEqual(release.publish(self.root / "dist"), "v0.3.0")
         self.assertFalse(self.github.release["draft"])
         self.assertEqual(self.github.tag_sha, self.github.sha)
         operations = [call[1] for call in self.github.calls if call[0] == "release"]
         self.assertLess(operations.index("download"), operations.index("edit"))
         self.github.calls.clear()
-        release.publish()
+        release.publish(self.root / "dist")
         self.assertFalse(any(call[:2] in [("release", "upload"), ("release", "edit"), ("release", "create")]
                              for call in self.github.calls))
 
     def test_release_captures_public_notes_first_and_reruns_ignore_pr_edits(self):
-        release.publish()
+        release.publish(self.root / "dist")
         body = self.github.release["body"]
         self.assertEqual(release.public_notes(body), "Camera controls are easier to use.")
         self.assertLess(body.index("## Public notes"), body.index("## Generated notes"))
         self.assertIn("- Camera controls.", body)
         self.assertIn("Source commit:", body)
         self.github.pr["body"] = release.format_notes("Edited after publication", "changed")
-        release.publish()
+        release.publish(self.root / "dist")
         self.assertEqual(self.github.release["body"], body)
 
     def test_unreviewed_public_notes_do_not_create_a_release(self):
         self.github.pr["body"] = release.format_notes(release.PUBLIC_PLACEHOLDER, "generated")
         with self.assertRaisesRegex(ValueError, "Write public release notes"):
-            release.publish()
+            release.publish(self.root / "dist")
         self.assertIsNone(self.github.release)
 
     def test_only_exact_same_repository_release_merge_is_used(self):
@@ -466,33 +512,33 @@ class PublicationTests(ReleaseFixture):
             original = self.github.pr[field]
             self.github.pr[field] = value
             with self.subTest(field=field), self.assertRaisesRegex(ValueError, "exact release commit and version"):
-                release.publish()
+                release.publish(self.root / "dist")
             self.github.pr[field] = original
         self.github.pr["head"]["repo"]["full_name"] = "someone/fork"
         with self.assertRaisesRegex(ValueError, "exact release commit and version"):
-            release.publish()
+            release.publish(self.root / "dist")
         self.assertIsNone(self.github.release)
 
     def test_published_mismatched_assets_are_never_overwritten(self):
-        release.publish()
+        release.publish(self.root / "dist")
         self.github.assets["orca-snapmaker-u1-camera-plugin_any.py"] = b"changed"
         self.github.calls.clear()
         with self.assertRaisesRegex(ValueError, "immutable"):
-            release.publish()
+            release.publish(self.root / "dist")
         self.assertFalse(any(call[:2] == ("release", "upload") for call in self.github.calls))
 
     def test_published_missing_assets_are_never_added(self):
-        release.publish()
+        release.publish(self.root / "dist")
         del self.github.assets["SHA256SUMS"]
         self.github.calls.clear()
         with self.assertRaisesRegex(ValueError, "will not be modified"):
-            release.publish()
+            release.publish(self.root / "dist")
         self.assertFalse(any(call[:2] == ("release", "upload") for call in self.github.calls))
 
     def test_existing_tag_must_resolve_to_the_release_commit(self):
         self.github.tag_sha = "b" * 40
         with self.assertRaisesRegex(ValueError, "another commit"):
-            release.publish()
+            release.publish(self.root / "dist")
         self.assertFalse(any(call[:2] == ("release", "create") for call in self.github.calls))
 
     def test_annotated_tag_is_checked_against_its_underlying_commit(self):
@@ -502,7 +548,7 @@ class PublicationTests(ReleaseFixture):
                 return json.dumps({"object": {"type": "tag", "sha": "c" * 40}})
             return self.github(*args)
         with patch.object(release, "gh", side_effect=github):
-            self.assertEqual(release.publish(), "v0.3.0")
+            self.assertEqual(release.publish(self.root / "dist"), "v0.3.0")
         self.assertFalse(self.github.release["draft"])
 
     def test_tag_lookup_errors_do_not_create_a_release(self):
@@ -512,7 +558,7 @@ class PublicationTests(ReleaseFixture):
             return self.github(*args)
         with patch.object(release, "gh", side_effect=github):
             with self.assertRaisesRegex(RuntimeError, "HTTP 422"):
-                release.publish()
+                release.publish(self.root / "dist")
         self.assertFalse(any(call[:2] in [("release", "create"), ("release", "upload"), ("release", "edit")]
                              for call in self.github.calls))
 
@@ -527,14 +573,14 @@ class PublicationTests(ReleaseFixture):
     def test_dirty_checkout_cannot_publish(self):
         with patch.object(release, "git", return_value=" M pyproject.toml"):
             with self.assertRaisesRegex(ValueError, "clean checkout"):
-                release.publish()
+                release.publish(self.root / "dist")
         self.assertEqual(self.github.calls, [])
 
     def test_development_version_cannot_publish(self):
         path = self.root / "pyproject.toml"
         path.write_text(path.read_text().replace('version = "0.3.0"', 'version = "0.3.1.dev0"'))
         with self.assertRaisesRegex(ValueError, "Development versions"):
-            release.publish()
+            release.publish(self.root / "dist")
         self.assertEqual(self.github.calls, [])
 
     def test_partial_draft_can_resume_without_replacing_assets(self):
@@ -542,7 +588,7 @@ class PublicationTests(ReleaseFixture):
         self.github.release = {"draft": True, "target_commitish": self.github.sha,
                                "body": release.format_notes("Camera controls.", "generated")}
         self.github.assets[artifact.name] = artifact.read_bytes()
-        release.publish()
+        release.publish(self.root / "dist")
         upload = next(call for call in self.github.calls if call[:2] == ("release", "upload"))
         self.assertNotIn(str(artifact), upload)
         self.assertFalse(self.github.release["draft"])

@@ -1,6 +1,7 @@
 """Prepare release/snapshot PR changes and publish immutable GitHub release assets."""
 
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -10,10 +11,12 @@ import tempfile
 import time
 import tomllib
 
-from build import ROOT, build
 from release_notes import (PUBLIC_PLACEHOLDER, REVIEW_TEXT, ReleaseNotesError, format_notes,
                            generated_section, notes_reviewed, public_notes, public_section, tagged_section)
 from versioning import next_snapshot, parse_change, parse_version, read_version, release_version, set_version
+
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def git(*args):
@@ -291,7 +294,7 @@ def verify_assets(release, tag, assets):
     return missing
 
 
-def publish():
+def release_identity():
     version = read_version(ROOT)
     _, development = parse_version(version)
     if development:
@@ -299,9 +302,45 @@ def publish():
     if git("status", "--porcelain", "--untracked-files=no"):
         raise ValueError("Publish from a clean checkout")
     sha = git("rev-parse", "HEAD")
+    expected = os.environ.get("GITHUB_SHA", sha)
+    if sha != expected:
+        raise ValueError("Release checkout does not match the workflow commit")
+    return version, sha
+
+
+def release_assets(directory):
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]
+    artifact = Path(directory) / (project["name"] + "_any.py")
+    checksum = artifact.with_name("SHA256SUMS")
+    expected = hashlib.sha256(artifact.read_bytes()).hexdigest() + "  " + artifact.name + "\n"
+    if checksum.read_text(encoding="utf-8") != expected:
+        raise ValueError("Prepared release artifact does not match SHA256SUMS")
+    return [artifact, checksum]
+
+
+def prepare_artifact(directory):
+    """Seal the already built and tested bytes without running the builder again."""
+    version, sha = release_identity()
+    assets = release_assets(directory)
+    manifest = {"version": version, "commit": sha,
+                "sha256": {asset.name: hashlib.sha256(asset.read_bytes()).hexdigest() for asset in assets}}
+    (Path(directory) / "release-manifest.json").write_text(json.dumps(manifest) + "\n", encoding="utf-8")
+
+
+def verify_artifact(directory):
+    version, sha = release_identity()
+    assets = release_assets(directory)
+    manifest = json.loads((Path(directory) / "release-manifest.json").read_text(encoding="utf-8"))
+    expected = {"version": version, "commit": sha,
+                "sha256": {asset.name: hashlib.sha256(asset.read_bytes()).hexdigest() for asset in assets}}
+    if manifest != expected:
+        raise ValueError("Prepared release artifact does not match the release commit, version, and bytes")
+    return version, sha, assets
+
+
+def publish(directory):
+    version, sha, assets = verify_artifact(directory)
     tag = "v" + version
-    artifact = build(release_tag=tag)
-    assets = [artifact, artifact.with_name("SHA256SUMS")]
     release = release_by_tag(tag, optional=True)
     if release is None:
         commit = tag_commit(tag)
@@ -312,7 +351,7 @@ def publish():
         if section is None:
             raise ValueError("Missing changelog section for " + version)
         public = merged_release_notes(sha, version)
-        notes = ROOT / "dist/release-notes.md"
+        notes = Path(directory) / "release-notes.md"
         notes.write_text(format_notes(public, section[1].strip()) + f"\nSource commit: `{sha}`.\n", encoding="utf-8")
         gh("release", "create", tag, "--draft", "--target", sha, "--title", f"Snapmaker U1 {tag}",
            "--notes-file", str(notes), "--repo", repository())
@@ -363,7 +402,8 @@ def write_outputs(**values):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=["info", "prepare-pr", "check-pr", "classify-pr", "merge-snapshot", "publish"])
+    parser.add_argument("command", choices=["info", "prepare-pr", "check-pr", "classify-pr", "merge-snapshot", "prepare-artifact", "verify-artifact", "publish"])
+    parser.add_argument("--artifact-dir", type=Path, default=ROOT / "dist")
     args = parser.parse_args()
     if args.command == "info":
         version = read_version(ROOT)
@@ -390,8 +430,12 @@ def main():
         write_outputs(snapshot_only=str(snapshot_only(event["pull_request"])).lower())
     elif args.command == "merge-snapshot":
         merge_snapshot(int(os.environ["SNAPSHOT_PR"]), os.environ["SNAPSHOT_HEAD_SHA"], os.environ["SNAPSHOT_VERSION"])
+    elif args.command == "prepare-artifact":
+        prepare_artifact(args.artifact_dir)
+    elif args.command == "verify-artifact":
+        verify_artifact(args.artifact_dir)
     else:
-        print(publish())
+        print(publish(args.artifact_dir))
 
 
 if __name__ == "__main__":

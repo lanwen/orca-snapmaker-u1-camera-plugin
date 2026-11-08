@@ -44,7 +44,10 @@ New releases contain:
 The stable project version, plugin metadata, changelog heading, and tag must agree.
 Keep generated files out of commits.
 Published assets are immutable: reruns verify their source commit and exact bytes without replacing them.
-An interrupted draft upload can resume by rerunning the publishing job.
+An interrupted draft upload can resume by rerunning the publishing job while its checked artifact is retained (seven days).
+The read-only validation job installs dependencies, builds, tests, and seals the resulting assets with their source commit and version.
+The publishing job downloads that exact immutable artifact ID from the same workflow run and verifies its manifest and checksums against the workflow commit.
+It obtains the release App token only after verification and runs no package installation, build, or tests.
 
 ## Automation setup
 
@@ -65,7 +68,8 @@ mise run release:prepare-pr
 
 This edits `pyproject.toml`, `uv.lock`, and `CHANGELOG.md` and writes the proposed PR body into ignored `dist/`.
 It requires Git history and stable release tags in the local checkout.
-The publishing fallback is `mise run release` from a clean checkout of the final release commit with GitHub CLI authentication.
+For local publishing, run `mise run release:prepare-artifact` from a clean checkout of the final release commit before supplying write credentials.
+Then use `mise run release` with GitHub CLI authentication to publish those prepared bytes without rebuilding.
 It refuses development versions, mismatched tags, and changes to published assets.
 
 ## Public release notes
