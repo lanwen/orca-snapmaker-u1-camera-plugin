@@ -19,14 +19,31 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
       final: ${{ steps.version.outputs.final }}
+      artifact-id: ${{ steps.artifact.outputs.artifact-id }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
+          ref: ${{ github.sha }}
       - uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d # v5
       - run: mise run check
       - id: version
         run: mise run release:info
+      - name: Seal the checked release assets
+        if: github.ref == 'refs/heads/main' && steps.version.outputs.final == 'true'
+        run: python scripts/release.py prepare-artifact
+      - name: Transfer the checked release assets
+        id: artifact
+        if: github.ref == 'refs/heads/main' && steps.version.outputs.final == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-${{ github.sha }}-${{ github.run_attempt }}
+          path: |
+            dist/orca-snapmaker-u1-camera-plugin_any.py
+            dist/SHA256SUMS
+            dist/release-manifest.json
+          if-no-files-found: error
+          retention-days: 7
 
   publish:
     needs: validate
@@ -35,6 +52,18 @@ jobs:
     permissions:
       contents: read
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      # With no token or run-id override, download only this run's exact immutable artifact ID.
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          artifact-ids: ${{ needs.validate.outputs.artifact-id }}
+          path: dist
+          merge-multiple: true
+      - name: Verify the handoff before obtaining write credentials
+        run: python3 scripts/release.py verify-artifact
       - name: Generate release GitHub App token
         id: app-token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
@@ -43,13 +72,8 @@ jobs:
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
           permission-contents: write
           permission-pull-requests: read
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          persist-credentials: false
-      - uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d # v5
-        with:
-          cache: false
-      - run: mise run release
+      - name: Publish the verified assets without rebuilding
+        run: python3 scripts/release.py publish
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           GH_REPO: ${{ github.repository }}

@@ -6,6 +6,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import tomllib
 import unittest
 
 ROOT = Path(__file__).parents[1]
@@ -74,6 +75,25 @@ class ReleaseOutputTests(unittest.TestCase):
 
     def test_metadata_workflow_checks_policy(self):
         self.run_workflow_command("pr-policy.yml", "check-pr", {"snapshot_only": "true"})
+
+    def test_publish_workflow_isolated_from_dependency_tools_and_other_runs(self):
+        workflow = (ROOT / ".github/workflows/release.yml").read_text()
+        validate, publish = workflow.split("  publish:\n", 1)
+        publish = publish.split("  next-snapshot:\n", 1)[0]
+        self.assertIn("mise run check", validate)
+        self.assertIn("python scripts/release.py prepare-artifact", validate)
+        self.assertIn("artifact-id: ${{ steps.artifact.outputs.artifact-id }}", validate)
+        self.assertIn("artifact-ids: ${{ needs.validate.outputs.artifact-id }}", publish)
+        self.assertNotIn("run-id:", publish)
+        self.assertNotIn("github-token:", publish)
+        self.assertIn("ref: ${{ github.sha }}", publish)
+        self.assertNotIn("mise", publish)
+        self.assertLess(publish.index("python3 scripts/release.py verify-artifact"),
+                        publish.index("Generate release GitHub App token"))
+        self.assertLess(publish.index("Generate release GitHub App token"),
+                        publish.index("python3 scripts/release.py publish"))
+        tasks = tomllib.loads((ROOT / "mise.toml").read_text())["tasks"]
+        self.assertNotIn("depends", tasks["release"])
 
     def test_local_cli_still_prints_version_info_without_github_output(self):
         with tempfile.TemporaryDirectory() as directory:
