@@ -14,6 +14,7 @@ import time
 from urllib.parse import quote, urlsplit
 
 import websocket
+from websocket._abnf import frame_buffer
 
 
 @dataclass(frozen=True)
@@ -132,6 +133,56 @@ class NetworkOperation:
         raise error
 
 
+class _CameraResponseTooLarge(RuntimeError):
+    def __init__(self):
+        super().__init__("Camera response is too large.")
+
+
+class _CameraFrameBuffer(frame_buffer):
+    """Reject oversized frames before reading their payloads.
+
+    Uses private frame-buffer internals; recheck read order when upgrading
+    websocket-client. recv() checks happen after frame and message buffering.
+    """
+
+    RESPONSE_LIMIT = 512_000
+    DATA_OPCODES = (websocket.ABNF.OPCODE_TEXT, websocket.ABNF.OPCODE_BINARY,
+                    websocket.ABNF.OPCODE_CONT)
+
+    def __init__(self, recv_fn, skip_utf8_validation):
+        super().__init__(recv_fn, skip_utf8_validation)
+        self.message_bytes = 0
+
+    def recv_length(self):
+        super().recv_length()
+        # recv_frame calls this before reading either the mask or payload.
+        if (self.length > self.RESPONSE_LIMIT
+                or (self.header[4] in self.DATA_OPCODES
+                    and self.message_bytes + self.length > self.RESPONSE_LIMIT)):
+            raise _CameraResponseTooLarge()
+
+    def recv_frame(self):
+        frame = super().recv_frame()
+        if frame.opcode in self.DATA_OPCODES:
+            self.message_bytes = 0 if frame.fin else self.message_bytes + len(frame.data)
+        return frame
+
+
+class CameraWebSocket(websocket.WebSocket):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.frame_buffer = _CameraFrameBuffer(
+            self._recv, kwargs.get("skip_utf8_validation", False))
+
+    def recv_frame(self):
+        try:
+            return super().recv_frame()
+        except _CameraResponseTooLarge:
+            # An unread oversized payload cannot be reused as another header.
+            self.shutdown()
+            raise
+
+
 class HttpClient:
     def __init__(self, address, api_key=""):
         self.address = printer_url(address)
@@ -175,6 +226,7 @@ class HttpClient:
                     self.ws = websocket.create_connection(
                         url, socket=sock, timeout=operation.remaining(),
                         suppress_origin=True, http_no_proxy=["*"], redirect_limit=0,
+                        class_=CameraWebSocket,
                     )
                 except BaseException:
                     sock.close()
