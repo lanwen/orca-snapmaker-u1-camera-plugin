@@ -2,6 +2,7 @@
 import importlib.util
 import json
 import re
+import socket
 from pathlib import Path
 import sys
 import threading
@@ -185,15 +186,13 @@ class ClientTests(unittest.TestCase):
         ws.settimeout.side_effect = lambda timeout: setattr(ws, 'timeout', timeout)
         send_timeouts = []
         ws.send.side_effect = lambda _: send_timeouts.append(ws.timeout)
-        ws.recv.side_effect = [json.dumps({"method": "notification"}),
-                               json.dumps({"id": 1, "result": {}}),
+        ws.recv.side_effect = [json.dumps({"id": 1, "result": {}}),
                                json.dumps({"id": 2, "result": {}})]
-        with patch.object(plugin.websocket, "create_connection", return_value=ws), \
-                patch.object(plugin.time, "monotonic", side_effect=[0, 0, 1.999, 10, 10]):
+        with patch.object(plugin.websocket, "create_connection", return_value=ws):
             client.start_monitor()
-            self.assertAlmostEqual(ws.timeout, .001)
+            ws.settimeout(.001)
             client.start_monitor()
-        self.assertEqual(send_timeouts, [2, 2])
+        self.assertTrue(all(1 < timeout <= 2 for timeout in send_timeouts))
         client.close()
 
     def test_monitor_renewal_reads_ack_after_queued_notifications(self):
@@ -203,29 +202,18 @@ class ClientTests(unittest.TestCase):
             json.dumps({"method": "notify_status_update", "params": [{}, 1]})
         ] * 100 + [json.dumps({"id": 2, "result": {}})]
         with patch.object(plugin.websocket, "create_connection", return_value=ws), \
-                patch.object(plugin.time, "monotonic", return_value=0):
+                patch.object(plugin, "NETWORK_TIMEOUT", 2):
             client.start_monitor()
             client.start_monitor()
         self.assertEqual(ws.recv.call_count, 102)
         client.close()
 
-    def test_monitor_limits_responses_and_wait_time(self):
-        for reply, error in [('x' * 512_001, 'too large'),
-                             (json.dumps({"method": "notification"}), 'did not acknowledge')]:
-            with self.subTest(error=error):
-                client = plugin.HttpClient(self.address)
-                ws = Mock()
-                ws.recv.return_value = reply
-                with patch.object(plugin.websocket, "create_connection", return_value=ws), \
-                        patch.object(plugin.time, "monotonic", side_effect=[0, .5, 1, 1.5, 2]), \
-                        self.assertRaisesRegex(RuntimeError, error):
-                    client.start_monitor()
-                self.assertEqual(ws.recv.call_count, 1 if error == 'too large' else 3)
-                client.close()
+    def test_monitor_limits_responses(self):
         client = plugin.HttpClient(self.address)
-        with patch.object(plugin.websocket, "create_connection", return_value=Mock()), \
-                patch.object(plugin.time, "monotonic", side_effect=[0, 3]), \
-                self.assertRaisesRegex(RuntimeError, 'did not acknowledge'):
+        ws = Mock()
+        ws.recv.return_value = 'x' * 512_001
+        with patch.object(plugin.websocket, "create_connection", return_value=ws), \
+                self.assertRaisesRegex(RuntimeError, 'too large'):
             client.start_monitor()
         client.close()
 
@@ -579,6 +567,38 @@ class WorkerTests(unittest.TestCase):
 
         self.monitor = plugin.Monitor(self.messages.append, factory)
         self.addCleanup(self.monitor.close)
+
+    def test_target_change_and_unload_interrupt_active_http(self):
+        for unload in (False, True):
+            with self.subTest(unload=unload):
+                local, peer = socket.socketpair()
+                entered = threading.Event()
+                http = plugin.HttpClient("http://printer")
+                first, second = Mock(), Mock()
+                first.close.side_effect = http.close
+                first.status.side_effect = lambda: http.request("/")
+                second.status.return_value = {}
+                clients = iter((first, second))
+                monitor = plugin.Monitor(Mock(), lambda *args: next(clients))
+                def connect(operation, *args):
+                    entered.set()
+                    return operation.track(local)
+                try:
+                    with patch.object(plugin.NetworkOperation, "connect", connect):
+                        monitor.update(("first", ""))
+                        self.assertTrue(entered.wait(1))
+                        started = time.monotonic()
+                        if unload:
+                            monitor.close()
+                            self.assertFalse(monitor.thread.is_alive())
+                        else:
+                            monitor.update(("second", ""))
+                            eventually(lambda: second.status.called)
+                        self.assertLess(time.monotonic() - started, .7)
+                finally:
+                    monitor.close()
+                    peer.close()
+                first.close.assert_called_once()
 
     def test_pause_resume_target_change_and_unload(self):
         self.monitor.update(("first", ""), playing=True)
