@@ -139,10 +139,10 @@ class _CameraResponseTooLarge(RuntimeError):
 
 
 class _CameraFrameBuffer(frame_buffer):
-    """Check lengths before websocket-client 1.9.2 reads frame payloads.
+    """Reject oversized frames before reading their payloads.
 
-    This uses the pinned library's frame-buffer hook because recv() checks
-    happen after both frame and continuation payloads have been buffered.
+    Uses private frame-buffer internals; recheck read order when upgrading
+    websocket-client. recv() checks happen after frame and message buffering.
     """
 
     RESPONSE_LIMIT = 512_000
