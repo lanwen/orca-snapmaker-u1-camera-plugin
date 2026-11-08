@@ -342,7 +342,9 @@ iframe { display:block; border:0; background:#0b0e12; }
 
 
 def find_browser():
-    browser = shutil.which("chromium") or shutil.which("google-chrome")
+    # Prefer packaged Chrome: Ubuntu AppArmor permits its sandboxed executable path.
+    browser = (shutil.which("google-chrome-stable") or shutil.which("google-chrome")
+               or shutil.which("chromium"))
     if not browser:
         chrome = Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
         if chrome.is_file():
