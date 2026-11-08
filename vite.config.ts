@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { defineConfig } from 'vitest/config';
 import { svelte } from '@sveltejs/vite-plugin-svelte';
 
@@ -21,12 +22,13 @@ export default defineConfig({
         )
           throw new Error('The camera must build to one script and one stylesheet.');
         const template = readFileSync('src/camera.html', 'utf8');
+        // Hash exactly the escaped bytes placed between the script tags.
+        const code = script.code.replaceAll('</script', '<\\/script');
+        const hash = createHash('sha256').update(code, 'utf8').digest('base64');
         const page = template
+          .replace('__CAMERA_SCRIPT_HASH__', () => hash)
           .replace('<!-- CAMERA_STYLE -->', () => `<style>${style.source}</style>`)
-          .replace(
-            '<!-- CAMERA_SCRIPT -->',
-            () => `<script>${script.code.replaceAll('</script', '<\\/script')}</script>`,
-          );
+          .replace('<!-- CAMERA_SCRIPT -->', () => `<script>${code}</script>`);
         for (const name of Object.keys(bundle)) delete bundle[name];
         this.emitFile({ type: 'asset', fileName: 'camera.html', source: page });
       },

@@ -2,7 +2,9 @@
 
 import argparse
 import base64
+import hashlib
 import json
+import re
 from pathlib import Path
 import shutil
 import subprocess
@@ -37,6 +39,14 @@ PREVIEW_LABELS = {
     "config-missing": "Printer address missing",  # No usable address in plugin Config or the preset.
     "printer-unavailable": "Printer unreachable",  # Connection failure before receiving any camera image.
 }
+
+
+def authorize_preview_scripts(page):
+    """Allow only the final production script and offline fixture bootstrap."""
+    scripts = re.findall(r"<script>(.*?)</script>", page, re.DOTALL)
+    hashes = " ".join("'sha256-" + base64.b64encode(hashlib.sha256(
+        script.encode("utf-8")).digest()).decode("ascii") + "'" for script in scripts)
+    return re.sub(r"script-src [^;\"]+", lambda _: "script-src " + hashes, page)
 
 
 def image_uri(camera=None):
@@ -273,10 +283,10 @@ body { --viewer-top:calc(100vw * .05231144); }
     output.mkdir(parents=True, exist_ok=True)
     for state in STATES:
         view = page.replace("__SCREENSHOT_STATE__", json.dumps(state))
-        (output / (state + ".html")).write_text(view)
+        (output / (state + ".html")).write_text(authorize_preview_scripts(view))
         if state != "printing":
-            (output / (state + "-stats.html")).write_text(view.replace(
-                "</head>", "<style>.stream-controls { display:none !important; }</style></head>"))
+            (output / (state + "-stats.html")).write_text(authorize_preview_scripts(view.replace(
+                "</head>", "<style>.stream-controls { display:none !important; }</style></head>")))
     options = "".join('<button type="button" data-preview-state="' + state +
                       '" aria-pressed="' + str(state == "preparing").lower() + '">' + label + '</button>'
                       for state, label in PREVIEW_LABELS.items())
@@ -312,7 +322,7 @@ body { --viewer-top:calc(100vw * .05231144); }
              .replace("</head>", preview_style + "</head>")
              .replace("<body>", "<body>" + controls))
     entry = output / "index.html"
-    entry.write_text(index)
+    entry.write_text(authorize_preview_scripts(index))
     tiles = "".join('<section><h2>' + state.title() + '</h2><div class="crop"><iframe title="' +
                     state.title() + ' statistics" src="' + state + '-stats.html"></iframe></div></section>'
                     for state in STATES[1:])
@@ -332,7 +342,9 @@ iframe { display:block; border:0; background:#0b0e12; }
 
 
 def find_browser():
-    browser = shutil.which("chromium") or shutil.which("google-chrome")
+    # Prefer packaged Chrome: Ubuntu AppArmor permits its sandboxed executable path.
+    browser = (shutil.which("google-chrome-stable") or shutil.which("google-chrome")
+               or shutil.which("chromium"))
     if not browser:
         chrome = Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
         if chrome.is_file():
