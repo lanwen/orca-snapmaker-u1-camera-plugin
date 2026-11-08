@@ -126,3 +126,42 @@ The screenshot tool loads the compiled production UI with an offline Orca bridge
 PNG export uses an installed Chrome or Chromium with an isolated temporary profile.
 The generated `dist/screenshots/showcase.html` shows Printing in one full camera view, followed by desktop Preparing, Paused, and Complete statistics strips.
 This keeps the tab visible while making the statistics readable at README width.
+
+## Camera memory profiling on macOS
+
+The standalone profiler runs the compiled camera page and the real Python worker in two native WebKit processes.
+Orca does not need to run.
+One process loads an original page that uses data URLs.
+The other process loads the current player with its own Blob URL cleanup.
+Use a compiled page from before the change as `ORIGINAL_PAGE_HTML`.
+
+Build the page, then run the comparison against a printer on your network:
+
+```sh
+mise exec -- pnpm build:ui
+mise exec -- uv run --no-sync python scripts/profile_camera.py \
+  --host PRINTER_ADDRESS --duration 1800 \
+  --baseline-page ORIGINAL_PAGE_HTML \
+  --output-dir dist/memory-profile/comparison
+```
+
+Use a new output directory for each run.
+The default run takes thirty minutes.
+Each ten-minute cycle includes playback, Stop/Start, simulated hide/return, and ten rapid Start/Stop cycles.
+The host controls the page visibility events so that other desktop windows do not pause the test.
+The profiler makes camera and status requests.
+It rejects light commands and sends no print commands.
+
+Read `result.json` for the lifecycle verdict and `samples.jsonl` for the recorded measurements.
+The recording includes native host and WebContent memory, decoded frame counts, connection failures, and outstanding Blob URLs.
+The `vmmap` directory contains native memory summaries.
+The final heap summaries contain allocation types without object contents.
+The recording contains no camera images.
+The copied HTML files and `metadata.json` identify the tested page and host code.
+With `--baseline-page`, both bridges pass frames unchanged and the current player manages its own Blob URLs.
+The bridge conversion mode can test an original page without changing its source.
+For that mode, pass an original page through `--page` and omit `--baseline-page`.
+
+For a short test of the complete sequence, use `--duration 75 --cycle-seconds 60 --interval 10`.
+For an existing process, use `scripts/profile_memory.py --help` to record its native memory without a test host.
+This standalone comparison does not cover Orca's message queue or recovery after a browser process exits.

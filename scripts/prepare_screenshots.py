@@ -169,10 +169,13 @@ function publishScreenshot() {
   if (changed && interrupted) {
     const state = screenshotState;
     document.getElementById('image').addEventListener('load', () => {
-      if (screenshotState !== state) return;
-      screenshotHandler({generation, failed:true, camera:'Printer returned HTTP 404'});
-      screenshotOffset = state === 'stream-waiting' ? 3000 : 8000;
-      window.dispatchEvent(new Event('pageshow'));
+      // Apply the interruption after the player's load handler, regardless of listener order.
+      queueMicrotask(() => {
+        if (screenshotState !== state) return;
+        screenshotHandler({generation, failed:true, camera:'Printer returned HTTP 404'});
+        screenshotOffset = state === 'stream-waiting' ? 3000 : 8000;
+        window.dispatchEvent(new Event('pageshow'));
+      });
     }, {once:true});
   }
   if (changed) queueMicrotask(() => {

@@ -39,6 +39,7 @@ export class Camera {
   private active = false;
   private generation = -1;
   private lastFrame = 0;
+  private frameURL: string | null = null;
 
   constructor(
     private bridge: OrcaBridge,
@@ -50,7 +51,14 @@ export class Camera {
     this.statsAt = this.stats && this.stats.state !== 'unavailable' ? Date.now() : 0;
   }
 
+  private releaseFrame() {
+    this.image.onload = this.image.onerror = null;
+    if (this.frameURL !== null) URL.revokeObjectURL(this.frameURL);
+    this.frameURL = null;
+  }
+
   private clearImage() {
+    this.releaseFrame();
     this.imageVisible = false;
     this.image.removeAttribute('src');
   }
@@ -193,33 +201,51 @@ export class Camera {
     }
     if (!this.playing) return;
     if (data.image) {
-      const frameGeneration = data.generation;
+      const { generation: frameGeneration, fps = 0, frozen } = data;
       const acknowledge = () => {
         if (this.active && this.playing && this.generation === frameGeneration)
           this.bridge.postMessage({ type: 'frame', generation: frameGeneration });
       };
-      // Assign the source only after handlers, so cached frames are acknowledged too.
+      this.releaseFrame();
+      let url: string;
+      try {
+        const prefix = /^data:(image\/[a-z0-9.+-]+);base64,/i.exec(data.image);
+        if (!prefix) throw new Error('Invalid camera image');
+        const bytes = Uint8Array.from(atob(data.image.slice(prefix[0].length)), (c) =>
+          c.charCodeAt(0),
+        );
+        url = URL.createObjectURL(new Blob([bytes], { type: prefix[1] }));
+      } catch {
+        this.clearImage();
+        this.interrupt('Could not display camera image');
+        acknowledge();
+        return;
+      }
+      this.frameURL = url;
+      // Revocable URLs keep WebKit from retaining each frame's encoded data URL.
       this.image.onload = () => {
+        if (this.frameURL !== url) return;
         if (this.active && this.playing && this.generation === frameGeneration) {
           this.lastFrame = Date.now();
           this.imageVisible = true;
           this.now = Date.now();
-          this.fps = data.fps ?? 0;
-          if (data.frozen) this.interrupt('Camera not updating');
+          this.fps = fps;
+          if (frozen) this.interrupt('Camera not updating');
           else {
             this.issueAt = null;
             this.issue = '';
           }
         }
+        this.releaseFrame();
         acknowledge();
       };
       this.image.onerror = () => {
-        if (!this.active || !this.playing || this.generation !== frameGeneration) return;
+        if (this.frameURL !== url) return;
         this.clearImage();
         this.interrupt('Could not display camera image');
         acknowledge();
       };
-      this.image.src = data.image;
+      this.image.src = url;
     }
   };
 

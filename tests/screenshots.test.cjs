@@ -3,6 +3,11 @@ const fs = require('node:fs');
 const { JSDOM, VirtualConsole } = require('jsdom');
 const directory = process.argv[2];
 const settle = () => new Promise((resolve) => setImmediate(resolve));
+const stubImageURLs = (window) => {
+  let frame = 0;
+  window.URL.createObjectURL = () => 'blob:preview-' + ++frame;
+  window.URL.revokeObjectURL = () => {};
+};
 
 (async () => {
   for (const state of ['printing', 'preparing', 'paused', 'complete']) {
@@ -18,6 +23,7 @@ const settle = () => new Promise((resolve) => setImmediate(resolve));
           observe() {}
           disconnect() {}
         };
+        stubImageURLs(window);
         window.orca = {
           postMessage() {
             throw new Error('Screenshot contacted the host');
@@ -39,8 +45,8 @@ const settle = () => new Promise((resolve) => setImmediate(resolve));
         assert.equal(visible(get('stop')), true);
         assert.equal(
           new URL(get('image').src).protocol,
-          'data:',
-          'The preview image is self-contained',
+          'blob:',
+          'The preview displays its embedded image through a Blob URL',
         );
         assert.equal(visible(get('hotend-value')), phase !== 'complete');
         assert.equal(
@@ -103,6 +109,7 @@ const settle = () => new Promise((resolve) => setImmediate(resolve));
     runScripts: 'dangerously',
     virtualConsole: previewConsole,
     beforeParse(window) {
+      stubImageURLs(window);
       window.ResizeObserver = class {
         observe() {}
         disconnect() {}

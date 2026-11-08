@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { Blob as NodeBlob } from 'node:buffer';
 import { afterEach, beforeEach, test, vi } from 'vitest';
 import { flushSync, mount, tick, unmount } from 'svelte';
 import App from '../src/ui/App.svelte';
@@ -7,6 +8,7 @@ import type { HostMessage, OrcaBridge } from '../src/ui/types';
 let app: ReturnType<typeof mount>;
 let receive: (data: HostMessage) => void;
 let sent: Parameters<OrcaBridge['postMessage']>[0][];
+let activeURLs: Set<string>;
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -18,6 +20,20 @@ beforeEach(() => {
     },
   );
   vi.spyOn(document, 'hidden', 'get').mockReturnValue(false);
+  activeURLs = new Set();
+  let serial = 0;
+  vi.stubGlobal('Blob', NodeBlob);
+  vi.stubGlobal(
+    'URL',
+    class extends URL {
+      static createObjectURL = vi.fn((_blob: Blob) => {
+        const url = 'blob:frame-' + ++serial;
+        activeURLs.add(url);
+        return url;
+      });
+      static revokeObjectURL = vi.fn((url: string) => activeURLs.delete(url));
+    },
+  );
   sent = [];
   window.orca = {
     onMessage: (callback) => {
@@ -52,6 +68,8 @@ const image = () => element('img[alt]') as HTMLImageElement;
 const progress = () => element('[role="progressbar"]');
 const numbers = (node: HTMLElement) => (node.textContent?.match(/\d+\.\d+|\d+/g) ?? []).map(Number);
 const publish = (data: HostMessage) => {
+  if (data.image && !data.image.startsWith('data:'))
+    data = { ...data, image: 'data:image/jpeg;base64,' + btoa(data.image) };
   if (data.stats && !data.stats.tools) {
     const stats = { ...data.stats };
     data = { ...data, stats };
@@ -581,13 +599,90 @@ for (const outcome of ['load', 'error'] as const) {
   });
 }
 
+test('camera frames use a decoded image Blob and release its URL after loading', async () => {
+  start();
+  publish({ generation: 1, image: 'jpeg bytes', fps: 4 });
+  assert.match(image().getAttribute('src')!, /^blob:/);
+  const blob = vi.mocked(URL.createObjectURL).mock.calls[0][0] as Blob;
+  assert.equal(blob.type, 'image/jpeg');
+  assert.equal(await blob.text(), 'jpeg bytes');
+  assert.equal(activeURLs.size, 1);
+  settleFrame();
+  assert.equal(activeURLs.size, 0);
+  assert.equal(visible(image()), true, 'Revoking the URL retains the loaded frame');
+  assert.equal(image().onload, null, 'A finished frame releases its callback payload');
+  assert.equal(image().onerror, null);
+});
+
+for (const action of ['error', 'stop', 'hide', 'generation', 'unmount'] as const) {
+  test('a pending frame URL is released on ' + action, async () => {
+    start();
+    publish({ generation: 1, image: 'pending' });
+    assert.equal(activeURLs.size, 1);
+    if (action === 'error') settleFrame('error');
+    if (action === 'stop') click(button('stop'));
+    if (action === 'hide') setVisible(false);
+    if (action === 'generation') selectPrinter(2);
+    if (action === 'unmount') await unmount(app);
+    assert.equal(activeURLs.size, 0);
+    assert.equal(vi.mocked(URL.revokeObjectURL).mock.calls.length, 1);
+  });
+}
+
+test('replacing a pending frame releases it and ignores its late load callback', () => {
+  start();
+  publish({ generation: 1, image: 'first' });
+  const oldLoad = image().onload!;
+  const oldSource = image().getAttribute('src');
+  publish({ generation: 1, image: 'second' });
+  assert.equal(activeURLs.size, 1);
+  assert.notEqual(image().getAttribute('src'), oldSource);
+  flushSync(() => oldLoad.call(image(), new Event('load')));
+  assert.equal(frames().length, 0);
+  assert.equal(activeURLs.size, 1, 'An old callback cannot release the replacement frame');
+  settleFrame();
+  assert.equal(frames().length, 1);
+  assert.equal(activeURLs.size, 0);
+});
+
+test('repeated playback and visibility cycles leave no frame URLs outstanding', () => {
+  selectPrinter();
+  for (let cycle = 0; cycle < 20; cycle++) {
+    click(button('play'));
+    publish({ generation: 1, image: 'frame' });
+    if (cycle % 2 === 0) settleFrame();
+    if (cycle % 3 === 0) {
+      setVisible(false);
+      setVisible(true);
+    } else click(button('stop'));
+    assert.equal(activeURLs.size, 0);
+    assert.equal(visible(button('play')), true);
+  }
+  assert.equal(vi.mocked(URL.createObjectURL).mock.calls.length, 20);
+  assert.equal(vi.mocked(URL.revokeObjectURL).mock.calls.length, 20);
+});
+
+for (const invalid of ['data:image/jpeg;base64,%%%', 'data:text/html;base64,aGVsbG8=']) {
+  test('invalid frame data is acknowledged and recovers: ' + invalid, () => {
+    start();
+    flushSync(() => receive({ generation: 1, image: invalid }));
+    assert.equal(activeURLs.size, 0);
+    assert.deepEqual(frames(), [{ type: 'frame', generation: 1 }]);
+    assert.equal(visible(image()), false);
+    publish({ generation: 1, image: 'recovered' });
+    settleFrame();
+    assert.equal(visible(image()), true);
+  });
+}
+
 test('a camera 404 retains the last frame through retries and recovers on the next image', () => {
   start();
   publish({ generation: 1, image: 'last-good-frame', fps: 4 });
+  const lastGoodSource = image().getAttribute('src');
   settleFrame();
   publish({ generation: 1, failed: true, camera: 'Printer returned HTTP 404.' });
   assert.equal(visible(image()), true);
-  assert.equal(image().getAttribute('src'), 'last-good-frame');
+  assert.equal(image().getAttribute('src'), lastGoodSource);
   assert.equal(field('camera').dataset.state, 'waiting');
   assert.doesNotMatch(field('camera').textContent!, /404/);
   advance(5000);
@@ -595,13 +690,13 @@ test('a camera 404 retains the last frame through retries and recovers on the ne
   publish({ generation: 1, failed: true, camera: 'Printer returned HTTP 404.' });
   advance(7000);
   assert.equal(visible(image()), true);
-  assert.equal(image().getAttribute('src'), 'last-good-frame');
+  assert.equal(image().getAttribute('src'), lastGoodSource);
   assert.equal(field('camera').dataset.state, 'error');
   assert.match(field('camera').textContent!, /404/);
   assert.doesNotMatch(field('camera').textContent!, /404\./);
   publish({ generation: 1, image: 'recovered-frame', fps: 4 });
   settleFrame();
-  assert.equal(image().getAttribute('src'), 'recovered-frame');
+  assert.notEqual(image().getAttribute('src'), lastGoodSource);
   assert.equal(field('camera').dataset.state, 'live');
   assert.match(field('camera').textContent!, /4.0 FPS/);
   assert.doesNotMatch(field('camera').textContent!, /404/);
@@ -643,7 +738,7 @@ test('changing generation rejects old frames and status without losing playback 
   publish({ generation: 2, image: 'new frame' });
   assert.equal(
     image().getAttribute('src'),
-    'new frame',
+    vi.mocked(URL.createObjectURL).mock.results.at(-1)!.value,
     'A target announcement preserves playback intent',
   );
   settleFrame();
