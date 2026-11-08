@@ -112,3 +112,18 @@ The plugin therefore asks explicitly before accessing connection settings, even 
 - [Snapmaker's LED implementation](https://github.com/Snapmaker/u1-klipper/blob/main/klippy/extras/led.py)
 - [Snapmaker's Fluidd light controls](https://github.com/Snapmaker/u1-fluidd/blob/main/src/components/widgets/outputs/OutputLed.vue)
 - [Snapmaker's Fluidd adaptive camera](https://github.com/Snapmaker/u1-fluidd/blob/main/src/components/widgets/camera/services/MjpegstreamerAdaptiveCamera.vue)
+
+## Network deadlines
+
+Each HTTP request and camera-monitor WebSocket operation has a two-second elapsed deadline.
+This includes TCP connection attempts, TLS negotiation, HTTP headers and bodies, and WebSocket send and receive processing.
+A watchdog is a timer that interrupts network waits.
+It shuts down active sockets at the deadline, so a slow stream of bytes or control frames cannot keep resetting the wait.
+Changing the target, stopping playback, leaving the page, or unloading the plugin cancels the current client's active socket I/O.
+WebSocket redirects are disabled because redirected connections bypass the deadline's socket tracking.
+
+The operating system's synchronous hostname resolver cannot be interrupted portably.
+A stalled DNS lookup can delay the worker until the resolver returns, even after cancellation or the deadline.
+The plugin checks cancellation and elapsed time immediately after resolution and does not open a late connection.
+All resolved addresses share the remaining deadline.
+The plugin does not restart the deadline for each address.

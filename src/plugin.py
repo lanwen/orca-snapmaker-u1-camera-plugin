@@ -261,6 +261,7 @@ class Monitor:
         self.playing = False
         self.frame_ready = True
         self.closed = False
+        self.client = None
         self.thread = threading.Thread(target=self.run, name="U1 camera", daemon=True)
         self.thread.start()
 
@@ -269,6 +270,8 @@ class Monitor:
             target_changed = target != self.target
             playback_changed = type(playing) is bool and playing != self.playing
             if target_changed or playback_changed:
+                if self.client is not None:
+                    self.close_client(self.client)
                 self.generation += 1
                 self.frame_ready = True
             if target_changed:
@@ -315,7 +318,7 @@ class Monitor:
                     selected_generation = self.generation
                     playing = self.playing
                 if client is not None and (not target or generation != selected_generation):
-                    client.close()
+                    self.close_client(client)
                     client = None
                 if not target:
                     with self.condition:
@@ -329,6 +332,10 @@ class Monitor:
                     if client is None:
                         generation = selected_generation
                         client = self.client_factory(*target)
+                        with self.condition:
+                            self.client = client
+                            if self.closed or generation != self.generation:
+                                self.close_client(client)
                         keepalive_at = status_at = 0
                     if not self.current(generation):
                         continue
@@ -369,22 +376,30 @@ class Monitor:
                     message = str(error) if isinstance(error, RuntimeError) else "Cannot reach printer — check its address, API key, and connection"
                     self.emit(generation, {"camera": message, "failed": True})
                     if client is not None:
-                        client.close()
+                        self.close_client(client)
                     client = None
                     with self.condition:
                         self.frame_ready = True
-                    retry_at = time.monotonic() + 3
+                    retry_at = time.monotonic() + 3 if self.current(generation) else 0
                 with self.condition:
                     # Image-load acknowledgements wake this immediately; no frame-rate cap.
                     if not (self.playing and self.frame_ready):
                         self.condition.wait(timeout=0.2)
         finally:
             if client is not None:
+                self.close_client(client)
+
+    def close_client(self, client):
+        with self.condition:
+            if self.client is client:
+                self.client = None
                 client.close()
 
     def close(self):
         with self.condition:
             self.closed = True
+            if self.client is not None:
+                self.close_client(self.client)
             self.condition.notify()
         self.thread.join(timeout=3)
 
