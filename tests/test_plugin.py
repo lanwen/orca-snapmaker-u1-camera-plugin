@@ -5,6 +5,7 @@ import importlib.util
 import json
 import re
 import socket
+import struct
 from pathlib import Path
 import sys
 import threading
@@ -164,6 +165,76 @@ class WebSocketRedirectTests(unittest.TestCase):
             client.close()
 
 
+class WebSocketLimitTests(unittest.TestCase):
+    def make_socket(self, wire):
+        ws = plugin.CameraWebSocket()
+        pending = bytearray(wire)
+        reads = []
+
+        def receive(size):
+            reads.append(size)
+            if size > len(pending):
+                self.fail("Payload read exceeded the supplied frame headers")
+            data = bytes(pending[:size])
+            del pending[:size]
+            return data
+
+        ws.frame_buffer.recv = receive
+        ws.pong = Mock()
+        ws.shutdown = Mock()
+        return ws, reads, pending
+
+    def frame(self, payload, opcode=1, fin=True):
+        return bytes([(0x80 if fin else 0) | opcode, len(payload)]) + payload
+
+    def test_oversized_lengths_are_rejected_before_payload_reads(self):
+        for header in [b'\x81\x7e' + struct.pack('!H', 513),
+                       b'\x82\x7f' + struct.pack('!Q', 2 ** 40),
+                       b'\x81\xff' + struct.pack('!Q', 2 ** 40)]:
+            with self.subTest(header=header), \
+                    patch.object(plugin._CameraFrameBuffer, "RESPONSE_LIMIT", 512):
+                ws, reads, pending = self.make_socket(header)
+                with self.assertRaisesRegex(RuntimeError, "too large"):
+                    ws.recv()
+                self.assertEqual(reads, [2, len(header) - 2])
+                self.assertFalse(pending)
+                ws.shutdown.assert_called_once()
+
+    def test_fragment_total_rejected_before_next_payload_even_with_ping(self):
+        wire = (self.frame(b'12345', fin=False) + self.frame(b'ping', opcode=9)
+                + bytes([0x80, 4]))
+        with patch.object(plugin._CameraFrameBuffer, "RESPONSE_LIMIT", 8):
+            ws, reads, pending = self.make_socket(wire)
+            with self.assertRaisesRegex(RuntimeError, "too large"):
+                ws.recv()
+        self.assertEqual(reads, [2, 5, 2, 4, 2])
+        self.assertFalse(pending)
+        ws.pong.assert_called_once_with(b'ping')
+        ws.shutdown.assert_called_once()
+        self.assertEqual(ws.cont_frame.cont_data[1], b'12345')
+
+    def test_exact_byte_limit_and_next_message_survive_control_frames(self):
+        # Four UTF-8 characters occupy eight bytes on the wire.
+        data = "éééé".encode()
+        wire = (self.frame(data[:4], fin=False) + self.frame(b'ping', opcode=9)
+                + self.frame(data[4:], opcode=0) + self.frame(b'12345678'))
+        with patch.object(plugin._CameraFrameBuffer, "RESPONSE_LIMIT", 8):
+            ws, _, pending = self.make_socket(wire)
+            self.assertEqual(ws.recv(), "éééé")
+            self.assertEqual(ws.recv(), "12345678")
+        self.assertFalse(pending)
+        ws.pong.assert_called_once_with(b'ping')
+        ws.shutdown.assert_not_called()
+
+    def test_fragment_limit_counts_utf8_bytes(self):
+        wire = self.frame("ééé".encode(), fin=False) + bytes([0x80, 4])
+        with patch.object(plugin._CameraFrameBuffer, "RESPONSE_LIMIT", 8):
+            ws, reads, _ = self.make_socket(wire)
+            with self.assertRaisesRegex(RuntimeError, "too large"):
+                ws.recv()
+        self.assertEqual(reads, [2, 6, 2])
+
+
 class ClientTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -244,6 +315,7 @@ class ClientTests(unittest.TestCase):
         self.assertTrue(connect.call_args.args[0].endswith("/websocket?token=token"))
         self.assertEqual(connect.call_args.kwargs["http_no_proxy"], ["*"])
         self.assertEqual(connect.call_args.kwargs["redirect_limit"], 0)
+        self.assertIs(connect.call_args.kwargs["class_"], plugin.CameraWebSocket)
 
     def test_camera_rejection(self):
         printer = plugin.Printer(self.address)
