@@ -1,4 +1,6 @@
 """Client protocol and worker tests; no Orca instance or physical printer needed."""
+import base64
+import hashlib
 import importlib.util
 import json
 import re
@@ -73,6 +75,93 @@ class Endpoint(BaseHTTPRequestHandler):
 
     def log_message(self, *args):
         pass
+
+
+class WebSocketServer(ThreadingHTTPServer):
+    def get_request(self):
+        connection = super().get_request()
+        self.connections += 1
+        return connection
+
+
+class WebSocketEndpoint(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.server.requests.append(self.path)
+        if self.server.redirect_status:
+            self.send_response(self.server.redirect_status)
+            self.send_header("Location", self.server.redirect_url)
+            self.end_headers()
+            return
+        accept = base64.b64encode(hashlib.sha1(
+            (self.headers["Sec-WebSocket-Key"] + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").encode()
+        ).digest()).decode()
+        self.send_response(101)
+        self.send_header("Upgrade", "websocket")
+        self.send_header("Connection", "Upgrade")
+        self.send_header("Sec-WebSocket-Accept", accept)
+        self.end_headers()
+        reply = json.dumps({"id": 1, "result": {}})
+        self.wfile.write(plugin.websocket.ABNF(
+            fin=1, opcode=plugin.websocket.ABNF.OPCODE_TEXT, mask_value=0, data=reply).format())
+        self.wfile.flush()
+        # Keep the upgraded connection open until the client closes it.
+        while self.rfile.read(1):
+            pass
+
+    def log_message(self, *args):
+        pass
+
+
+class WebSocketRedirectTests(unittest.TestCase):
+    def setUp(self):
+        self.servers = []
+
+    def tearDown(self):
+        for server, thread in self.servers:
+            server.shutdown()
+            server.server_close()
+            thread.join()
+
+    def serve(self, redirect_status=0, redirect_url=""):
+        server = WebSocketServer(("127.0.0.1", 0), WebSocketEndpoint)
+        server.connections = 0
+        server.requests = []
+        server.redirect_status = redirect_status
+        server.redirect_url = redirect_url
+        thread = threading.Thread(target=lambda: server.serve_forever(poll_interval=.01), daemon=True)
+        thread.start()
+        self.servers.append((server, thread))
+        return server
+
+    def test_real_client_rejects_every_redirect_without_contacting_target(self):
+        token = "private-oneshot-token"
+        target = self.serve()
+        for status in (301, 302, 303, 307, 308):
+            with self.subTest(status=status):
+                source = self.serve(status, "ws://127.0.0.1:%d/redirected?token=%s" % (
+                    target.server_port, token))
+                client = plugin.HttpClient("http://127.0.0.1:%d" % source.server_port, "api-key")
+                try:
+                    with patch.object(client, "_query", return_value=token), \
+                            self.assertRaises(plugin.websocket.WebSocketException) as raised:
+                        client.start_monitor()
+                    self.assertNotIn(token, str(raised.exception))
+                    self.assertEqual(source.requests, ["/websocket?token=" + token])
+                    self.assertEqual(target.requests, [])
+                    self.assertEqual(target.connections, 0, "Redirect destinations must never be contacted")
+                    self.assertIsNone(client.ws)
+                finally:
+                    client.close()
+
+    def test_real_client_still_accepts_normal_handshake(self):
+        server = self.serve()
+        client = plugin.HttpClient("http://127.0.0.1:%d" % server.server_port)
+        try:
+            client.start_monitor()
+            self.assertTrue(client.ws.connected)
+            self.assertEqual(server.requests, ["/websocket"])
+        finally:
+            client.close()
 
 
 class ClientTests(unittest.TestCase):
@@ -154,6 +243,7 @@ class ClientTests(unittest.TestCase):
             "params": {"domain": "lan", "interval": 0}})
         self.assertTrue(connect.call_args.args[0].endswith("/websocket?token=token"))
         self.assertEqual(connect.call_args.kwargs["http_no_proxy"], ["*"])
+        self.assertEqual(connect.call_args.kwargs["redirect_limit"], 0)
 
     def test_camera_rejection(self):
         printer = plugin.Printer(self.address)
