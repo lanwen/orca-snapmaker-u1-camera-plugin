@@ -2,11 +2,14 @@
 
 import argparse
 import base64
+import errno
 from contextlib import contextmanager
 import html
 import json
+import os
 from pathlib import Path
 import shutil
+import signal
 import subprocess
 import tempfile
 import time
@@ -56,16 +59,81 @@ class DevTools:
         Path(path).write_bytes(base64.b64decode(data))
 
 
+def _signal_browser(process, *, kill=False):
+    try:
+        if os.name == "posix":
+            # Popen creates this session; never signal a shared browser process group.
+            os.killpg(process.pid, signal.SIGKILL if kill else signal.SIGTERM)
+        elif process.poll() is None:
+            process.kill() if kill else process.terminate()
+    except ProcessLookupError:
+        pass
+
+
+def _stop_browser(process, connection):
+    if connection is not None:
+        try:
+            connection.settimeout(1)
+            # Browser.close can disconnect without replying. Wait for exit, not a CDP response.
+            connection.send(json.dumps({"id": 0, "method": "Browser.close"}))
+        except (OSError, websocket.WebSocketException):
+            pass  # A lost transport still needs the bounded process shutdown below.
+        finally:
+            try:
+                connection.close()
+            except (OSError, websocket.WebSocketException):
+                pass
+    try:
+        process.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        _signal_browser(process)
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            _signal_browser(process, kill=True)
+            process.wait(timeout=5)
+    if os.name == "posix":
+        # The parent can exit before its profile-writing children. Drain our own group too.
+        _signal_browser(process)
+        deadline = time.monotonic() + 1
+        while True:
+            try:
+                os.killpg(process.pid, 0)
+            except ProcessLookupError:
+                break
+            if time.monotonic() >= deadline:
+                _signal_browser(process, kill=True)
+                break  # Killed children can remain zombies briefly, but cannot write files.
+            time.sleep(.05)
+
+
+def _remove_profile(profile):
+    deadline = time.monotonic() + 5
+    while True:
+        try:
+            shutil.rmtree(profile)
+            return
+        except FileNotFoundError:
+            if not Path(profile).exists():
+                return
+            raise
+        except OSError as error:
+            if error.errno not in {errno.ENOTEMPTY, errno.EBUSY} or time.monotonic() >= deadline:
+                raise
+            time.sleep(.05)
+
+
 @contextmanager
 def browser():
-    with tempfile.TemporaryDirectory(prefix="u1-preview-browser-") as profile, tempfile.TemporaryFile() as log:
-        process = subprocess.Popen([
-            find_browser(), "--headless", "--no-first-run", "--no-default-browser-check",
-            "--disable-background-networking", "--disable-sync", "--hide-scrollbars",
-            "--remote-debugging-port=0", "--user-data-dir=" + profile, "about:blank",
-        ], stdout=subprocess.DEVNULL, stderr=log)
-        connection = None
-        try:
+    profile = tempfile.mkdtemp(prefix="u1-preview-browser-")
+    process = connection = failure = None
+    try:
+        with tempfile.TemporaryFile() as log:
+            process = subprocess.Popen([
+                find_browser(), "--headless", "--no-first-run", "--no-default-browser-check",
+                "--disable-background-networking", "--disable-sync", "--hide-scrollbars",
+                "--remote-debugging-port=0", "--user-data-dir=" + profile, "about:blank",
+            ], stdout=subprocess.DEVNULL, stderr=log, start_new_session=os.name == "posix")
             port_file = Path(profile) / "DevToolsActivePort"
             deadline = time.monotonic() + 10
             while not port_file.exists():
@@ -81,16 +149,21 @@ def browser():
             connection = websocket.create_connection(target["webSocketDebuggerUrl"], timeout=10,
                                                      suppress_origin=True, http_no_proxy=["*"])
             yield DevTools(connection)
-        finally:
-            if connection:
-                connection.close()
-            if process.poll() is None:
-                process.terminate()
-                try:
-                    process.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    process.kill()
-                    process.wait()
+    except BaseException as error:
+        failure = error
+        raise
+    finally:
+        try:
+            if process is not None:
+                _stop_browser(process, connection)
+            _remove_profile(profile)
+        except Exception as error:
+            note = f"Browser cleanup failed for {profile}: {error!r}"
+            if failure is not None:
+                failure.add_note(note)
+            else:
+                error.add_note(note)
+                raise
 
 
 def seek(client, milliseconds):
