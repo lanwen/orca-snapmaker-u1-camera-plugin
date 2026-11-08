@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.7.2
+
+- deps: bump svelte-check from 4.7.7 to 4.7.8 (#68) ([cdf0a1d](https://github.com/lanwen/orca-snapmaker-u1-camera-plugin/commit/cdf0a1d597e657b02d7402ededb3ed03b40d44d1))
+- deps: bump actions/upload-artifact from 4.6.2 to 7.0.2 (#67) ([101225a](https://github.com/lanwen/orca-snapmaker-u1-camera-plugin/commit/101225a8fe4b25472ec14351b6d5a2a1a23497ed))
+- fix(test): wait for preview browser shutdown before profile cleanup (#69) ([27f951a](https://github.com/lanwen/orca-snapmaker-u1-camera-plugin/commit/27f951aa47d0004e459376a588681c9e2b2809eb))
+- fix(security): bound camera WebSocket responses (#58) ([b011843](https://github.com/lanwen/orca-snapmaker-u1-camera-plugin/commit/b011843cd8d1b52ee835645f7f95afefdae65f0a))
+- deps: bump actions/create-github-app-token from 3.2.0 to 3.3.0 (#65) ([ccddb0b](https://github.com/lanwen/orca-snapmaker-u1-camera-plugin/commit/ccddb0b510c9ce7fc5ccb01f1eab13f9c1adba9b))
+- deps: bump actions/download-artifact from 4.3.0 to 8.0.2 (#66) ([683bcbf](https://github.com/lanwen/orca-snapmaker-u1-camera-plugin/commit/683bcbf5abb5198b9aada1a2de436ff997611efe))
+- deps: bump jdx/mise-action from 5.2.4 to 5.2.5 (#64) ([b6723ce](https://github.com/lanwen/orca-snapmaker-u1-camera-plugin/commit/b6723ce264f96bc77b11c5131e42ec042ac7b828))
+- test: cover printer WebSocket redirect rejection (#61) ([968277f](https://github.com/lanwen/orca-snapmaker-u1-camera-plugin/commit/968277f1eb396ed41f7947638cf56b6311cd6691))
+- ci: add pnpm Dependabot updates and seven-day cooldowns (#62) ([b347f5a](https://github.com/lanwen/orca-snapmaker-u1-camera-plugin/commit/b347f5a130a5fc8ff2a09b53644002cf86f72256))
+- fix(security): restrict camera scripts with generated CSP hashes (#63) ([e744d49](https://github.com/lanwen/orca-snapmaker-u1-camera-plugin/commit/e744d49202a0bd71e85ed54b29ca09054dc8a41c))
+- fix(release): isolate publication credentials from builds (#59) ([e8482f3](https://github.com/lanwen/orca-snapmaker-u1-camera-plugin/commit/e8482f32b41bcddfd790c43242a91202b8502f89))
+- fix: bound printer operations by elapsed deadlines (#60) ([de68eaf](https://github.com/lanwen/orca-snapmaker-u1-camera-plugin/commit/de68eaf4b75d39ee27479cd2315008a9ad9530d8))
+- fix: release camera frame image resources (#56) ([6e57b07](https://github.com/lanwen/orca-snapmaker-u1-camera-plugin/commit/6e57b07a40ba5215df67f8ae670107fbc02f82ea))
+
 ## 0.7.1
 
 - fix: normalize release notes and scope commit checks (#54) ([57bab87](https://github.com/lanwen/orca-snapmaker-u1-camera-plugin/commit/57bab87dd7171e22d21d4464b8c84922908224d2))
