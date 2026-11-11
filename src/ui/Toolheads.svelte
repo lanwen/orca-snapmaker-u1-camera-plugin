@@ -69,19 +69,19 @@
         right: tab.right - tooltip.left + 6,
       };
     }
-    const temp = root.querySelector('.current-temperature')!.getBoundingClientRect();
+    const temp = (
+      root.querySelector('.current-temperature .temperature-current') ??
+      root.querySelector('.current-temperature dd')!
+    ).getBoundingClientRect();
     paths = tools.map((tool, id) => {
       const tab = root.querySelector(`[data-tool="${id}"]`)!.getBoundingClientRect();
       const swatch = root.querySelector(`[data-swatch="${id}"]`)!.getBoundingClientRect();
       const y = tab.y + tab.height / 2 - origin.y;
       let d = `M ${swatch.x - origin.x - 4} ${y} H ${tab.right - origin.x + 4}`;
       if (id === active && root.querySelector('.current-temperature dd:not([hidden])')) {
-        const nozzle = root.querySelector('.nozzle-size')!.getBoundingClientRect();
-        const start = nozzle.x - origin.x - 7;
+        const start = tab.left - origin.x - 4;
         const end = temp.right - origin.x + 4;
-        const elbow = (start + end) / 2;
-        const temperatureY = temp.y + temp.height / 2 - origin.y;
-        d += ` M ${start} ${y} H ${elbow} V ${temperatureY} H ${end} M ${end} ${temperatureY - 3} V ${temperatureY + 3}`;
+        d += ` M ${start} ${y} H ${end} M ${end} ${y - 3} V ${y + 3}`;
       }
       return {
         id,
@@ -121,14 +121,15 @@
 <div
   id="hardware-stat"
   class:standby={stats?.state === 'standby'}
+  style:--active-tool={Math.max(active, 0)}
   hidden={!stats || stats.state === 'unavailable'}
   bind:this={root}
   role="group"
   aria-label="Toolheads and temperatures"
 >
   <dl class="sheet">
-    <div class="current-temperature" hidden={stats?.state === 'complete'}>{@render hotend()}</div>
     <div class="bed-temperature">{@render bed()}</div>
+    <div class="current-temperature" hidden={stats?.state === 'complete'}>{@render hotend()}</div>
   </dl>
   <div class="index-stack" hidden={!showTabs}>
     {#each tools as tool, id}
@@ -138,6 +139,9 @@
           >{/if}
         <b>{id + 1}</b><span
           class="head-state"
+          class:dot={id === connected || tool.state === 'parked'}
+          class:connected={id === connected}
+          class:unavailable={tool.state === 'unavailable'}
           style:color={id === connected ? color(tool) : undefined}
           aria-hidden="true"
           >{tool.state === 'changing'
@@ -243,32 +247,29 @@
     grid-column: 3;
     position: relative;
     display: grid;
-    grid-template-columns: 160px minmax(0, 1fr);
+    grid-template-columns: 179px minmax(0, 1fr);
     height: 88px;
     min-width: 0;
     border-left: 1px solid #ffffff28;
-    padding-left: 18px;
+    padding-left: 9px;
     grid-template-rows: 88px;
   }
   .sheet {
     margin: 0;
-    padding: 0 50px 4px 8px;
-    display: flex;
-    flex-direction: column;
-    justify-content: space-between;
+    padding: 0 61px 0 4px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) max-content;
+    gap: 12px;
+    align-items: start;
   }
-  .current-temperature {
-    display: flex;
-    align-items: center;
-    height: 22px;
-    width: max-content;
-    white-space: nowrap;
-  }
+  .current-temperature,
   .bed-temperature {
-    margin-top: auto;
     position: relative;
     width: max-content;
     white-space: nowrap;
+  }
+  .current-temperature {
+    transform: translateY(calc(var(--active-tool) * 22px - 7px));
   }
   .index-stack {
     display: grid;
@@ -288,13 +289,14 @@
   }
   .index-tab {
     position: relative;
-    display: flex;
+    isolation: isolate;
+    --status-clearance: 3.5px;
+    display: grid;
+    grid-template-columns: max-content minmax(0, 1fr);
     align-items: center;
-    justify-content: flex-end;
-    gap: 3px;
     width: 34px;
     height: 22px;
-    margin-left: -1px;
+    margin-left: -5px;
     padding: 0 4px;
     border: 1px solid transparent;
     border-radius: 0 5px 5px 0;
@@ -304,38 +306,62 @@
     cursor: default;
     box-shadow: none;
   }
+  .index-row:first-child:not(.chosen) .index-tab {
+    border-top-left-radius: 5px;
+  }
+  .index-row:last-child .index-tab {
+    border-bottom-left-radius: 5px;
+  }
   .index-tab::before {
     content: '';
     position: absolute;
     inset: -1px;
     border: 1px solid #465360;
-    border-left-color: transparent;
     border-radius: inherit;
+    z-index: -1;
+    mask-image: radial-gradient(
+      circle at calc(100% - 0.5px) 50%,
+      transparent var(--status-clearance),
+      #000 var(--status-clearance)
+    );
+    mask-origin: border-box;
+    mask-clip: border-box;
     pointer-events: none;
+  }
+  .index-tab::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: -4px;
+    width: 3px;
+    height: 5px;
+    transform: translateY(-50%);
+    border-radius: 2px 0 0 2px;
+    background: #465360;
+    pointer-events: none;
+  }
+  .index-tab:has(.head-state.unavailable) {
+    --status-clearance: 4.5px;
   }
   .index-tab[data-active='true'] {
     width: 56px;
     height: 28px;
     margin-left: -19px;
     z-index: 3;
-    color: #fff;
+    border-radius: 5px;
+    color: #111820;
   }
   .index-tab[data-active='true']::before {
     inset: -1px;
-    border: 1px solid #c4d3e0;
+    border: 1px solid #000;
     border-radius: 5px;
-    mask-image:
-      linear-gradient(to right, transparent 5px, #000 5px),
-      linear-gradient(
-        to bottom,
-        #000 6px,
-        transparent 6px,
-        transparent calc(100% - 6px),
-        #000 calc(100% - 6px)
-      );
+    background: #e0e7ef;
   }
-  .index-tab:hover {
-    background: transparent;
+  .index-tab[data-active='true']::after {
+    left: -5px;
+    width: 5px;
+    height: 7px;
+    background: #65717e;
   }
   .index-tab:focus-visible {
     outline: 2px solid #7abaff;
@@ -347,7 +373,16 @@
   .chosen + .index-row .index-tab::before {
     clip-path: inset(3px 0 0 0);
   }
+  .index-row:not(.chosen):has(+ .index-row:not(.chosen)) .index-tab::before {
+    border-bottom-right-radius: 0;
+  }
+  .index-row:not(.chosen) + .index-row:not(.chosen) .index-tab::before {
+    border-top: 0;
+    border-top-right-radius: 0;
+  }
   .index-tab b {
+    grid-column: 2;
+    text-align: center;
     font-size: 11px;
     font-weight: 500;
     line-height: 1;
@@ -356,7 +391,53 @@
     font-size: 22px;
   }
   .head-state {
+    position: absolute;
+    top: 50%;
+    right: -4px;
+    transform: translateY(-50%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 7px;
+    height: 7px;
+    color: #a7b5c2;
     font-size: 7px;
+    line-height: 1;
+  }
+  .head-state.dot {
+    right: -3px;
+    width: 5px;
+    height: 5px;
+    font-size: 0;
+  }
+  .head-state.dot::after {
+    content: '';
+    box-sizing: border-box;
+    flex: none;
+    width: 5px;
+    height: 5px;
+    border: 1px solid currentColor;
+    border-radius: 50%;
+  }
+  .head-state.connected::after {
+    background: currentColor;
+  }
+  .head-state.unavailable {
+    font-size: 0;
+  }
+  .head-state.unavailable::before,
+  .head-state.unavailable::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 3px;
+    width: 1px;
+    height: 7px;
+    background: currentColor;
+    transform: rotate(45deg);
+  }
+  .head-state.unavailable::after {
+    transform: rotate(-45deg);
   }
   .nozzle-size {
     display: inline-flex;
@@ -365,11 +446,13 @@
     gap: 1px;
     line-height: 1;
     font-size: 10px;
+    font-weight: 700;
     white-space: nowrap;
   }
   .nozzle-size small {
     font-size: 8px;
-    color: #c0cbd5;
+    font-weight: 600;
+    color: #65717e;
   }
   .filament {
     display: flex;
@@ -531,18 +614,19 @@
     min-height: 44px;
     border-top: 0;
     border-left: 1px solid #ffffff28;
-    padding: 0 0 0 12px;
+    padding: 0 0 0 6px;
   }
   .standby .sheet {
     padding: 9px 0 0;
-    justify-content: center;
-    gap: 12px;
+    grid-template-columns: none;
+    grid-auto-flow: column;
+    grid-auto-columns: max-content;
+  }
+  .standby .current-temperature {
+    transform: none;
   }
   .standby .current-temperature:has(:global(dd[hidden])) {
     display: none;
-  }
-  .standby .bed-temperature {
-    margin-top: 0;
   }
   @media (max-width: 850px) {
     #hardware-stat {

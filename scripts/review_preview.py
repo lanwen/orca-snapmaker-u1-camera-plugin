@@ -197,27 +197,57 @@ def check_toolheads(client):
       const fixture = structuredClone(screenshotFixtures[screenshotState]);
       const generation = screenshotStates.indexOf(screenshotState) + 1;
       const update = async stats => { screenshotFixtures[screenshotState] = stats; screenshotHandler({generation, stats}); await wait(); };
+      const checkTemperatures = () => {
+        const bed = root.querySelector('.bed-temperature').getBoundingClientRect();
+        const nozzle = root.querySelector('.current-temperature').getBoundingClientRect();
+        if (bed.right >= nozzle.left) errors.push('Bed and nozzle temperatures are not in separate columns');
+        for (const heater of root.querySelectorAll('.heater-temperature')) {
+          const current = heater.querySelector('.temperature-current').getBoundingClientRect();
+          const heating = heater.querySelector('sup')?.getBoundingClientRect();
+          const cooling = heater.querySelector('sub')?.getBoundingClientRect();
+          if (heating && heating.bottom > current.top + 1) errors.push('Heating target is not above current temperature');
+          if (cooling && cooling.top < current.bottom - 1) errors.push('Cooling target is not below current temperature');
+        }
+      };
       for (const id of [0, 1, 2, 3]) {
         const stats = structuredClone(fixture);
         stats.tools.forEach((tool, i) => { tool.state = i === id ? 'connected' : 'parked'; });
         stats.tools[id].heater = {temperature:157, target:210};
+        stats.bed = {temperature:45, target:60};
         await update(stats);
+        checkTemperatures();
         if (root.querySelector('.chosen .index-tab')?.dataset.tool !== String(id)) errors.push('Wrong active tab');
+        for (const dot of root.querySelectorAll('.head-state.dot')) {
+          const bounds = dot.getBoundingClientRect();
+          const circle = getComputedStyle(dot, '::after');
+          const style = getComputedStyle(dot);
+          if (style.backgroundColor !== 'rgba(0, 0, 0, 0)' || style.boxShadow !== 'none') errors.push('Status circle has an opaque surround');
+          const border = circle.boxSizing === 'border-box' ? 0 : 2 * parseFloat(circle.borderWidth);
+          const width = parseFloat(circle.width) + border;
+          const height = parseFloat(circle.height) + border;
+          if (Math.abs(width - height) > 0.1 || Math.abs(width - bounds.width) > 0.1 ||
+              Math.abs(height - bounds.height) > 0.1) errors.push('Status circle is distorted or off-center');
+        }
         const trace = root.querySelector('.trace-draw');
         if (!trace || getComputedStyle(trace).animationName === 'none') errors.push('Tool change did not draw a path');
-        const temperature = root.querySelector('.current-temperature').getBoundingClientRect();
+        const temperature = root.querySelector('.current-temperature .temperature-current').getBoundingClientRect();
         const origin = root.getBoundingClientRect();
         const end = trace.getPointAtLength(trace.getTotalLength() - 3);
         if (Math.abs(end.x - (temperature.right - origin.x + 4)) > 1 ||
             Math.abs(end.y - (temperature.y + temperature.height/2 - origin.y)) > 1) errors.push('Trace misses temperature');
-        if (id === 0) {
-          const nozzle = root.querySelector('.nozzle-size').getBoundingClientRect();
-          if (Math.abs(nozzle.y + nozzle.height/2 - temperature.y - temperature.height/2) > 1) errors.push('T0 route is not horizontal');
-        }
-        const before = trace.getAttribute('d');
+        const nozzle = root.querySelector('.chosen .index-tab').getBoundingClientRect();
+        if (Math.abs(nozzle.y + nozzle.height/2 - temperature.y - temperature.height/2) > 1 ||
+            Math.abs(trace.getBBox().height - 6) > 0.1) errors.push('Nozzle temperature connector is not horizontal');
+        if (Math.abs(nozzle.left - 4 - temperature.right - 38) > 1) errors.push('Nozzle clearance is not doubled');
+        stats.tools[id].heater = {temperature:240, target:210};
+        stats.bed = {temperature:70, target:60};
+        await update(stats);
+        checkTemperatures();
+        const before = root.querySelector('.current-temperature .temperature-current').getBoundingClientRect().right;
         stats.tools[id].heater = {temperature:9, target:0};
         await update(stats);
-        if (before === root.querySelector('.trace-draw').getAttribute('d')) errors.push('Temperature width did not update route');
+        const after = root.querySelector('.current-temperature .temperature-current').getBoundingClientRect().right;
+        if (Math.abs(before - after) > 1) errors.push('Temperature width changed nozzle clearance');
         if (id === 1) {
           const tab = root.querySelector('.chosen .index-tab');
           tab.focus(); await wait();

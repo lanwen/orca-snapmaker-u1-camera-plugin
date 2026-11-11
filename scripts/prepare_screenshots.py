@@ -151,6 +151,8 @@ function publishScreenshot() {
   if (changed) { screenshotOffset = 0; screenshotAppliedState = screenshotState; }
   const generation = screenshotStates.indexOf(screenshotState) + 1;
   const interrupted = screenshotState.startsWith('stream-');
+  // Decode the fixed camera image only after a state change or playback restart.
+  const needsImage = changed || !document.getElementById('image')?.hasAttribute('src');
   const trigger = document.getElementById('preview-state');
   if (trigger) trigger.title = 'Preview state: ' + screenshotLabels[screenshotState];
   document.querySelectorAll('[data-preview-state]').forEach(button => {
@@ -169,7 +171,7 @@ function publishScreenshot() {
   screenshotHandler({generation, printer:screenshotLabels[screenshotFixtures[screenshotState].state],
     light:offline ? null : screenshotLight, light_error:screenshotState === 'light-error' ? 'Could not change light — try again' : '',
     stats:screenshotFixtures[screenshotState],
-    image:offline || screenshotState === 'connecting' || (interrupted && !changed) ? undefined : screenshotImage, fps:4.4, frozen:false});
+    image:!needsImage || offline || screenshotState === 'connecting' || (interrupted && !changed) ? undefined : screenshotImage, fps:4.4, frozen:false});
   if (offline) {
     screenshotHandler({generation, failed:true, camera:'Cannot reach printer — check its address and connection'});
     screenshotOffset = 8000;
