@@ -297,6 +297,13 @@ body { --viewer-top:calc(100vw * .05231144); }
     for state in STATES:
         view = page.replace("__SCREENSHOT_STATE__", json.dumps(state))
         (output / (state + ".html")).write_text(authorize_preview_scripts(view))
+        surface_view = view.replace("<body>", '<body class="screenshot-surface">').replace(
+            "</head>", """<style>
+body.screenshot-surface #stats .filament,
+body.screenshot-surface #stats .parked-temperature,
+body.screenshot-surface #stats .trace-base { visibility:visible; }
+body.screenshot-surface #stats .fan-island { border-color:#ffffff26; background:#111820e8; box-shadow:0 4px 16px #0003; backdrop-filter:blur(18px); }
+</style></head>""")
         if state == "printing":
             showcase_style = """<style>
 body .viewer footer { grid-template-columns:minmax(0, 1fr); row-gap:54px; }
@@ -305,10 +312,10 @@ body .viewer footer .stream-controls { grid-column:1; grid-row:1; flex-direction
 body .viewer #stop { opacity:1; }
 body .viewer #camera { background:#17202be8; border-color:#ffffff40; }
 </style>"""
-            (output / "printing-showcase.html").write_text(authorize_preview_scripts(view.replace(
+            (output / "printing-showcase.html").write_text(authorize_preview_scripts(surface_view.replace(
                 "</head>", showcase_style + "</head>")))
         else:
-            (output / (state + "-stats.html")).write_text(authorize_preview_scripts(view.replace(
+            (output / (state + "-stats.html")).write_text(authorize_preview_scripts(surface_view.replace(
                 "</head>", "<style>.stream-controls { display:none !important; }</style></head>")))
     options = "".join('<button type="button" data-preview-state="' + state +
                       '" aria-pressed="' + str(state == "preparing").lower() + '">' + label + '</button>'
@@ -358,7 +365,7 @@ h2 { margin:0; font-size:20px; line-height:24px; font-weight:550; }
 iframe { display:block; border:0; background:#0b0e12; }
 .hero iframe { width:100%; height:480px; border:1px solid #ffffff20; border-radius:12px; }
 .crop { position:relative; height:180px; overflow:hidden; border:1px solid #ffffff20; border-radius:12px; }
-.crop iframe { position:absolute; width:1100px; height:650px; left:-20px; bottom:-10px; }
+.crop iframe { position:absolute; width:1100px; height:650px; left:-20px; bottom:-14px; }
 @media(max-width:650px) { body { padding:16px; } .crop { height:420px; } }
 </style></head><body><section class="hero"><h2>Camera view</h2><iframe title="Simulated Orca camera tab" src="printing-showcase.html"></iframe></section>''' + tiles + '</body></html>')
     return entry
