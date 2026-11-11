@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.8.0
+
+- docs: add project skill for preparing release notes (#75) ([e3466df](https://github.com/lanwen/orca-snapmaker-u1-camera-plugin/commit/e3466dfa820f5db3e929763b67897196efb6ebc2))
+- feat: show cooling fan speeds in the camera view (#74) ([5982f45](https://github.com/lanwen/orca-snapmaker-u1-camera-plugin/commit/5982f45eba8f5ba8510d3036e5b05cf3b2324bdb))
+- feat(ui): show inactive toolhead temperatures (#73) ([5b03042](https://github.com/lanwen/orca-snapmaker-u1-camera-plugin/commit/5b03042a81823f0659831a590db1cd46a682fabc))
+- fix(ui): clarify toolhead temperatures and smooth preview playback (#71) ([0ec78eb](https://github.com/lanwen/orca-snapmaker-u1-camera-plugin/commit/0ec78eb2e085ee175b7d0ccd7f6d260515928f1d))
+
 ## 0.7.2
 
 - deps: bump svelte-check from 4.7.7 to 4.7.8 (#68) ([cdf0a1d](https://github.com/lanwen/orca-snapmaker-u1-camera-plugin/commit/cdf0a1d597e657b02d7402ededb3ed03b40d44d1))
