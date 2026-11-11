@@ -258,6 +258,12 @@ def check_toolheads(client):
           const tab = root.querySelector('.chosen .index-tab');
           tab.focus(); await wait();
           if (getComputedStyle(root.querySelector('[data-tool="0"] + .filament')).visibility !== 'visible') errors.push('Focus did not reveal parked filament');
+          for (const temperature of root.querySelectorAll('.parked-temperature')) {
+            const bounds = temperature.getBoundingClientRect();
+            const tabBounds = temperature.parentElement.querySelector('.index-tab').getBoundingClientRect();
+            if (getComputedStyle(temperature).visibility !== 'visible') errors.push('Focus did not reveal parked temperature');
+            if (Math.abs(tabBounds.left - bounds.right - 8.25) > 1 || Math.abs(bounds.y + bounds.height/2 - tabBounds.y - tabBounds.height/2) > 1) errors.push('Parked temperature is not aligned with its toolhead');
+          }
           tab.click(); await wait();
           if (tab.getAttribute('aria-expanded') !== 'true') errors.push('Tap did not open tool details');
           tab.dispatchEvent(new KeyboardEvent('keydown', {key:'Escape', bubbles:true})); await wait();
@@ -282,6 +288,8 @@ def check_hover_escape(client):
     client.evaluate("document.activeElement?.blur()")
     client.call("Input.dispatchMouseEvent", {"type":"mouseMoved", "x":0, "y":0})
     client.evaluate("new Promise(resolve => setTimeout(resolve, 280))")
+    if not client.evaluate("Array.from(document.querySelectorAll('.parked-temperature')).every(node => getComputedStyle(node).visibility === (node.classList.contains('changing') ? 'visible' : 'hidden'))"):
+        raise ValueError("Only changing inactive temperatures should remain visible without hover")
     tab = client.evaluate("(() => { const r=document.querySelector('.chosen .index-tab').getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2}; })()")
     client.call("Input.dispatchMouseEvent", {"type":"mouseMoved", **tab})
     client.wait_for("getComputedStyle(document.querySelector('.chosen .tool-tooltip')).visibility === 'visible'")
