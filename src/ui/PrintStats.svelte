@@ -3,6 +3,12 @@
   import Toolheads from './Toolheads.svelte';
   import PrintState from './PrintState.svelte';
   let { stats, receivedAt }: { stats: PrintStats | null; receivedAt: number } = $props();
+  let fanTooltipBottom = $state(0);
+  function positionFanTooltip(event: Event) {
+    const fan = event.currentTarget as HTMLElement;
+    fanTooltipBottom =
+      fan.getBoundingClientRect().bottom - fan.closest('#stats')!.getBoundingClientRect().top + 8;
+  }
   const number = (value: unknown): value is number =>
     typeof value === 'number' && Number.isFinite(value) && value >= 0;
   const layer = (value: unknown) => (number(value) ? Math.floor(value).toLocaleString() : '—');
@@ -280,7 +286,52 @@
     {#snippet bed()}<dt id="bed-label" hidden={!bedTemperature.visible}>Bed</dt>
       <dd id="bed-value" hidden={!bedTemperature.visible}>
         {@render heaterTemperature(bedTemperature)}
-      </dd>{/snippet}
+      </dd>
+      {#each [{ label: 'Aux', value: stats?.aux_fan }, { label: 'Part', value: stats?.part_fan }] as fan}
+        {@const speed =
+          number(fan.value?.speed) && fan.value.speed <= 1
+            ? Math.round(fan.value.speed * 100)
+            : null}
+        {@const rpm = number(fan.value?.rpm) ? Math.round(fan.value.rpm) : null}
+        {#if !missing && (speed !== null || rpm !== null)}
+          <!-- svelte-ignore a11y_no_noninteractive_tabindex (Keyboard users can reveal this fan's RPM.) -->
+          <div
+            class="fan-speed"
+            role="group"
+            onpointerenter={positionFanTooltip}
+            onfocus={positionFanTooltip}
+            aria-label={fan.label + ' fan'}
+            aria-describedby={rpm !== null ? 'fan-rpm-' + fan.label : undefined}
+            tabindex={rpm !== null ? 0 : undefined}
+          >
+            <dt>{fan.label}</dt>
+            <dd>
+              {#if speed !== null}{speed}
+                <small class="fan-unit">%</small>{/if}{#if rpm !== null}<span
+                  class="fan-tooltip"
+                  style:bottom={fanTooltipBottom + 'px'}
+                  id={'fan-rpm-' + fan.label}
+                  role="tooltip"
+                  ><svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    width="16"
+                    height="16"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    aria-hidden="true"
+                    ><path
+                      d="M10.827 16.379a6.082 6.082 0 0 1-8.618-7.002l5.412 1.45a6.082 6.082 0 0 1 7.002-8.618l-1.45 5.412a6.082 6.082 0 0 1 8.618 7.002l-5.412-1.45a6.082 6.082 0 0 1-7.002 8.618l1.45-5.412Z"
+                    /><path d="M12 12v.01" /></svg
+                  >{rpm} rpm</span
+                >{/if}
+            </dd>
+          </div>
+        {/if}
+      {/each}{/snippet}
   </Toolheads>
 </section>
 
@@ -538,6 +589,52 @@
   }
   #stats #bed-label:has(+ dd .temperature-target > :not(sub)) {
     top: -9px;
+  }
+  .fan-speed {
+    position: relative;
+    padding-bottom: 8px;
+    text-align: left;
+  }
+  #stats .fan-speed dt {
+    display: block;
+    margin: 0;
+    font-size: 8px;
+    line-height: 8px;
+    text-transform: uppercase;
+  }
+  #stats .fan-speed dd {
+    display: block;
+    font-size: 10px;
+    line-height: 10px;
+  }
+  .fan-tooltip {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    position: absolute;
+    left: 0;
+    z-index: 6;
+    width: max-content;
+    padding: 8px 10px;
+    border: 1px solid #ffffff38;
+    border-radius: 8px;
+    background: #111820fa;
+    color: #a7b5c2;
+    font-size: 11px;
+    line-height: 1.5;
+    visibility: hidden;
+  }
+  .fan-speed:hover .fan-tooltip,
+  #stats:not(:has(.fan-speed:hover)) .fan-speed:focus .fan-tooltip {
+    visibility: visible;
+  }
+  .fan-speed:focus-visible {
+    outline: 1px solid #7abaff;
+    outline-offset: 2px;
+  }
+  .fan-unit {
+    color: #a7b5c2;
+    font-size: 8px;
   }
   .heater-temperature {
     display: grid;

@@ -54,6 +54,8 @@ window.orca = {
           material_subtype: 'SnapSpeed',
           material_profile: 'Snapmaker PLA SnapSpeed @Snapmaker U1 (0.4 nozzle)',
           color: '#FFFFFF',
+          aux_fan: { speed: 0.7, rpm: 3200 },
+          part_fan: { speed: 1, rpm: 8200 },
           bed: { temperature: 59, target: 60 },
           hotend: { temperature: 209, target: 210 },
         },

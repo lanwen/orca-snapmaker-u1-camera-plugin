@@ -1074,3 +1074,26 @@ test('filament paths show flow only during confirmed model printing', async () =
     );
   }
 });
+
+test('fan readings show reported percent and RPM and clear missing status', () => {
+  selectPrinter();
+  publish({
+    generation: 1,
+    stats: { ...metrics, aux_fan: { speed: 0.7, rpm: 3200 }, part_fan: { speed: 0, rpm: 0 } },
+  });
+  assert.deepEqual(numbers(element('[aria-label="Aux fan"]')), [70, 3200]);
+  assert.deepEqual(numbers(element('[aria-label="Part fan"]')), [0, 0]);
+  publish({
+    generation: 1,
+    stats: { ...metrics, aux_fan: { speed: null, rpm: 1234 }, part_fan: { speed: 0.5 } },
+  });
+  assert.deepEqual(numbers(element('[aria-label="Aux fan"]')), [1234]);
+  assert.deepEqual(numbers(element('[aria-label="Part fan"]')), [50]);
+  publish({ generation: 1, stats: { ...metrics, aux_fan: { speed: 2, rpm: -1 } } });
+  assert.equal(document.querySelector('.fan-speed'), null);
+  publish({
+    generation: 1,
+    stats: { ...metrics, state: 'unavailable', aux_fan: { speed: 1, rpm: 3200 } },
+  });
+  assert.equal(document.querySelector('.fan-speed'), null);
+});

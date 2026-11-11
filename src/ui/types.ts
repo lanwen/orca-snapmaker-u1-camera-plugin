@@ -20,7 +20,14 @@ export interface Toolhead {
   heater?: Heater;
 }
 
+export interface Fan {
+  speed?: number | null;
+  rpm?: number | null;
+}
+
 export interface PrintStats {
+  aux_fan?: Fan;
+  part_fan?: Fan;
   state: string;
   progress?: number;
   current_layer?: number;

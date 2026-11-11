@@ -74,6 +74,8 @@ def screenshot_page(camera=None):
                      "remaining": 3000, "tool": 3, "material": "PLA", "color": "#FFFFFF",
                      "material_vendor": "Snapmaker", "material_subtype": "SnapSpeed",
                      "material_profile": "Snapmaker PLA SnapSpeed @Snapmaker U1 (0.4 nozzle)",
+                     "aux_fan": {"speed": .7, "rpm": 3200},
+                     "part_fan": {"speed": 1, "rpm": 8200},
                      "bed": {"temperature": 59, "target": 60},
                      "hotend": {"temperature": 209, "target": 210}},
     }

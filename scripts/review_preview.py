@@ -354,6 +354,39 @@ def export_gif(client, destination, duration, ffmpeg):
         ], check=True, capture_output=True)
 
 
+def check_fan_hover(client):
+    readings = "[...document.querySelectorAll('.fan-speed')]"
+    visible = readings + ".map(e => getComputedStyle(e.querySelector('.fan-tooltip')).visibility === 'visible')"
+    client.evaluate("document.activeElement.blur()")
+    client.call("Input.dispatchMouseEvent", {"type": "mouseMoved", "x": 0, "y": 0})
+    client.evaluate("new Promise(resolve => setTimeout(resolve, 280))")
+    if any(client.evaluate(visible)):
+        raise ValueError("Fan RPM is visible before hover")
+    for index in range(2):
+        target = readings + f"[{index}]"
+        bounds = client.evaluate("(() => { const r=(" + target + ").getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+2}; })()")
+        client.call("Input.dispatchMouseEvent", {"type": "mouseMoved", **bounds})
+        expected = [index == fan for fan in range(2)]
+        if client.evaluate(visible) != expected:
+            raise ValueError("Hover must reveal only the specific fan's RPM")
+        above = client.evaluate("(() => { const tip=(" + target + ").querySelector('.fan-tooltip').getBoundingClientRect(); const panel=document.querySelector('#stats').getBoundingClientRect(); return tip.bottom <= panel.top - 7 && tip.top >= 0; })()")
+        if not above:
+            raise ValueError("Fan RPM tooltip must sit above the info panel")
+        client.call("Input.dispatchMouseEvent", {"type": "mouseMoved", "x": 0, "y": 0})
+        client.evaluate(target + ".focus()")
+        if client.evaluate(visible) != expected:
+            raise ValueError("Keyboard focus must reveal only the specific fan's RPM")
+        client.evaluate(target + ".blur()")
+    client.evaluate(readings + "[0].focus()")
+    for index in (1, 0):
+        bounds = client.evaluate("(() => { const r=(" + readings + f"[{index}]" + ").getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+2}; })()")
+        client.call("Input.dispatchMouseEvent", {"type": "mouseMoved", **bounds})
+        if client.evaluate(visible) != [index == fan for fan in range(2)]:
+            raise ValueError("Switching fans must replace the RPM tooltip immediately")
+    client.evaluate("document.activeElement.blur()")
+    client.call("Input.dispatchMouseEvent", {"type": "mouseMoved", "x": 0, "y": 0})
+
+
 def review(directory, output, states, widths, gifs=False):
     entry = Path(directory).resolve() / "index.html"
     if not entry.is_file():
@@ -383,7 +416,7 @@ def review(directory, output, states, widths, gifs=False):
                       return !image.hidden && image.complete && image.naturalWidth > 0;
                     })()""")
                 if state == "printing":
-                    for check in (check_toolheads, check_hover_escape, check_tooltip_hover):
+                    for check in (check_toolheads, check_hover_escape, check_tooltip_hover, check_fan_hover):
                         try:
                             check(client)
                         except ValueError as error:

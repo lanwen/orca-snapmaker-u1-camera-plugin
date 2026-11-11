@@ -154,6 +154,16 @@ def print_metrics(status, metadata=None):
                       "filament_present": filament("filament_exist", tool) if type(filament("filament_exist", tool)) is bool else None,
                       "color": color, "nozzle_diameter": nonnegative(head.get("nozzle_diameter")) or None,
                       "heater": {key: nonnegative(head.get(key)) for key in ("temperature", "target")}})
+    connected = [tool for tool, head in enumerate(tools) if head["state"] == "connected"]
+
+    def fan(name):
+        source = status.get(name)
+        source = source if isinstance(source, dict) else {}
+        speed = nonnegative(source.get("speed"))
+        return {"speed": speed if speed is not None and speed <= 1 else None,
+                "rpm": nonnegative(source.get("rpm"))}
+
+    part_fan = ("fan" if connected[0] == 0 else "fan_generic e%d_fan" % connected[0]) if len(connected) == 1 else None
     active = tools[index] if index is not None else {}
     return {"state": state, "progress": progress,
             "current_layer": current,
@@ -161,6 +171,7 @@ def print_metrics(status, metadata=None):
             "elapsed": nonnegative(stats.get("total_duration")), "printing_duration": duration,
             "remaining": remaining, "planned_total": planned, "phase": phase,
             "tool": index, "tools": tools,
+            "aux_fan": fan("fan_generic cavity_fan"), "part_fan": fan(part_fan),
             "layer_height": nonnegative(metadata.get("layer_height")) or None,
             "material": active.get("material"),
             "material_vendor": active.get("material_vendor"),
@@ -206,6 +217,9 @@ class Printer:
                                                                           "filament_vendor", "filament_sub_type",
                                                                           "extruder_map_table", "filament_exist")),
                                          ObjectQuery("heater_bed", ("temperature", "target")),
+                                         *(ObjectQuery(name, ("speed", "rpm")) for name in
+                                           ("fan_generic cavity_fan", "fan", "fan_generic e1_fan",
+                                            "fan_generic e2_fan", "fan_generic e3_fan")),
                                          *(ObjectQuery(name, ("temperature", "target", "nozzle_diameter",
                                                               "state", "activating_move")) for name in
                                            ("extruder", "extruder1", "extruder2", "extruder3")))
