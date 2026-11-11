@@ -102,7 +102,10 @@ def screenshot_page(camera=None):
     fixtures["complete"] = dict(fixtures["printing"], state="complete", progress=1, material_profile=None,
                                  current_layer=86, elapsed=5118, printing_duration=4950,
                                  remaining=0, bed={"temperature": 42, "target": 0},
-                                 hotend={"temperature": 41, "target": 0})
+                                 hotend={"temperature": 41, "target": 0},
+                                 aux_fan={"speed": 0, "rpm": 0}, part_fan={"speed": 0, "rpm": 0},
+                                 psu_fan={"speed": 0, "rpm": None}, hotend_fan={"speed": 0, "rpm": 0},
+                                 exhaust_fan={"speed": 0, "rpm": None}, circulation_fan={"speed": 0, "rpm": 0})
     fixtures["preparing-warm"] = dict(fixtures["preparing"],
                                      bed={"temperature": 60, "target": 60},
                                      hotend={"temperature": 210, "target": 130})
