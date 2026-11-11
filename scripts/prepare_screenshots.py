@@ -19,6 +19,7 @@ STATES = (
 )
 PREVIEW_LABELS = {
     "printing": "Printing",  # Model printing with an eligible estimate.
+    "top-cover-missing": "Top cover disconnected",  # Optional cover is not detected.
     "preparing": "Heating",  # Preparation with heaters below target.
     "preparing-warm": "Preparing (warm)",  # Preparation after warm-up.
     "paused": "Paused",  # Interrupted print without a finish estimate.
@@ -74,9 +75,18 @@ def screenshot_page(camera=None):
                      "remaining": 3000, "tool": 3, "material": "PLA", "color": "#FFFFFF",
                      "material_vendor": "Snapmaker", "material_subtype": "SnapSpeed",
                      "material_profile": "Snapmaker PLA SnapSpeed @Snapmaker U1 (0.4 nozzle)",
+                     "psu_fan": {"speed": .6, "rpm": None},
+                     "hotend_fan": {"speed": .75, "rpm": 16761},
+                     "exhaust_fan": {"speed": .6, "rpm": None},
+                     "circulation_fan": {"speed": 0, "rpm": 0},
+                     "aux_fan": {"speed": .7, "rpm": 3200},
+                     "part_fan": {"speed": 1, "rpm": 8200},
                      "bed": {"temperature": 59, "target": 60},
                      "hotend": {"temperature": 209, "target": 210}},
     }
+    fixtures["top-cover-missing"] = dict(fixtures["printing"],
+                                          exhaust_fan={"speed": None, "rpm": None},
+                                          circulation_fan={"speed": None, "rpm": None})
     # Layer zero can include extrusion; show a plan-based after-time and activity bar.
     fixtures["preparing"] = dict(fixtures["printing"], tool=0, progress=0, current_layer=0,
                                   phase="preparing", planned_total=2081,
@@ -92,7 +102,10 @@ def screenshot_page(camera=None):
     fixtures["complete"] = dict(fixtures["printing"], state="complete", progress=1, material_profile=None,
                                  current_layer=86, elapsed=5118, printing_duration=4950,
                                  remaining=0, bed={"temperature": 42, "target": 0},
-                                 hotend={"temperature": 41, "target": 0})
+                                 hotend={"temperature": 41, "target": 0},
+                                 aux_fan={"speed": 0, "rpm": 0}, part_fan={"speed": 0, "rpm": 0},
+                                 psu_fan={"speed": 0, "rpm": None}, hotend_fan={"speed": 0, "rpm": 0},
+                                 exhaust_fan={"speed": 0, "rpm": None}, circulation_fan={"speed": 0, "rpm": 0})
     fixtures["preparing-warm"] = dict(fixtures["preparing"],
                                      bed={"temperature": 60, "target": 60},
                                      hotend={"temperature": 210, "target": 130})
@@ -248,7 +261,7 @@ window.addEventListener('DOMContentLoaded', () => {
   document.addEventListener('keydown', event => {
     if (event.ctrlKey || event.metaKey || event.altKey || event.target.closest('input,textarea,select,[contenteditable]')) return;
     if (/^[1-4]$/.test(event.key)) {
-      screenshotState = screenshotStates[Number(event.key) - 1];
+      screenshotState = ['printing', 'preparing', 'paused', 'complete'][Number(event.key) - 1];
       publishScreenshot();
     }
     if (event.key.toLowerCase() === 'h') document.body.classList.toggle('screenshot-surface');
@@ -287,8 +300,25 @@ body { --viewer-top:calc(100vw * .05231144); }
     for state in STATES:
         view = page.replace("__SCREENSHOT_STATE__", json.dumps(state))
         (output / (state + ".html")).write_text(authorize_preview_scripts(view))
-        if state != "printing":
-            (output / (state + "-stats.html")).write_text(authorize_preview_scripts(view.replace(
+        surface_view = view.replace("<body>", '<body class="screenshot-surface">').replace(
+            "</head>", """<style>
+body.screenshot-surface #stats .filament,
+body.screenshot-surface #stats .parked-temperature,
+body.screenshot-surface #stats .trace-base { visibility:visible; }
+body.screenshot-surface #stats .fan-island { border-color:#ffffff26; background:#111820e8; box-shadow:0 4px 16px #0003; backdrop-filter:blur(18px); }
+</style></head>""")
+        if state == "printing":
+            showcase_style = """<style>
+body .viewer footer { grid-template-columns:minmax(0, 1fr); row-gap:54px; }
+body .viewer footer #stats { grid-column:1; grid-row:2; }
+body .viewer footer .stream-controls { grid-column:1; grid-row:1; flex-direction:row; align-items:center; max-width:100%; }
+body .viewer #stop { opacity:1; }
+body .viewer #camera { background:#17202be8; border-color:#ffffff40; }
+</style>"""
+            (output / "printing-showcase.html").write_text(authorize_preview_scripts(surface_view.replace(
+                "</head>", showcase_style + "</head>")))
+        else:
+            (output / (state + "-stats.html")).write_text(authorize_preview_scripts(surface_view.replace(
                 "</head>", "<style>.stream-controls { display:none !important; }</style></head>")))
     options = "".join('<button type="button" data-preview-state="' + state +
                       '" aria-pressed="' + str(state == "preparing").lower() + '">' + label + '</button>'
@@ -338,9 +368,9 @@ h2 { margin:0; font-size:20px; line-height:24px; font-weight:550; }
 iframe { display:block; border:0; background:#0b0e12; }
 .hero iframe { width:100%; height:480px; border:1px solid #ffffff20; border-radius:12px; }
 .crop { position:relative; height:180px; overflow:hidden; border:1px solid #ffffff20; border-radius:12px; }
-.crop iframe { position:absolute; width:1100px; height:650px; left:-20px; bottom:-10px; }
+.crop iframe { position:absolute; width:1100px; height:650px; left:-20px; bottom:-14px; }
 @media(max-width:650px) { body { padding:16px; } .crop { height:420px; } }
-</style></head><body><section class="hero"><h2>Camera view</h2><iframe title="Simulated Orca camera tab" src="printing.html"></iframe></section>''' + tiles + '</body></html>')
+</style></head><body><section class="hero"><h2>Camera view</h2><iframe title="Simulated Orca camera tab" src="printing-showcase.html"></iframe></section>''' + tiles + '</body></html>')
     return entry
 
 

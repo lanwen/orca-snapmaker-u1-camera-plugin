@@ -70,6 +70,9 @@ const stubImageURLs = (window) => {
         }
         assert.equal(dom.window.document.querySelectorAll('[data-tool]').length, 4);
         if (phase === 'complete') {
+          const fans = dom.window.document.querySelectorAll('.fan-speed');
+          assert.equal(fans.length, 0);
+          assert.equal(dom.window.document.querySelector('.fan-tooltip'), null);
           const bar = get('progress-bar');
           assert.equal(
             bar.getAttribute('aria-valuenow'),
@@ -136,6 +139,7 @@ const stubImageURLs = (window) => {
     const picker = doc.getElementById('preview-state');
     const cases = {
       printing: 'printing',
+      'top-cover-missing': 'printing',
       preparing: 'preparing',
       'preparing-warm': 'preparing',
       paused: 'paused',
@@ -168,6 +172,10 @@ const stubImageURLs = (window) => {
       assert.equal(picker.getAttribute('aria-expanded'), 'true');
       doc.querySelector(`[data-preview-state="${state}"]`).click();
       await settle();
+      if (state === 'top-cover-missing') {
+        assert.equal(doc.querySelector('.cover-island'), null);
+        assert.equal(doc.querySelectorAll('.fan-island').length, 2);
+      }
       if (doc.getElementById('image').hasAttribute('src'))
         doc.getElementById('image').dispatchEvent(new preview.window.Event('load'));
       await settle();
@@ -256,7 +264,7 @@ const stubImageURLs = (window) => {
   } finally {
     preview.window.close();
   }
-  console.log('All 20 preview states render; the four showcase states retain keyboard switching.');
+  console.log('All preview states render; the four showcase states retain keyboard switching.');
 })().catch((error) => {
   console.error(error);
   process.exitCode = 1;

@@ -1,10 +1,14 @@
 <script lang="ts">
-  import type { Heater, PrintStats } from './types';
+  import type { Fan, Heater, PrintStats } from './types';
+  import FanIcon from './FanIcon.svelte';
+  import FanSpeed from './FanSpeed.svelte';
   import Toolheads from './Toolheads.svelte';
   import PrintState from './PrintState.svelte';
   let { stats, receivedAt }: { stats: PrintStats | null; receivedAt: number } = $props();
   const number = (value: unknown): value is number =>
     typeof value === 'number' && Number.isFinite(value) && value >= 0;
+  const reportedFan = (fan?: Fan) =>
+    (number(fan?.speed) && fan.speed <= 1) || (number(fan?.rpm) && Math.round(fan.rpm) > 0);
   const layer = (value: unknown) => (number(value) ? Math.floor(value).toLocaleString() : '—');
   function duration(value: unknown, estimate = false) {
     if (!number(value)) return '—';
@@ -186,6 +190,25 @@
   data-state={printState}
 >
   <h2 id="stats-title">Print statistics</h2>
+  {#if activePrint && [stats?.psu_fan, stats?.hotend_fan, stats?.exhaust_fan, stats?.circulation_fan].some(reportedFan)}
+    <div class="fan-islands" aria-label="Additional cooling fans">
+      {#if reportedFan(stats?.psu_fan)}<dl class="fan-island">
+          <FanIcon size={12} /><FanSpeed label="PSU" value={stats?.psu_fan} />
+        </dl>{/if}
+      {#if reportedFan(stats?.hotend_fan)}<dl class="fan-island">
+          <FanIcon size={12} /><FanSpeed label="Hotend" value={stats?.hotend_fan} />
+        </dl>{/if}
+      {#if [stats?.exhaust_fan, stats?.circulation_fan].some(reportedFan)}<div
+          class="fan-island cover-island"
+          role="group"
+          aria-label="Top cover fans"
+        >
+          <FanIcon size={12} /><span>Top cover</span>
+          <dl><FanSpeed label="Exhaust" value={stats?.exhaust_fan} /></dl>
+          <dl><FanSpeed label="Circulation" value={stats?.circulation_fan} /></dl>
+        </div>{/if}
+    </div>
+  {/if}
   <div class="stats-gauge">
     <PrintState id="stats-state" {stats} />
     <div class="stats-primary">
@@ -280,12 +303,20 @@
     {#snippet bed()}<dt id="bed-label" hidden={!bedTemperature.visible}>Bed</dt>
       <dd id="bed-value" hidden={!bedTemperature.visible}>
         {@render heaterTemperature(bedTemperature)}
-      </dd>{/snippet}
+      </dd>
+      {#if activePrint}<div class="bed-fans">
+          <FanSpeed label="Aux" value={stats?.aux_fan} /><FanSpeed
+            label="Part"
+            value={stats?.part_fan}
+          />
+        </div>{/if}{/snippet}
   </Toolheads>
 </section>
 
 <style>
   #stats {
+    position: relative;
+    isolation: isolate;
     grid-column: 1;
     display: grid;
     grid-template-columns: 146px minmax(0, 1fr) 360px;
@@ -300,6 +331,13 @@
     font-variant-numeric: tabular-nums;
     line-height: 1.2;
     text-shadow: 0 1px 4px #0009;
+  }
+  #stats::before,
+  .fan-islands::before {
+    content: '';
+    position: absolute;
+    inset: -8px;
+    z-index: -1;
   }
   #stats:hover,
   #stats:focus-within {
@@ -538,6 +576,51 @@
   }
   #stats #bed-label:has(+ dd .temperature-target > :not(sub)) {
     top: -9px;
+  }
+  .bed-fans {
+    display: grid;
+    gap: 4px;
+  }
+  .fan-islands {
+    position: absolute;
+    right: 0;
+    bottom: calc(100% + 8px);
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    align-items: stretch;
+    gap: 6px;
+    width: max-content;
+    max-width: min(calc(100% - 32px), calc(100vw - 68px));
+  }
+  .fan-island {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0;
+    padding: 7px 6px;
+    border: 1px solid transparent;
+    border-radius: 10px;
+    background: transparent;
+  }
+  .fan-island:hover,
+  .fan-island:focus-within {
+    border-color: #ffffff26;
+    background: #111820e8;
+    box-shadow: 0 4px 16px #0003;
+    backdrop-filter: blur(18px);
+  }
+  .cover-island {
+    gap: 8px;
+  }
+  .cover-island dl {
+    margin: 0;
+  }
+  .cover-island > span {
+    color: #a7b5c2;
+    font-size: 8px;
+    line-height: 10px;
+    max-width: 24px;
   }
   .heater-temperature {
     display: grid;
