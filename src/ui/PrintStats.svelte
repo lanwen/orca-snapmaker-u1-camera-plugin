@@ -531,10 +531,13 @@
   #stats #bed-label {
     position: absolute;
     left: 0;
-    bottom: calc(100% + 1px);
+    top: 2px;
     margin: 0;
     font-size: 8px;
     line-height: 1;
+  }
+  #stats #bed-label:has(+ dd .temperature-target > :not(sub)) {
+    top: -9px;
   }
   .heater-temperature {
     display: grid;

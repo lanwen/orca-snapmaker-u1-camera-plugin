@@ -73,6 +73,7 @@
       root.querySelector('.current-temperature .temperature-current') ??
       root.querySelector('.current-temperature dd')!
     ).getBoundingClientRect();
+    const bedBounds = root.querySelector('.bed-temperature')!.getBoundingClientRect();
     paths = tools.map((tool, id) => {
       const tab = root.querySelector(`[data-tool="${id}"]`)!.getBoundingClientRect();
       const swatch = root.querySelector(`[data-swatch="${id}"]`)!.getBoundingClientRect();
@@ -80,8 +81,8 @@
       let d = `M ${swatch.x - origin.x - 4} ${y} H ${tab.right - origin.x + 4}`;
       if (id === active && root.querySelector('.current-temperature dd:not([hidden])')) {
         const start = tab.left - origin.x - 4;
-        const end = temp.right - origin.x + 4;
-        d += ` M ${start} ${y} H ${end} M ${end} ${y - 3} V ${y + 3}`;
+        const end = bedBounds.right - origin.x + 5;
+        d += ` M ${start} ${y} H ${temp.right - origin.x + 3} M ${temp.left - origin.x - 6} ${y} H ${end} M ${end} ${y - 3} V ${y + 3}`;
       }
       return {
         id,
@@ -247,7 +248,7 @@
     grid-column: 3;
     position: relative;
     display: grid;
-    grid-template-columns: 179px minmax(0, 1fr);
+    grid-template-columns: 205px minmax(0, 1fr);
     height: 88px;
     min-width: 0;
     border-left: 1px solid #ffffff28;
@@ -256,10 +257,10 @@
   }
   .sheet {
     margin: 0;
-    padding: 0 61px 0 4px;
+    padding: 0 0 0 4px;
     display: grid;
-    grid-template-columns: minmax(0, 1fr) max-content;
-    gap: 12px;
+    grid-template-columns: max-content minmax(0, 1fr);
+    gap: 5px;
     align-items: start;
   }
   .current-temperature,
@@ -268,8 +269,29 @@
     width: max-content;
     white-space: nowrap;
   }
+  .bed-temperature {
+    align-self: stretch;
+  }
+  #hardware-stat:has(.index-stack:not([hidden]))
+    .bed-temperature:has(:global(dd:not([hidden])))::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    right: -5px;
+    width: 1px;
+    background: #c0cbd5;
+  }
   .current-temperature {
+    width: auto;
+    margin-right: 23px;
     transform: translateY(calc(var(--active-tool) * 22px - 7px));
+  }
+  .current-temperature :global(.heater-temperature) {
+    position: relative;
+    left: 100%;
+    width: max-content;
+    transform: translateX(calc(-100% - 15px));
   }
   .index-stack {
     display: grid;
@@ -569,6 +591,9 @@
   .trace-base {
     opacity: 0.45;
   }
+  .filament-traces:not(.flowing) .trace-base {
+    stroke-dasharray: 6 3;
+  }
   .filament-traces:not(.flowing) .trace-base[data-active='true'] {
     opacity: 1;
     stroke-width: 1.2;
@@ -618,11 +643,18 @@
   }
   .standby .sheet {
     padding: 9px 0 0;
+    gap: 12px;
     grid-template-columns: none;
     grid-auto-flow: column;
     grid-auto-columns: max-content;
   }
   .standby .current-temperature {
+    width: max-content;
+    margin-right: 0;
+    transform: none;
+  }
+  .standby .current-temperature :global(.heater-temperature) {
+    left: auto;
     transform: none;
   }
   .standby .current-temperature:has(:global(dd[hidden])) {

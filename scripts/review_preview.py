@@ -199,8 +199,12 @@ def check_toolheads(client):
       const update = async stats => { screenshotFixtures[screenshotState] = stats; screenshotHandler({generation, stats}); await wait(); };
       const checkTemperatures = () => {
         const bed = root.querySelector('.bed-temperature').getBoundingClientRect();
-        const nozzle = root.querySelector('.current-temperature').getBoundingClientRect();
-        if (bed.right >= nozzle.left) errors.push('Bed and nozzle temperatures are not in separate columns');
+        const nozzleValue = root.querySelector('.current-temperature .temperature-current').getBoundingClientRect();
+        if (bed.right >= nozzleValue.left) errors.push('Bed and nozzle temperatures are not in separate columns');
+        const bedLabel = root.querySelector('#bed-label').getBoundingClientRect();
+        const bedValue = root.querySelector('.bed-temperature .temperature-current').getBoundingClientRect();
+        const bedTarget = root.querySelector('.bed-temperature .temperature-target > :not(sub)')?.getBoundingClientRect();
+        if (Math.abs((bedTarget?.top ?? bedValue.top) - bedLabel.bottom) > 1) errors.push('Bed label is not adjacent to temperature');
         for (const heater of root.querySelectorAll('.heater-temperature')) {
           const current = heater.querySelector('.temperature-current').getBoundingClientRect();
           const heating = heater.querySelector('sup')?.getBoundingClientRect();
@@ -233,21 +237,23 @@ def check_toolheads(client):
         const temperature = root.querySelector('.current-temperature .temperature-current').getBoundingClientRect();
         const origin = root.getBoundingClientRect();
         const end = trace.getPointAtLength(trace.getTotalLength() - 3);
-        if (Math.abs(end.x - (temperature.right - origin.x + 4)) > 1 ||
-            Math.abs(end.y - (temperature.y + temperature.height/2 - origin.y)) > 1) errors.push('Trace misses temperature');
+        const bed = root.querySelector('.bed-temperature').getBoundingClientRect();
+        const bedLine = bed.right + 5;
+        if (Math.abs(end.x - (bedLine - origin.x)) > 1 ||
+            Math.abs(end.y - (temperature.y + temperature.height/2 - origin.y)) > 1) errors.push('Trace does not meet bed surface');
         const nozzle = root.querySelector('.chosen .index-tab').getBoundingClientRect();
         if (Math.abs(nozzle.y + nozzle.height/2 - temperature.y - temperature.height/2) > 1 ||
             Math.abs(trace.getBBox().height - 6) > 0.1) errors.push('Nozzle temperature connector is not horizontal');
-        if (Math.abs(nozzle.left - 4 - temperature.right - 38) > 1) errors.push('Nozzle clearance is not doubled');
+        if (Math.abs(nozzle.left - 4 - temperature.right - 15) > 1) errors.push('Nozzle temperature clearance is not constant');
         stats.tools[id].heater = {temperature:240, target:210};
         stats.bed = {temperature:70, target:60};
         await update(stats);
         checkTemperatures();
-        const before = root.querySelector('.current-temperature .temperature-current').getBoundingClientRect().right;
+        const before = root.querySelector('.current-temperature .temperature-current').getBoundingClientRect();
         stats.tools[id].heater = {temperature:9, target:0};
         await update(stats);
-        const after = root.querySelector('.current-temperature .temperature-current').getBoundingClientRect().right;
-        if (Math.abs(before - after) > 1) errors.push('Temperature width changed nozzle clearance');
+        const after = root.querySelector('.current-temperature .temperature-current').getBoundingClientRect();
+        if (Math.abs(before.right - after.right) > 1) errors.push('Temperature width changed nozzle clearance');
         if (id === 1) {
           const tab = root.querySelector('.chosen .index-tab');
           tab.focus(); await wait();
@@ -404,10 +410,18 @@ def review(directory, output, states, widths, gifs=False):
                     errors.append(f"{state} at {width}px: Hardware information is visible without status")
                 if state in {"standby", "complete"} and client.evaluate("Boolean(document.querySelector('.index-stack')?.getClientRects().length || document.querySelector('.filament-traces')?.getClientRects().length)"):
                     errors.append(f"{state} at {width}px: Toolhead tabs are visible without a running print")
+                if state in {"standby", "complete"} and client.evaluate("getComputedStyle(document.querySelector('.bed-temperature'), '::after').content !== 'none'"):
+                    errors.append(f"{state} at {width}px: Bed surface is visible without toolhead tabs")
                 flow = client.evaluate("Boolean(document.querySelector('.trace-shimmer'))")
                 expected_flow = client.evaluate("screenshotFixtures[screenshotState].state === 'printing' && screenshotFixtures[screenshotState].phase === 'printing' && Boolean(document.querySelector('.chosen')?.getClientRects().length)")
                 if flow != expected_flow:
                     errors.append(f"{state} at {width}px: Filament animation does not match confirmed printing")
+                dashed = client.evaluate("""(() => {
+                  const line = document.querySelector('.trace-base[data-active="true"]');
+                  return line ? getComputedStyle(line).strokeDasharray !== 'none' : null;
+                })()""")
+                if dashed is not None and dashed == expected_flow:
+                    errors.append(f"{state} at {width}px: Connector dash style does not match printing state")
                 row.update(state=state, width=width, screenshot=f"{state}-{width}.png")
                 rows.append(row)
                 results.append(row)
