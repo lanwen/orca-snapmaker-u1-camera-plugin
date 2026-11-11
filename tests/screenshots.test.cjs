@@ -81,6 +81,20 @@ const stubImageURLs = (window) => {
         }
       };
       assertPreview(state);
+      const image = get('image');
+      image.dispatchEvent(new dom.window.Event('load'));
+      await settle();
+      const initialImage = image.src;
+      dom.window.dispatchEvent(new dom.window.Event('pageshow'));
+      await settle();
+      assert.equal(image.src, initialImage, 'A heartbeat reuses the decoded camera image');
+      get('stop').click();
+      await settle();
+      assert.equal(image.hasAttribute('src'), false, 'Stop clears the camera image');
+      get('play').click();
+      await settle();
+      assert.equal(new URL(image.src).protocol, 'blob:', 'Play reloads the camera image');
+      assert.notEqual(image.src, initialImage, 'Playback restart loads a fresh Blob URL');
       for (const [next, phase] of ['printing', 'preparing', 'paused', 'complete'].entries()) {
         dom.window.document.body.dispatchEvent(
           new dom.window.KeyboardEvent('keydown', { key: String(next + 1), bubbles: true }),

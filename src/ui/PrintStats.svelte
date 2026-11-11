@@ -150,22 +150,31 @@
 {#snippet heaterTemperature(value: ReturnType<typeof temperature>)}
   {#if value.current !== null}
     <span
+      class="heater-temperature"
       title={value.description}
       aria-label={value.description ? value.current + ' °C · ' + value.description : undefined}
     >
       <span class="temperature-target"
         >{#if value.direction === 'heating'}<sup
             class="heating"
-            aria-label={'Target ' + value.target + ' °C'}>{value.target} °C</sup
+            aria-label={'Target ' + value.target + ' °C'}
+            >{value.target} <small class="temperature-unit">°C</small></sup
           >{:else if value.direction === 'cooling' && value.target !== 0}<sub
             class="cooling"
-            aria-label={'Target ' + value.target + ' °C'}>{value.target} °C</sub
+            aria-label={'Target ' + value.target + ' °C'}
+            >{value.target} <small class="temperature-unit">°C</small></sub
           >{/if}</span
-      >{#if value.direction}<span class="temperature-arrow {value.direction}" aria-hidden="true"
-          >{value.direction === 'heating' ? '↑' : '↓'}</span
-        >{/if}{value.current} °C
+      ><span class="temperature-current"
+        >{#if value.direction}<span class="temperature-arrow {value.direction}" aria-hidden="true"
+            >{value.direction === 'heating' ? '↑' : '↓'}</span
+          >{/if}{value.current} <small class="temperature-unit">°C</small></span
+      >
     </span>
-  {:else if value.visible}Target {value.target} °C{/if}
+  {:else if value.visible}<span class="heater-temperature"
+      ><span class="temperature-target"><small>Target{' '}</small></span><span
+        class="temperature-current">{value.target} <small class="temperature-unit">°C</small></span
+      ></span
+    >{/if}
 {/snippet}
 
 <!-- svelte-ignore a11y_no_noninteractive_tabindex (Keyboard users can reveal the statistics surface.) -->
@@ -508,25 +517,52 @@
   .cooling {
     color: #7abaff;
   }
+  .temperature-unit {
+    color: #a7b5c2;
+    font-size: 8px;
+  }
+  .temperature-target .temperature-unit {
+    color: inherit;
+    font-size: 7px;
+  }
   .temperature-arrow {
     margin-right: 3px;
   }
   #stats #bed-label {
     position: absolute;
-    right: 0;
-    bottom: calc(100% + 1px);
+    left: 0;
+    top: 2px;
     margin: 0;
     font-size: 8px;
     line-height: 1;
   }
+  #stats #bed-label:has(+ dd .temperature-target > :not(sub)) {
+    top: -9px;
+  }
+  .heater-temperature {
+    display: grid;
+    grid-template-rows: 10px 16px 10px;
+    grid-template-columns: max-content;
+  }
+  .temperature-current {
+    font-size: 14px;
+    line-height: 16px;
+    grid-row: 2;
+    grid-column: 1;
+  }
   .temperature-target {
-    display: inline-block;
-    margin-right: 5px;
+    grid-row: 1;
+    grid-column: 1;
+    line-height: 10px;
+  }
+  .temperature-target:has(sub) {
+    grid-row: 3;
   }
   sup,
   sub {
     font-size: 0.75em;
-    line-height: 0;
+    line-height: 10px;
+    vertical-align: baseline;
   }
   #stats[data-state='standby'] {
     width: fit-content;
