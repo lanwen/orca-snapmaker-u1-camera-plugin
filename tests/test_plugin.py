@@ -490,8 +490,9 @@ class ClientTests(unittest.TestCase):
         with patch.object(plugin.time, "monotonic", return_value=100) as clock:
             self.assertAlmostEqual(printer.status()["stats"]["remaining"], 1331.84)
             queries = printer.http.query_objects.call_args.args
-            for name in ("fan_generic cavity_fan", "fan", "fan_generic e1_fan", "fan_generic e2_fan", "fan_generic e3_fan"):
+            for name in ("fan_generic cavity_fan", "fan", "fan_generic e1_fan", "fan_generic e2_fan", "fan_generic e3_fan", "heater_fan power_fan", *("heater_fan e%d_nozzle_fan" % tool for tool in range(4))):
                 self.assertIn(plugin.ObjectQuery(name, ("speed", "rpm")), queries)
+            self.assertIn(plugin.ObjectQuery("purifier", ("power_detected", "exhaust_fan", "inner_fan", "inner_fan_rpm")), queries)
             self.assertIn(plugin.ObjectQuery("gcode_move", ("speed_factor",)), queries)
             self.assertIn(plugin.ObjectQuery("virtual_sdcard", ("progress", "file_position", "file_size")), queries)
             for state in ("paused", "printing"):
@@ -579,9 +580,11 @@ class ClientTests(unittest.TestCase):
             status.update(toolhead={"extruder": head})
             status[head] = {"state": "ACTIVATE"}
             status[name] = {"speed": .5, "rpm": 8100}
+            status["heater_fan e%d_nozzle_fan" % tool] = {"speed": .75, "rpm": 16761}
             result = plugin.print_metrics(status)
             self.assertEqual(result["aux_fan"], {"speed": .7, "rpm": 3200})
             self.assertEqual(result["part_fan"], {"speed": .5, "rpm": 8100})
+            self.assertEqual(result["hotend_fan"], {"speed": .75, "rpm": 16761})
             status[head]["state"] = "PARKED"
         self.assertEqual(plugin.print_metrics(status)["part_fan"], {"speed": None, "rpm": None})
         for speed, rpm in ((None, None), (True, False), (-1, -1), (1.1, float("nan"))):
@@ -589,6 +592,22 @@ class ClientTests(unittest.TestCase):
             self.assertEqual(plugin.print_metrics(status)["aux_fan"], {"speed": None, "rpm": None})
         status["fan_generic cavity_fan"] = {"speed": 0, "rpm": 0}
         self.assertEqual(plugin.print_metrics(status)["aux_fan"], {"speed": 0, "rpm": 0})
+
+    def test_additional_fans_require_current_valid_status_and_connected_cover(self):
+        status = {"heater_fan power_fan": {"speed": .6, "rpm": None},
+                  "purifier": {"power_detected": True, "exhaust_fan": {"speed": .6},
+                               "inner_fan": {"speed": 0}, "inner_fan_rpm": 0}}
+        result = plugin.print_metrics(status)
+        self.assertEqual(result["psu_fan"], {"speed": .6, "rpm": None})
+        self.assertEqual(result["exhaust_fan"], {"speed": .6, "rpm": None})
+        self.assertEqual(result["circulation_fan"], {"speed": 0, "rpm": 0})
+        self.assertEqual(result["hotend_fan"], {"speed": None, "rpm": None})
+        for power in (False, None, 1):
+            status["purifier"]["power_detected"] = power
+            result = plugin.print_metrics(status)
+            for name in ("exhaust_fan", "circulation_fan"):
+                self.assertEqual(result[name], {"speed": None, "rpm": None})
+        self.assertEqual(plugin.print_metrics({})["psu_fan"], {"speed": None, "rpm": None})
 
     def test_four_toolheads_use_physical_status_and_live_nozzle_sizes(self):
         status = {"toolhead": {"extruder": "extruder"},

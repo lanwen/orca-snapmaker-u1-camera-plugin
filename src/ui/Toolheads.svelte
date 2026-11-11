@@ -62,7 +62,7 @@
       const rowBounds = row.getBoundingClientRect();
       const tab = row.querySelector('.index-tab')!.getBoundingClientRect();
       const tooltip = row.querySelector('.tool-tooltip')!.getBoundingClientRect();
-      tooltipBottom = rowBounds.bottom - root.closest('#stats')!.getBoundingClientRect().top + 8;
+      tooltipBottom = rowBounds.bottom - root.closest('#stats')!.getBoundingClientRect().top + 4;
       hoverBridge = {
         height: tooltipBottom - rowBounds.height + 2,
         left: tab.left - tooltip.left - 6,

@@ -1,16 +1,14 @@
 <script lang="ts">
-  import type { Heater, PrintStats } from './types';
+  import type { Fan, Heater, PrintStats } from './types';
+  import FanIcon from './FanIcon.svelte';
+  import FanSpeed from './FanSpeed.svelte';
   import Toolheads from './Toolheads.svelte';
   import PrintState from './PrintState.svelte';
   let { stats, receivedAt }: { stats: PrintStats | null; receivedAt: number } = $props();
-  let fanTooltipBottom = $state(0);
-  function positionFanTooltip(event: Event) {
-    const fan = event.currentTarget as HTMLElement;
-    fanTooltipBottom =
-      fan.getBoundingClientRect().bottom - fan.closest('#stats')!.getBoundingClientRect().top + 8;
-  }
   const number = (value: unknown): value is number =>
     typeof value === 'number' && Number.isFinite(value) && value >= 0;
+  const reportedFan = (fan?: Fan) =>
+    (number(fan?.speed) && fan.speed <= 1) || (number(fan?.rpm) && Math.round(fan.rpm) > 0);
   const layer = (value: unknown) => (number(value) ? Math.floor(value).toLocaleString() : '—');
   function duration(value: unknown, estimate = false) {
     if (!number(value)) return '—';
@@ -192,6 +190,25 @@
   data-state={printState}
 >
   <h2 id="stats-title">Print statistics</h2>
+  {#if !missing && [stats?.psu_fan, stats?.hotend_fan, stats?.exhaust_fan, stats?.circulation_fan].some(reportedFan)}
+    <div class="fan-islands" aria-label="Additional cooling fans">
+      {#if reportedFan(stats?.psu_fan)}<dl class="fan-island">
+          <FanIcon size={12} /><FanSpeed label="PSU" value={stats?.psu_fan} />
+        </dl>{/if}
+      {#if reportedFan(stats?.hotend_fan)}<dl class="fan-island">
+          <FanIcon size={12} /><FanSpeed label="Hotend" value={stats?.hotend_fan} />
+        </dl>{/if}
+      {#if [stats?.exhaust_fan, stats?.circulation_fan].some(reportedFan)}<div
+          class="fan-island cover-island"
+          role="group"
+          aria-label="Top cover fans"
+        >
+          <FanIcon size={12} /><span>Top cover</span>
+          <dl><FanSpeed label="Exhaust" value={stats?.exhaust_fan} /></dl>
+          <dl><FanSpeed label="Circulation" value={stats?.circulation_fan} /></dl>
+        </div>{/if}
+    </div>
+  {/if}
   <div class="stats-gauge">
     <PrintState id="stats-state" {stats} />
     <div class="stats-primary">
@@ -287,56 +304,19 @@
       <dd id="bed-value" hidden={!bedTemperature.visible}>
         {@render heaterTemperature(bedTemperature)}
       </dd>
-      {#each [{ label: 'Aux', value: stats?.aux_fan }, { label: 'Part', value: stats?.part_fan }] as fan}
-        {@const speed =
-          number(fan.value?.speed) && fan.value.speed <= 1
-            ? Math.round(fan.value.speed * 100)
-            : null}
-        {@const rpm = number(fan.value?.rpm) ? Math.round(fan.value.rpm) : null}
-        {#if !missing && (speed !== null || rpm !== null)}
-          <!-- svelte-ignore a11y_no_noninteractive_tabindex (Keyboard users can reveal this fan's RPM.) -->
-          <div
-            class="fan-speed"
-            role="group"
-            onpointerenter={positionFanTooltip}
-            onfocus={positionFanTooltip}
-            aria-label={fan.label + ' fan'}
-            aria-describedby={rpm !== null ? 'fan-rpm-' + fan.label : undefined}
-            tabindex={rpm !== null ? 0 : undefined}
-          >
-            <dt>{fan.label}</dt>
-            <dd>
-              {#if speed !== null}{speed}
-                <small class="fan-unit">%</small>{/if}{#if rpm !== null}<span
-                  class="fan-tooltip"
-                  style:bottom={fanTooltipBottom + 'px'}
-                  id={'fan-rpm-' + fan.label}
-                  role="tooltip"
-                  ><svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    width="16"
-                    height="16"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    aria-hidden="true"
-                    ><path
-                      d="M10.827 16.379a6.082 6.082 0 0 1-8.618-7.002l5.412 1.45a6.082 6.082 0 0 1 7.002-8.618l-1.45 5.412a6.082 6.082 0 0 1 8.618 7.002l-5.412-1.45a6.082 6.082 0 0 1-7.002 8.618l1.45-5.412Z"
-                    /><path d="M12 12v.01" /></svg
-                  >{rpm} rpm</span
-                >{/if}
-            </dd>
-          </div>
-        {/if}
-      {/each}{/snippet}
+      {#if !missing}<div class="bed-fans">
+          <FanSpeed label="Aux" value={stats?.aux_fan} /><FanSpeed
+            label="Part"
+            value={stats?.part_fan}
+          />
+        </div>{/if}{/snippet}
   </Toolheads>
 </section>
 
 <style>
   #stats {
+    position: relative;
+    isolation: isolate;
     grid-column: 1;
     display: grid;
     grid-template-columns: 146px minmax(0, 1fr) 360px;
@@ -351,6 +331,13 @@
     font-variant-numeric: tabular-nums;
     line-height: 1.2;
     text-shadow: 0 1px 4px #0009;
+  }
+  #stats::before,
+  .fan-islands::before {
+    content: '';
+    position: absolute;
+    inset: -8px;
+    z-index: -1;
   }
   #stats:hover,
   #stats:focus-within {
@@ -590,51 +577,50 @@
   #stats #bed-label:has(+ dd .temperature-target > :not(sub)) {
     top: -9px;
   }
-  .fan-speed {
-    position: relative;
-    padding-bottom: 8px;
-    text-align: left;
+  .bed-fans {
+    display: grid;
+    gap: 4px;
   }
-  #stats .fan-speed dt {
-    display: block;
-    margin: 0;
-    font-size: 8px;
-    line-height: 8px;
-    text-transform: uppercase;
+  .fan-islands {
+    position: absolute;
+    right: 0;
+    bottom: calc(100% + 8px);
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    align-items: stretch;
+    gap: 6px;
+    width: max-content;
+    max-width: min(calc(100% - 32px), calc(100vw - 68px));
   }
-  #stats .fan-speed dd {
-    display: block;
-    font-size: 10px;
-    line-height: 10px;
-  }
-  .fan-tooltip {
+  .fan-island {
     display: flex;
     align-items: center;
     gap: 6px;
-    position: absolute;
-    left: 0;
-    z-index: 6;
-    width: max-content;
-    padding: 8px 10px;
-    border: 1px solid #ffffff38;
-    border-radius: 8px;
-    background: #111820fa;
-    color: #a7b5c2;
-    font-size: 11px;
-    line-height: 1.5;
-    visibility: hidden;
+    margin: 0;
+    padding: 7px 6px;
+    border: 1px solid transparent;
+    border-radius: 10px;
+    background: transparent;
   }
-  .fan-speed:hover .fan-tooltip,
-  #stats:not(:has(.fan-speed:hover)) .fan-speed:focus .fan-tooltip {
-    visibility: visible;
+  .fan-island:hover,
+  .fan-island:focus-within {
+    border-color: #ffffff26;
+    background: #111820e8;
+    box-shadow: 0 4px 16px #0003;
+    backdrop-filter: blur(18px);
   }
-  .fan-speed:focus-visible {
-    outline: 1px solid #7abaff;
-    outline-offset: 2px;
+  .cover-island {
+    gap: 8px;
   }
-  .fan-unit {
+  .cover-island dl {
+    margin: 0;
+  }
+  .cover-island > span {
     color: #a7b5c2;
     font-size: 8px;
+    line-height: 10px;
+    max-width: 24px;
   }
   .heater-temperature {
     display: grid;

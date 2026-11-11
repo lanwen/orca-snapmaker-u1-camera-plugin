@@ -26,6 +26,10 @@ export interface Fan {
 }
 
 export interface PrintStats {
+  psu_fan?: Fan;
+  hotend_fan?: Fan;
+  exhaust_fan?: Fan;
+  circulation_fan?: Fan;
   aux_fan?: Fan;
   part_fan?: Fan;
   state: string;

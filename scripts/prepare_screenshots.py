@@ -19,6 +19,7 @@ STATES = (
 )
 PREVIEW_LABELS = {
     "printing": "Printing",  # Model printing with an eligible estimate.
+    "top-cover-missing": "Top cover disconnected",  # Optional cover is not detected.
     "preparing": "Heating",  # Preparation with heaters below target.
     "preparing-warm": "Preparing (warm)",  # Preparation after warm-up.
     "paused": "Paused",  # Interrupted print without a finish estimate.
@@ -74,11 +75,18 @@ def screenshot_page(camera=None):
                      "remaining": 3000, "tool": 3, "material": "PLA", "color": "#FFFFFF",
                      "material_vendor": "Snapmaker", "material_subtype": "SnapSpeed",
                      "material_profile": "Snapmaker PLA SnapSpeed @Snapmaker U1 (0.4 nozzle)",
+                     "psu_fan": {"speed": .6, "rpm": None},
+                     "hotend_fan": {"speed": .75, "rpm": 16761},
+                     "exhaust_fan": {"speed": .6, "rpm": None},
+                     "circulation_fan": {"speed": 0, "rpm": 0},
                      "aux_fan": {"speed": .7, "rpm": 3200},
                      "part_fan": {"speed": 1, "rpm": 8200},
                      "bed": {"temperature": 59, "target": 60},
                      "hotend": {"temperature": 209, "target": 210}},
     }
+    fixtures["top-cover-missing"] = dict(fixtures["printing"],
+                                          exhaust_fan={"speed": None, "rpm": None},
+                                          circulation_fan={"speed": None, "rpm": None})
     # Layer zero can include extrusion; show a plan-based after-time and activity bar.
     fixtures["preparing"] = dict(fixtures["printing"], tool=0, progress=0, current_layer=0,
                                   phase="preparing", planned_total=2081,
@@ -250,7 +258,7 @@ window.addEventListener('DOMContentLoaded', () => {
   document.addEventListener('keydown', event => {
     if (event.ctrlKey || event.metaKey || event.altKey || event.target.closest('input,textarea,select,[contenteditable]')) return;
     if (/^[1-4]$/.test(event.key)) {
-      screenshotState = screenshotStates[Number(event.key) - 1];
+      screenshotState = ['printing', 'preparing', 'paused', 'complete'][Number(event.key) - 1];
       publishScreenshot();
     }
     if (event.key.toLowerCase() === 'h') document.body.classList.toggle('screenshot-surface');

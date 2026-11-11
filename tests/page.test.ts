@@ -1082,7 +1082,10 @@ test('fan readings show reported percent and RPM and clear missing status', () =
     stats: { ...metrics, aux_fan: { speed: 0.7, rpm: 3200 }, part_fan: { speed: 0, rpm: 0 } },
   });
   assert.deepEqual(numbers(element('[aria-label="Aux fan"]')), [70, 3200]);
-  assert.deepEqual(numbers(element('[aria-label="Part fan"]')), [0, 0]);
+  assert.equal(element('[aria-label="Aux fan"] .fan-tooltip strong').textContent, 'Aux fan');
+  assert.deepEqual(numbers(element('[aria-label="Part fan"]')), [0]);
+  assert.equal(document.querySelector('[aria-label="Part fan"] .fan-tooltip'), null);
+  assert.equal(element('[aria-label="Part fan"]').hasAttribute('tabindex'), false);
   publish({
     generation: 1,
     stats: { ...metrics, aux_fan: { speed: null, rpm: 1234 }, part_fan: { speed: 0.5 } },
@@ -1096,4 +1099,55 @@ test('fan readings show reported percent and RPM and clear missing status', () =
     stats: { ...metrics, state: 'unavailable', aux_fan: { speed: 1, rpm: 3200 } },
   });
   assert.equal(document.querySelector('.fan-speed'), null);
+});
+
+test('fan islands show reported PSU, hotend, and top cover status and clear unavailable data', () => {
+  selectPrinter();
+  publish({
+    generation: 1,
+    stats: {
+      ...metrics,
+      psu_fan: { speed: 0.6 },
+      hotend_fan: { speed: 0.75, rpm: 16761 },
+      exhaust_fan: { speed: 0.6 },
+      circulation_fan: { speed: 0, rpm: 0 },
+    },
+  });
+  assert.equal(document.querySelectorAll('.fan-island').length, 3);
+  assert.deepEqual(numbers(element('[aria-label="PSU fan"]')), [60]);
+  assert.deepEqual(numbers(element('[aria-label="Hotend fan"]')), [75, 16761]);
+  assert.deepEqual(numbers(element('[aria-label="Exhaust fan"]')), [60]);
+  assert.deepEqual(numbers(element('[aria-label="Circulation fan"]')), [0]);
+  assert.equal(document.querySelector('[aria-label="Circulation fan"] .fan-tooltip'), null);
+  publish({
+    generation: 1,
+    stats: {
+      ...metrics,
+      psu_fan: { speed: 0.6 },
+      hotend_fan: { speed: 0.75, rpm: 16761 },
+      exhaust_fan: { speed: null, rpm: null },
+      circulation_fan: { speed: null, rpm: null },
+    },
+  });
+  assert.equal(document.querySelector('.cover-island'), null);
+  assert.equal(document.querySelectorAll('.fan-island').length, 2);
+  assert.deepEqual(numbers(element('[aria-label="PSU fan"]')), [60]);
+  assert.deepEqual(numbers(element('[aria-label="Hotend fan"]')), [75, 16761]);
+  publish({
+    generation: 1,
+    stats: {
+      ...metrics,
+      psu_fan: { speed: 0 },
+      exhaust_fan: { speed: null },
+      circulation_fan: { rpm: null },
+    },
+  });
+  assert.equal(document.querySelectorAll('.fan-island').length, 1);
+  assert.deepEqual(numbers(element('[aria-label="PSU fan"]')), [0]);
+  publish({ generation: 1, stats: { ...metrics, state: 'unavailable', psu_fan: { speed: 0.6 } } });
+  assert.equal(document.querySelector('.fan-islands'), null);
+  publish({ generation: 1, stats: { ...metrics, psu_fan: { rpm: 0 } } });
+  assert.equal(document.querySelector('.fan-islands'), null);
+  publish({ generation: 1, stats: { ...metrics, psu_fan: { speed: 2 } } });
+  assert.equal(document.querySelector('.fan-islands'), null);
 });

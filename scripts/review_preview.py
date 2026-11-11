@@ -53,7 +53,9 @@ class DevTools:
         clip = self.evaluate("""(() => {
           const stats = document.querySelector('#stats');
           const r = (stats.getClientRects().length ? stats : document.querySelector('.viewer')).getBoundingClientRect();
-          return {x:r.x, y:r.y, width:r.width, height:r.height, scale:1};
+          const islands = document.querySelector('.fan-islands')?.getBoundingClientRect();
+          const top = islands ? Math.min(r.top, islands.top) : r.top;
+          return {x:r.x, y:top, width:r.width, height:r.bottom-top, scale:1};
         })()""")
         data = self.call("Page.captureScreenshot", {"format": "png", "clip": clip})["data"]
         Path(path).write_bytes(base64.b64decode(data))
@@ -316,7 +318,7 @@ def check_tooltip_hover(client):
       return {left:r.left, top:r.top, bottom:r.bottom, x:r.left+12, y:r.top+15,
         sectionTop:stats.top, cursor:getComputedStyle(document.querySelector('.chosen .index-tab')).cursor};
     })()""")
-    if position["bottom"] > position["sectionTop"] - 7:
+    if position["bottom"] > position["sectionTop"] - 3:
         raise ValueError("Tooltip overlaps the statistics section")
     if position["cursor"] == "pointer":
         raise ValueError("Toolhead advertises a clickable action")
@@ -354,24 +356,57 @@ def export_gif(client, destination, duration, ffmpeg):
         ], check=True, capture_output=True)
 
 
+def check_stats_hover(client):
+    client.evaluate("document.activeElement.blur()")
+    points = client.evaluate("""(() => {
+      const panel=document.querySelector('#stats').getBoundingClientRect();
+      const fans=document.querySelector('.fan-islands').getBoundingClientRect();
+      return [
+        {x:fans.left+fans.width/2, y:fans.top-6},
+        {x:fans.left-6, y:fans.top+fans.height/2},
+        {x:fans.right+6, y:fans.top+fans.height/2},
+        {x:fans.left+fans.width/2, y:(fans.bottom+panel.top)/2},
+        {x:panel.left-6, y:panel.top+panel.height/2},
+        {x:panel.right+6, y:panel.top+panel.height/2},
+        {x:panel.left+panel.width/2, y:panel.bottom+6}
+      ];
+    })()""")
+    for point in points:
+        client.call("Input.dispatchMouseEvent", {"type": "mouseMoved", **point})
+        if not client.evaluate("document.querySelector('#stats').matches(':hover')"):
+            raise ValueError("Info hover surface breaks at an edge or between the fan islands and panel")
+    client.call("Input.dispatchMouseEvent", {"type": "mouseMoved", "x": 0, "y": 0})
+
+
 def check_fan_hover(client):
-    readings = "[...document.querySelectorAll('.fan-speed')]"
+    readings = "[...document.querySelectorAll('.fan-speed:has(.fan-tooltip)')]"
     visible = readings + ".map(e => getComputedStyle(e.querySelector('.fan-tooltip')).visibility === 'visible')"
     client.evaluate("document.activeElement.blur()")
     client.call("Input.dispatchMouseEvent", {"type": "mouseMoved", "x": 0, "y": 0})
     client.evaluate("new Promise(resolve => setTimeout(resolve, 280))")
     if any(client.evaluate(visible)):
         raise ValueError("Fan RPM is visible before hover")
-    for index in range(2):
+    count = client.evaluate(readings + ".length")
+    for index in range(count):
         target = readings + f"[{index}]"
         bounds = client.evaluate("(() => { const r=(" + target + ").getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+2}; })()")
         client.call("Input.dispatchMouseEvent", {"type": "mouseMoved", **bounds})
-        expected = [index == fan for fan in range(2)]
+        expected = [index == fan for fan in range(count)]
         if client.evaluate(visible) != expected:
             raise ValueError("Hover must reveal only the specific fan's RPM")
-        above = client.evaluate("(() => { const tip=(" + target + ").querySelector('.fan-tooltip').getBoundingClientRect(); const panel=document.querySelector('#stats').getBoundingClientRect(); return tip.bottom <= panel.top - 7 && tip.top >= 0; })()")
-        if not above:
-            raise ValueError("Fan RPM tooltip must sit above the info panel")
+        positioned = client.evaluate("""(() => {
+          const tip=(%s).querySelector('.fan-tooltip').getBoundingClientRect();
+          const panel=document.querySelector('#stats').getBoundingClientRect();
+          const islands=document.querySelector('.fan-islands')?.getBoundingClientRect();
+          if (tip.left < 0 || tip.right > innerWidth || tip.top < 0) return false;
+          const island=document.querySelector('.fan-island')?.getBoundingClientRect();
+          if (island && Math.abs(tip.height-island.height) > 1) return false;
+          if (islands && islands.left - tip.width - 8 >= 8)
+            return Math.abs(tip.right-islands.left+8) <= 1 && Math.abs(tip.top+tip.height/2-islands.top-islands.height/2) <= 1;
+          return tip.bottom <= (islands ?? panel).top - 7 && Math.abs(tip.left-panel.left-16) <= 1;
+        })()""" % target)
+        if not positioned:
+            raise ValueError("Fan tooltip must sit left of the islands, or above when space is limited")
         client.call("Input.dispatchMouseEvent", {"type": "mouseMoved", "x": 0, "y": 0})
         client.evaluate(target + ".focus()")
         if client.evaluate(visible) != expected:
@@ -381,7 +416,7 @@ def check_fan_hover(client):
     for index in (1, 0):
         bounds = client.evaluate("(() => { const r=(" + readings + f"[{index}]" + ").getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+2}; })()")
         client.call("Input.dispatchMouseEvent", {"type": "mouseMoved", **bounds})
-        if client.evaluate(visible) != [index == fan for fan in range(2)]:
+        if client.evaluate(visible) != [index == fan for fan in range(count)]:
             raise ValueError("Switching fans must replace the RPM tooltip immediately")
     client.evaluate("document.activeElement.blur()")
     client.call("Input.dispatchMouseEvent", {"type": "mouseMoved", "x": 0, "y": 0})
@@ -416,7 +451,7 @@ def review(directory, output, states, widths, gifs=False):
                       return !image.hidden && image.complete && image.naturalWidth > 0;
                     })()""")
                 if state == "printing":
-                    for check in (check_toolheads, check_hover_escape, check_tooltip_hover, check_fan_hover):
+                    for check in (check_toolheads, check_hover_escape, check_tooltip_hover, check_stats_hover, check_fan_hover):
                         try:
                             check(client)
                         except ValueError as error:
@@ -444,8 +479,16 @@ def review(directory, output, states, widths, gifs=False):
                     connecting:!document.querySelector('#empty').hidden,
                     lightError:document.querySelector('.light-area').dataset.error === 'true',
                     warning:!document.querySelector('#warning').hidden,
+                    islandsAligned:(() => {
+                      const islands=document.querySelector('.fan-islands');
+                      return !islands || Math.abs(islands.getBoundingClientRect().right-document.querySelector('#stats').getBoundingClientRect().right) <= 1;
+                    })(),
+                    islandsOutside:[...document.querySelectorAll('.fan-islands,.fan-island')].some(e => {
+                      const r=e.getBoundingClientRect(); return r.left < 0 || r.right > innerWidth || r.top < 0;
+                    }),
+                    // The stats hover surface extends eight pixels beyond its border.
                     overflow:[...document.querySelectorAll('#stats,#plan-stat,#remaining-stat,#finish-value,#camera,.light-area,#warning-label,.printer-meta')]
-                      .filter(e => e.getClientRects().length && e.scrollWidth > e.clientWidth+1).map(e => e.id)};
+                      .filter(e => e.getClientRects().length && e.scrollWidth > e.clientWidth+(e.id === 'stats' ? 9 : 1)).map(e => e.id)};
                 })()""")
                 if state in {"unavailable", "printer-unavailable"} and client.evaluate("Boolean(document.querySelector('#hardware-stat')?.getClientRects().length)"):
                     errors.append(f"{state} at {width}px: Hardware information is visible without status")
@@ -469,6 +512,10 @@ def review(directory, output, states, widths, gifs=False):
                 try:
                     if row["fpsWrapped"]:
                         raise ValueError("Camera FPS label wraps")
+                    if not row["islandsAligned"]:
+                        raise ValueError("Fan islands are not aligned with the panel right edge")
+                    if row["islandsOutside"]:
+                        raise ValueError("Fan islands overflow the viewport")
                     if row["overflow"]:
                         raise ValueError("Overflow: " + ", ".join(row["overflow"]))
                     header, address, heading = row["headerStatus"], row["address"], row["heading"]
@@ -539,6 +586,7 @@ def review(directory, output, states, widths, gifs=False):
                     data = client.call("Page.captureScreenshot", {"format": "png"})["data"]
                     (output / row["profile"]).write_bytes(base64.b64decode(data))
                     client.evaluate(f"{tab}.blur()")
+                    client.evaluate("new Promise(resolve => setTimeout(resolve, 280))")
                 client.screenshot(output / row["screenshot"])
                 client.evaluate("document.querySelector('#stop').scrollIntoView({block:'nearest'})")
                 stop = client.evaluate("(() => { const r=document.querySelector('#stop').getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2}; })()")
