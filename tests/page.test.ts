@@ -1151,3 +1151,31 @@ test('fan islands show reported PSU, hotend, and top cover status and clear unav
   publish({ generation: 1, stats: { ...metrics, psu_fan: { speed: 2 } } });
   assert.equal(document.querySelector('.fan-islands'), null);
 });
+
+test('all fan readouts are hidden after a job ends and while idle', () => {
+  selectPrinter();
+  const fans = {
+    aux_fan: { speed: 0.7, rpm: 3200 },
+    part_fan: { speed: 1, rpm: 8200 },
+    psu_fan: { speed: 0.6 },
+    hotend_fan: { speed: 0.75, rpm: 16761 },
+    exhaust_fan: { speed: 0.6 },
+    circulation_fan: { speed: 0.5, rpm: 1500 },
+  };
+  for (const state of [
+    'printing',
+    'paused',
+    'complete',
+    'standby',
+    'cancelled',
+    'error',
+    'unavailable',
+    'printing',
+  ]) {
+    publish({ generation: 1, stats: { ...metrics, ...fans, state } });
+    const active = state === 'printing' || state === 'paused';
+    assert.equal(document.querySelectorAll('.fan-speed').length, active ? 6 : 0, state);
+    assert.equal(document.querySelectorAll('.fan-island').length, active ? 3 : 0, state);
+    assert.equal(Boolean(document.querySelector('.bed-fans')), active, state);
+  }
+});

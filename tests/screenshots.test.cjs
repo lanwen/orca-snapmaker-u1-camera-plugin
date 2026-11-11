@@ -71,9 +71,7 @@ const stubImageURLs = (window) => {
         assert.equal(dom.window.document.querySelectorAll('[data-tool]').length, 4);
         if (phase === 'complete') {
           const fans = dom.window.document.querySelectorAll('.fan-speed');
-          assert.equal(fans.length, 6);
-          for (const fan of fans)
-            assert.match(fan.querySelector('dd').textContent, /^\s*0\s*%\s*$/);
+          assert.equal(fans.length, 0);
           assert.equal(dom.window.document.querySelector('.fan-tooltip'), null);
           const bar = get('progress-bar');
           assert.equal(

@@ -190,7 +190,7 @@
   data-state={printState}
 >
   <h2 id="stats-title">Print statistics</h2>
-  {#if !missing && [stats?.psu_fan, stats?.hotend_fan, stats?.exhaust_fan, stats?.circulation_fan].some(reportedFan)}
+  {#if activePrint && [stats?.psu_fan, stats?.hotend_fan, stats?.exhaust_fan, stats?.circulation_fan].some(reportedFan)}
     <div class="fan-islands" aria-label="Additional cooling fans">
       {#if reportedFan(stats?.psu_fan)}<dl class="fan-island">
           <FanIcon size={12} /><FanSpeed label="PSU" value={stats?.psu_fan} />
@@ -304,7 +304,7 @@
       <dd id="bed-value" hidden={!bedTemperature.visible}>
         {@render heaterTemperature(bedTemperature)}
       </dd>
-      {#if !missing}<div class="bed-fans">
+      {#if activePrint}<div class="bed-fans">
           <FanSpeed label="Aux" value={stats?.aux_fan} /><FanSpeed
             label="Part"
             value={stats?.part_fan}
