@@ -129,6 +129,7 @@ def screenshot_page(camera=None):
             fixture["tools"][active].update({key: fixture.get(key) for key in
                 ("material", "material_vendor", "material_subtype", "material_profile", "color")})
             fixture["tools"][active].update(state="connected", heater=fixture["hotend"])
+            fixture["tools"][(active + 1) % 3]["heater"] = {"temperature": 157, "target": 210}
         fixture["layer_height"] = .2 if active is not None else None
     bootstrap = r'''
 <script>

@@ -1007,7 +1007,36 @@ test('four toolheads follow physical status and never display another head tempe
   assert.equal(document.querySelectorAll('[data-tool]').length, 4);
   assert.equal(element('[data-active="true"]').getAttribute('data-tool'), '1');
   assert.deepEqual(numbers(field('hotend-value')), [240, 180]);
+  assert.deepEqual(numbers(element('.parked-temperature')), [25]);
+  assert.equal(element('.parked-temperature').getAttribute('aria-label'), 'Toolhead 1 temperature');
+  assert.equal(document.querySelectorAll('.parked-temperature').length, 1);
   assert.match(element('[data-tool="3"]').getAttribute('aria-label')!, /unavailable/);
+  for (const [target, direction, arrow] of [
+    [210, 'heating', '↗'],
+    [100, 'cooling', '↘'],
+  ] as const) {
+    publish({
+      generation: 1,
+      stats: {
+        ...metrics,
+        tools: tools.map((tool, id) =>
+          id === 0 ? { ...tool, heater: { temperature: 157, target } } : tool,
+        ),
+      },
+    });
+    assert.equal(element('.parked-temperature .' + direction).textContent, arrow);
+    assert.ok(element('.parked-temperature').classList.contains('changing'));
+  }
+  for (const temperature of [undefined, NaN, Infinity, -1]) {
+    publish({
+      generation: 1,
+      stats: {
+        ...metrics,
+        tools: tools.map((tool, id) => (id === 0 ? { ...tool, heater: { temperature } } : tool)),
+      },
+    });
+    assert.equal(document.querySelector('.parked-temperature'), null);
+  }
   publish({
     generation: 1,
     stats: { ...metrics, tools: tools.map((tool) => ({ ...tool, state: 'parked' })) },

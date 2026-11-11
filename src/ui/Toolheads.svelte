@@ -162,6 +162,26 @@
         data-open={open === id}
         data-dismissed={dismissed === id}
       >
+        {#if id !== active && tool.state !== 'unavailable' && typeof tool.heater?.temperature === 'number' && Number.isFinite(tool.heater.temperature) && tool.heater.temperature >= 0}
+          {@const target = tool.heater.target}
+          {@const changing =
+            typeof target === 'number' &&
+            Number.isFinite(target) &&
+            target > 0 &&
+            Math.abs(target - tool.heater.temperature) > 2}
+          <span
+            class="parked-temperature"
+            class:changing
+            aria-label={'Toolhead ' + (id + 1) + ' temperature'}
+            >{#if changing}<span
+                class="temperature-arrow"
+                class:heating={target > tool.heater.temperature}
+                class:cooling={target < tool.heater.temperature}
+                aria-label={'Target ' + Math.round(target) + ' °C'}
+                >{target > tool.heater.temperature ? '↗' : '↘'}</span
+              >{/if}{Math.round(tool.heater.temperature)} <small>°C</small></span
+          >
+        {/if}
         {#if id === active}
           <button
             class="index-tab"
@@ -521,12 +541,35 @@
     text-overflow: ellipsis;
   }
   .index-tab:not([data-active='true']) + .filament,
+  .parked-temperature,
   .trace-base[data-active='false'] {
     visibility: hidden;
   }
   :global(#stats:is(:hover, :focus-within)) .filament,
+  .parked-temperature.changing,
+  :global(#stats:is(:hover, :focus-within)) .parked-temperature,
   :global(#stats:is(:hover, :focus-within)) .trace-base {
     visibility: visible;
+  }
+  .parked-temperature {
+    position: absolute;
+    right: calc(100% + 13.25px);
+    white-space: nowrap;
+    color: #a9b8c5;
+    font-size: 10px;
+    line-height: 16px;
+  }
+  .parked-temperature small {
+    font-size: 7px;
+  }
+  .temperature-arrow {
+    margin-right: 3px;
+  }
+  .heating {
+    color: #ffbb77;
+  }
+  .cooling {
+    color: #7abaff;
   }
   .tool-tooltip {
     position: absolute;
@@ -671,6 +714,7 @@
   }
   @media (hover: none) {
     .index-tab:not([data-active='true']) + .filament,
+    .parked-temperature,
     .trace-base[data-active='false'] {
       visibility: visible;
     }
