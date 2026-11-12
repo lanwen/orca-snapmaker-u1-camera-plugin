@@ -131,17 +131,21 @@ def browser():
     process = connection = failure = None
     try:
         with tempfile.TemporaryFile() as log:
+            executable = find_browser()
             process = subprocess.Popen([
-                find_browser(), "--headless", "--no-first-run", "--no-default-browser-check",
+                executable, "--headless", "--enable-logging=stderr", "--no-first-run", "--no-default-browser-check",
                 "--disable-background-networking", "--disable-sync", "--hide-scrollbars",
                 "--remote-debugging-port=0", "--user-data-dir=" + profile, "about:blank",
-            ], stdout=subprocess.DEVNULL, stderr=log, start_new_session=os.name == "posix")
+            ], stdout=log, stderr=log, start_new_session=os.name == "posix")
             port_file = Path(profile) / "DevToolsActivePort"
             deadline = time.monotonic() + 10
             while not port_file.exists():
-                if process.poll() is not None or time.monotonic() >= deadline:
+                exit_code = process.poll()
+                if exit_code is not None or time.monotonic() >= deadline:
                     log.seek(0)
-                    raise RuntimeError("Chrome failed to start: " + log.read().decode(errors="replace")[-2000:])
+                    reason = f"exit code {exit_code}" if exit_code is not None else "DevTools startup timed out after 10s"
+                    raise RuntimeError(f"Chrome failed to start ({executable}; {reason}): " +
+                                       log.read().decode(errors="replace")[-2000:])
                 time.sleep(.05)
             port = int(port_file.read_text().splitlines()[0])
             opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
