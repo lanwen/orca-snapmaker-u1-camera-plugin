@@ -163,6 +163,21 @@ class BrowserCleanupTests(unittest.TestCase):
                 self.run_context(Path(directory))
         self.assertIn("Browser cleanup failed", caught.exception.__notes__[0])
 
+    def test_browser_exit_reports_executable_return_code_and_output(self):
+        with tempfile.TemporaryDirectory() as directory, \
+             patch.object(review_preview.tempfile, "mkdtemp", return_value=directory), \
+             patch.object(review_preview, "find_browser", return_value="/usr/bin/google-chrome"), \
+             patch.object(review_preview.subprocess, "Popen") as launch, \
+             patch.object(review_preview, "_stop_browser"), \
+             patch.object(review_preview, "_remove_profile"):
+            def exited(*args, **kwargs):
+                kwargs["stderr"].write(b"browser startup diagnostic")
+                return Mock(poll=Mock(return_value=23))
+            launch.side_effect = exited
+            with self.assertRaisesRegex(RuntimeError, "/usr/bin/google-chrome.*exit code 23.*browser startup diagnostic"):
+                with browser():
+                    self.fail("Exited browser cannot become ready")
+
     def test_startup_failure_stays_primary_and_cleanup_is_attempted(self):
         original = FileNotFoundError("chrome missing")
         with tempfile.TemporaryDirectory() as directory, \
