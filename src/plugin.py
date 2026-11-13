@@ -248,21 +248,29 @@ class Printer:
         self.previous_run = run
         if new_run or not active:
             self.metadata, self.metadata_retry_at = None, 0
-        now = time.monotonic()
-        if active and isinstance(filename, str) and filename and now >= self.metadata_retry_at:
-            self.metadata_retry_at = now + 30
+        if time.monotonic() >= self.metadata_retry_at:
             self.metadata = None
-            try:
-                metadata = self.http.file_metadata(filename)
-                if isinstance(metadata, dict):
-                    size = nonnegative(metadata.get("size"))
-                    if size is None or run[4] is None or size == run[4]:
-                        self.metadata = metadata
-            except Exception:
-                pass  # Optional metadata must not hide live printer status.
         led = status.get("led cavity_led", {}).get("color_data")
         return {"printer": status.get("print_stats", {}).get("state", "Unknown"),
                 "light": bool(led[0][3]) if led else None, "stats": print_metrics(status, self.metadata)}
+
+    def refresh_metadata(self):
+        """Fetch after publishing live status; use the cache on the next live query."""
+        run = self.previous_run
+        now = time.monotonic()
+        if (run is None or run[0] not in ("printing", "paused")
+                or not isinstance(run[1], str) or not run[1] or now < self.metadata_retry_at):
+            return
+        self.metadata_retry_at = now + 30
+        self.metadata = None
+        try:
+            metadata = self.http.file_metadata(run[1])
+            if isinstance(metadata, dict) and self.previous_run is run:
+                size = nonnegative(metadata.get("size"))
+                if size is None or run[4] is None or size == run[4]:
+                    self.metadata = metadata
+        except Exception:
+            pass  # Optional metadata must not hide live printer status.
 
     def set_light(self, enabled):
         self.http.set_light(LightCommand(enabled))
@@ -381,6 +389,9 @@ class Monitor:
                             self.emit(generation, client.status())
                         except Exception:
                             self.emit(generation, {"printer": "Status unavailable", "light": None, "stats": None})
+                        else:
+                            if self.current(generation):
+                                client.refresh_metadata()
                         status_at = time.monotonic() + 3
                     if not self.current(generation):
                         continue
