@@ -20,6 +20,10 @@ import websocket
 from prepare_screenshots import PREVIEW_LABELS, ROOT, find_browser
 
 
+# Cold Linux startup can spend more than ten seconds waiting on I/O.
+BROWSER_STARTUP_TIMEOUT = 30
+
+
 class DevTools:
     def __init__(self, connection):
         self.connection = connection
@@ -138,12 +142,12 @@ def browser():
                 "--remote-debugging-port=0", "--user-data-dir=" + profile, "about:blank",
             ], stdout=log, stderr=log, start_new_session=os.name == "posix")
             port_file = Path(profile) / "DevToolsActivePort"
-            deadline = time.monotonic() + 10
+            deadline = time.monotonic() + BROWSER_STARTUP_TIMEOUT
             while not port_file.exists():
                 exit_code = process.poll()
                 if exit_code is not None or time.monotonic() >= deadline:
                     log.seek(0)
-                    reason = f"exit code {exit_code}" if exit_code is not None else "DevTools startup timed out after 10s"
+                    reason = f"exit code {exit_code}" if exit_code is not None else f"DevTools startup timed out after {BROWSER_STARTUP_TIMEOUT}s"
                     raise RuntimeError(f"Chrome failed to start ({executable}; {reason}): " +
                                        log.read().decode(errors="replace")[-2000:])
                 time.sleep(.05)
