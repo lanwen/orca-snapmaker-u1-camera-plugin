@@ -26,6 +26,17 @@ jobs:
         id: snapshot
         if: github.event_name == 'pull_request'
         run: mise run release:classify-pr
+      - name: Measure first Chrome launch
+        run: |
+          mise run setup
+          mkdir -p dist/cold-browser
+          mise exec -- uv run --no-sync python scripts/probe_cold_browser.py | tee dist/cold-browser/measurement.jsonl
+      - name: Save cold browser measurement
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: cold-browser-measurement
+          path: dist/cold-browser/measurement.jsonl
       - run: mise run check
         if: steps.snapshot.outputs.snapshot_only != 'true'
       - name: Verify snapshot diff
