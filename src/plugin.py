@@ -344,11 +344,12 @@ class Monitor:
                 if client is not None and (not target or generation != selected_generation):
                     self.close_client(client)
                     client = None
+                    retry_at = 0
                 if not target:
                     with self.condition:
                         self.condition.wait(timeout=0.2)
                     continue
-                if time.monotonic() < retry_at:
+                if client is None and time.monotonic() < retry_at:
                     with self.condition:
                         self.condition.wait(timeout=0.2)
                     continue
@@ -361,11 +362,6 @@ class Monitor:
                             if self.closed or generation != self.generation:
                                 self.close_client(client)
                         keepalive_at = status_at = 0
-                    if not self.current(generation):
-                        continue
-                    if playing and time.monotonic() >= keepalive_at:
-                        client.start_monitor()
-                        keepalive_at = time.monotonic() + 60
                     if not self.current(generation):
                         continue
                     with self.condition:
@@ -388,6 +384,15 @@ class Monitor:
                         status_at = time.monotonic() + 3
                     if not self.current(generation):
                         continue
+                    if not playing or time.monotonic() < retry_at:
+                        with self.condition:
+                            self.condition.wait(timeout=0.2)
+                        continue
+                    if time.monotonic() >= keepalive_at:
+                        client.start_monitor()
+                        keepalive_at = time.monotonic() + 60
+                    if not self.current(generation):
+                        continue
                     with self.condition:
                         fetch_frame = (generation == self.generation
                                        and self.playing and self.frame_ready)
@@ -399,15 +404,13 @@ class Monitor:
                     # Do not expose exception URLs/headers, which can contain credentials.
                     message = str(error) if isinstance(error, RuntimeError) else "Cannot reach printer — check its address, API key, and connection"
                     self.emit(generation, {"camera": message, "failed": True})
-                    if client is not None:
-                        self.close_client(client)
-                    client = None
+                    keepalive_at = 0
                     with self.condition:
                         self.frame_ready = True
                     retry_at = time.monotonic() + 3 if self.current(generation) else 0
                 with self.condition:
                     # Image-load acknowledgements wake this immediately; no frame-rate cap.
-                    if not (self.playing and self.frame_ready):
+                    if time.monotonic() < retry_at or not (self.playing and self.frame_ready):
                         self.condition.wait(timeout=0.2)
         finally:
             if client is not None:

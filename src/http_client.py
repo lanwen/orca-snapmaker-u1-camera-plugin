@@ -216,39 +216,47 @@ class HttpClient:
             self.close_websocket_if_idle()
 
     def start_monitor(self) -> None:
-        with self.operation() as operation:
-            if self.ws is None:
-                url = self.websocket_url()
-                sock = operation.connect(self.parts.hostname,
-                                         self.parts.port or (443 if self.parts.scheme == "https" else 80),
-                                         self.parts.scheme == "https")
-                try:
-                    self.ws = websocket.create_connection(
-                        url, socket=sock, timeout=operation.remaining(),
-                        suppress_origin=True, http_no_proxy=["*"], redirect_limit=0,
-                        class_=CameraWebSocket,
-                    )
-                except BaseException:
-                    sock.close()
-                    raise
-            operation.track(self.ws.sock)
-            self.request_id += 1
-            request_id = self.request_id
-            self.ws.settimeout(operation.remaining())
-            self.ws.send(json.dumps({"jsonrpc": "2.0", "id": request_id,
-                                     "method": "camera.start_monitor",
-                                     "params": {"domain": "lan", "interval": 0}}))
-            while True:
+        try:
+            with self.operation() as operation:
+                if self.ws is None:
+                    url = self.websocket_url()
+                    sock = operation.connect(self.parts.hostname,
+                                             self.parts.port or (443 if self.parts.scheme == "https" else 80),
+                                             self.parts.scheme == "https")
+                    try:
+                        self.ws = websocket.create_connection(
+                            url, socket=sock, timeout=operation.remaining(),
+                            suppress_origin=True, http_no_proxy=["*"], redirect_limit=0,
+                            class_=CameraWebSocket,
+                        )
+                    except BaseException:
+                        sock.close()
+                        raise
+                operation.track(self.ws.sock)
+                self.request_id += 1
+                request_id = self.request_id
                 self.ws.settimeout(operation.remaining())
-                raw = self.ws.recv()
-                operation.remaining()
-                if len(raw) > 512_000:
-                    raise RuntimeError("Camera response is too large.")
-                reply = json.loads(raw)
-                if reply.get("id") == request_id:
-                    if "error" in reply:
-                        raise RuntimeError("Printer rejected camera monitoring.")
-                    return
+                self.ws.send(json.dumps({"jsonrpc": "2.0", "id": request_id,
+                                         "method": "camera.start_monitor",
+                                         "params": {"domain": "lan", "interval": 0}}))
+                while True:
+                    self.ws.settimeout(operation.remaining())
+                    raw = self.ws.recv()
+                    operation.remaining()
+                    if len(raw) > 512_000:
+                        raise RuntimeError("Camera response is too large.")
+                    reply = json.loads(raw)
+                    if reply.get("id") == request_id:
+                        if "error" in reply:
+                            raise RuntimeError("Printer rejected camera monitoring.")
+                        return
+        except Exception:
+            # Receive has left its selector; discard the failed socket before retrying.
+            with self.operation_lock:
+                ws, self.ws = self.ws, None
+            if ws is not None:
+                ws.close(timeout=0)
+            raise
 
     def close(self) -> None:
         with self.operation_lock:
