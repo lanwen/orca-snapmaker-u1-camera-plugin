@@ -8,7 +8,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
-import unittest
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -16,15 +16,15 @@ from prepare_screenshots import prepare, find_browser
 from review_preview import browser
 
 
-class ScriptPolicyTests(unittest.TestCase):
+class TestScriptPolicy:
     def assert_script_hashes(self, page, count):
         scripts = re.findall(r"<script>(.*?)</script>", page, re.DOTALL)
         directive = re.search(r"script-src ([^;\"]+)", page).group(1)
         expected = ["'sha256-" + base64.b64encode(hashlib.sha256(
             script.encode("utf-8")).digest()).decode("ascii") + "'" for script in scripts]
-        self.assertEqual(len(scripts), count)
-        self.assertEqual(directive.split(), expected)
-        self.assertNotIn("__CAMERA_SCRIPT_HASH__", page)
+        assert len(scripts) == count
+        assert directive.split() == expected
+        assert '__CAMERA_SCRIPT_HASH__' not in page
 
     def test_production_and_final_preview_scripts_have_exact_hashes(self):
         self.assert_script_hashes((ROOT / "dist/ui/camera.html").read_text(), 1)
@@ -38,7 +38,7 @@ class ScriptPolicyTests(unittest.TestCase):
         try:
             find_browser()
         except RuntimeError:
-            self.skipTest("Chrome/Chromium is not installed")
+            pytest.skip('Chrome/Chromium is not installed')
         with tempfile.TemporaryDirectory() as directory, browser() as client:
             preview = prepare(directory)
             for source in (ROOT / "dist/ui/camera.html", preview):
@@ -47,13 +47,13 @@ class ScriptPolicyTests(unittest.TestCase):
                     '<script>window.unapprovedInline = true</script></body>'))
                 client.call("Page.navigate", {"url": page.as_uri()})
                 client.wait_for("Boolean(document.querySelector('#play'))")
-                self.assertFalse(client.evaluate("window.unapprovedInline === true"))
+                assert not client.evaluate('window.unapprovedInline === true')
                 if source == preview:
                     client.wait_for("document.querySelector('#stats').dataset.state === 'preparing'")
                     client.evaluate("document.querySelector('[data-preview-state=paused]').click()")
                     client.wait_for("document.querySelector('#stats').dataset.state === 'paused'")
 
-    @unittest.skipUnless(sys.platform == "darwin" and shutil.which("swiftc"), "Requires macOS WebKit and Swift")
+    @pytest.mark.skipif(not (sys.platform == 'darwin' and shutil.which('swiftc')), reason='Requires macOS WebKit and Swift')
     def test_webkit_executes_hashed_script_and_native_bridge_but_blocks_extra_inline(self):
         with tempfile.TemporaryDirectory() as directory:
             binary = Path(directory) / "csp-host"
@@ -65,4 +65,4 @@ class ScriptPolicyTests(unittest.TestCase):
                 '<script>window.unapprovedInline = true</script></body>'))
             result = subprocess.run([str(binary), str(page)], check=True, capture_output=True,
                                     text=True, timeout=30)
-            self.assertIn("CSP WebKit passed", result.stdout)
+            assert 'CSP WebKit passed' in result.stdout

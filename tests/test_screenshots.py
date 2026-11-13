@@ -5,7 +5,7 @@ import importlib.util
 from pathlib import Path
 import subprocess
 import tempfile
-import unittest
+import pytest
 
 ROOT = Path(__file__).parents[1]
 spec = importlib.util.spec_from_file_location("screenshots", ROOT / "scripts/prepare_screenshots.py")
@@ -24,23 +24,22 @@ class Links(HTMLParser):
             self.targets.append(attributes.get("href") or attributes.get("src"))
 
 
-class ScreenshotTests(unittest.TestCase):
+class TestScreenshot:
     def test_all_preview_states_render_and_switch_without_host_requests(self):
         with tempfile.TemporaryDirectory() as directory:
             entry = screenshots.prepare(directory)
             for document in [entry, Path(directory) / "showcase.html"]:
                 links = Links()
                 links.feed(document.read_text())
-                self.assertTrue(links.targets, "The overview links to prepared views")
+                assert links.targets, 'The overview links to prepared views'
                 for target in links.targets:
-                    self.assertTrue((document.parent / target).is_file(),
-                                    "Every overview link opens a prepared local view")
+                    assert (document.parent / target).is_file(), 'Every overview link opens a prepared local view'
             subprocess.run(["node", str(ROOT / "tests/screenshots.test.cjs"), directory], check=True)
 
     def test_custom_camera_rejects_non_images(self):
         with tempfile.TemporaryDirectory() as directory:
             camera = Path(directory) / "frame.txt"
             camera.write_text("not a camera frame")
-            with self.assertRaises(ValueError):
+            with pytest.raises(ValueError):
                 screenshots.prepare(Path(directory) / "output", camera)
-            self.assertFalse((Path(directory) / "output").exists())
+            assert not (Path(directory) / 'output').exists()

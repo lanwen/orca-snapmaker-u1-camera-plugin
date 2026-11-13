@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 import sys
 import tempfile
-import unittest
+import pytest
 from unittest.mock import Mock, patch
 from urllib.error import HTTPError
 
@@ -17,79 +17,46 @@ import publish_cloud as cloud
 from release_notes import format_notes
 
 
-class CloudPublicationTests(unittest.TestCase):
-    def setUp(self):
-        directory = tempfile.TemporaryDirectory()
-        self.addCleanup(directory.cleanup)
-        self.root = Path(directory.name)
-        self.filename = "orca-snapmaker-u1-camera-plugin_any.py"
-        self.artifact = b"# downloaded release artifact\n"
-        self.checksum = f"{hashlib.sha256(self.artifact).hexdigest()}  {self.filename}\n"
-        self.release = {"draft": False, "prerelease": False,
-                        "body": format_notes("Release notes", "- fix(ci): internal [commit](https://example.com)") +
-                                "\nSource commit: `abc`.\n"}
-        for name, value in {"ROOT": self.root, "read_version": Mock(return_value="0.3.2"),
-                            "release_by_tag": Mock(return_value=self.release), "git": Mock(return_value="a" * 40),
-                            "verify_commit": Mock(), "gh": Mock(side_effect=self.download), "urlopen": Mock()}.items():
-            context = patch.object(cloud, name, value)
-            context.start()
-            self.addCleanup(context.stop)
-        context = patch.dict("os.environ", {"ACTIONS_ID_TOKEN_REQUEST_URL": "https://oidc.example/?request=1",
-                                           "ACTIONS_ID_TOKEN_REQUEST_TOKEN": "request-token",
-                                           "GITHUB_EVENT_NAME": "release", "GITHUB_REF_NAME": "v0.3.2"})
-        context.start()
-        self.addCleanup(context.stop)
-        context = patch("builtins.print")
-        self.print = context.start()
-        self.addCleanup(context.stop)
-        token = io.BytesIO(b'{"value":"signed-oidc-token"}')
-        success = io.BytesIO(b'{}')
-        success.status = 201
-        cloud.urlopen.side_effect = [token, success]
+class TestCloudPublication:
 
-    def download(self, *args):
-        directory = Path(args[args.index("--dir") + 1])
-        (directory / self.filename).write_bytes(self.artifact)
-        (directory / "SHA256SUMS").write_text(self.checksum)
 
-    def test_uploads_verified_release_bytes_version_and_notes_with_oidc(self):
-        self.assertEqual(cloud.publish(), "0.3.2")
+    def test_uploads_verified_release_bytes_version_and_notes_with_oidc(self, cloud_release):
+        assert cloud.publish() == '0.3.2'
         cloud.release_by_tag.assert_called_once_with("v0.3.2")
-        cloud.verify_commit.assert_called_once_with(self.release, "v0.3.2", "a" * 40)
+        cloud.verify_commit.assert_called_once_with(cloud_release.release, "v0.3.2", "a" * 40)
         args = cloud.gh.call_args.args
-        self.assertEqual(args[:3], ("release", "download", "v0.3.2"))
-        self.assertEqual(args[-4:], ("--pattern", self.filename, "--pattern", "SHA256SUMS"))
+        assert args[:3] == ('release', 'download', 'v0.3.2')
+        assert args[-4:] == ('--pattern', cloud_release.filename, '--pattern', 'SHA256SUMS')
         oidc = cloud.urlopen.call_args_list[0].args[0]
-        self.assertEqual(oidc.full_url, "https://oidc.example/?request=1&audience=orcacloud")
-        self.assertEqual(oidc.get_header("Authorization"), "Bearer request-token")
+        assert oidc.full_url == 'https://oidc.example/?request=1&audience=orcacloud'
+        assert oidc.get_header('Authorization') == 'Bearer request-token'
         upload = cloud.urlopen.call_args_list[1].args[0]
-        self.assertEqual(upload.full_url, "https://api.orcaslicer.com/api/v1/plugin-publish/releases")
-        self.assertEqual(upload.get_header("Authorization"), "Bearer signed-oidc-token")
+        assert upload.full_url == 'https://api.orcaslicer.com/api/v1/plugin-publish/releases'
+        assert upload.get_header('Authorization') == 'Bearer signed-oidc-token'
         message = BytesParser(policy=policy.default).parsebytes(
             ("Content-Type: " + upload.get_header("Content-type") + "\r\n\r\n").encode() + upload.data)
         metadata, artifact = list(message.iter_parts())
-        self.assertEqual(json.loads(metadata.get_payload(decode=True)),
-                         {"version": "0.3.2", "changelog": "Release notes"})
-        self.assertEqual(artifact.get_filename(), self.filename)
-        self.assertEqual(artifact.get_payload(decode=True), self.artifact)
-        self.print.assert_called_once_with("::add-mask::signed-oidc-token", flush=True)
+        assert json.loads(metadata.get_payload(decode=True)) == {'version': '0.3.2', 'changelog': 'Release notes'}
+        assert artifact.get_filename() == cloud_release.filename
+        assert artifact.get_payload(decode=True) == cloud_release.artifact
+        cloud_release.print.assert_called_once_with("::add-mask::signed-oidc-token", flush=True)
 
-    def test_development_draft_or_mismatched_release_never_requests_oidc(self):
+    def test_development_draft_or_mismatched_release_never_requests_oidc(self, cloud_release):
         cloud.read_version.return_value = "0.3.3.dev0"
-        with self.assertRaisesRegex(ValueError, "Development"):
+        with pytest.raises(ValueError, match='Development'):
             cloud.publish()
         cloud.read_version.return_value = "0.3.2"
-        self.release["draft"] = True
-        with self.assertRaisesRegex(ValueError, "stable GitHub release"):
+        cloud_release.release["draft"] = True
+        with pytest.raises(ValueError, match='stable GitHub release'):
             cloud.publish()
-        self.release["draft"] = False
+        cloud_release.release["draft"] = False
         cloud.verify_commit.side_effect = ValueError("tag points to another commit")
-        with self.assertRaisesRegex(ValueError, "another commit"):
+        with pytest.raises(ValueError, match='another commit'):
             cloud.publish()
         cloud.gh.assert_not_called()
         cloud.urlopen.assert_not_called()
 
-    def test_upload_identifies_the_application_to_the_cloud_edge(self):
+    def test_upload_identifies_the_application_to_the_cloud_edge(self, cloud_release):
         def respond(request, **kwargs):
             if request.full_url.startswith("https://oidc.example/"):
                 return io.BytesIO(b'{"value":"token"}')
@@ -101,46 +68,77 @@ class CloudPublicationTests(unittest.TestCase):
             return response
 
         cloud.urlopen.side_effect = respond
-        self.assertEqual(cloud.publish(), "0.3.2")
+        assert cloud.publish() == '0.3.2'
 
-    def test_push_identity_or_wrong_release_tag_never_requests_oidc(self):
+    def test_push_identity_or_wrong_release_tag_never_requests_oidc(self, cloud_release):
         for event, tag in [("push", "main"), ("workflow_dispatch", "v0.3.2"), ("release", "v0.3.1")]:
-            with self.subTest(event=event, tag=tag), patch.dict("os.environ", {
-                "GITHUB_EVENT_NAME": event, "GITHUB_REF_NAME": tag,
-            }):
-                with self.assertRaisesRegex(ValueError, "release event.*matching version tag"):
+            with patch.dict('os.environ', {'GITHUB_EVENT_NAME': event, 'GITHUB_REF_NAME': tag}):
+                with pytest.raises(ValueError, match='release event.*matching version tag'):
                     cloud.publish()
         cloud.urlopen.assert_not_called()
         cloud.release_by_tag.assert_not_called()
 
-    def test_bad_checksum_or_missing_asset_never_requests_oidc(self):
-        self.checksum = f"{'0' * 64}  {self.filename}\n"
-        with self.assertRaisesRegex(ValueError, "does not match SHA256SUMS"):
+    def test_bad_checksum_or_missing_asset_never_requests_oidc(self, cloud_release):
+        cloud_release.checksum = f"{'0' * 64}  {cloud_release.filename}\n"
+        with pytest.raises(ValueError, match='does not match SHA256SUMS'):
             cloud.publish()
         cloud.gh.side_effect = RuntimeError("release asset missing")
-        with self.assertRaisesRegex(RuntimeError, "asset missing"):
+        with pytest.raises(RuntimeError, match='asset missing'):
             cloud.publish()
         cloud.urlopen.assert_not_called()
 
-    def test_cloud_rejection_fails_instead_of_reporting_success(self):
+    def test_cloud_rejection_fails_instead_of_reporting_success(self, cloud_release):
         cloud.urlopen.side_effect = [io.BytesIO(b'{"value":"token"}'),
                                     HTTPError("https://api.orcaslicer.com", 401, "Unauthorized", {},
                                               io.BytesIO(b'{"error":"repository not connected"}'))]
-        with self.assertRaisesRegex(RuntimeError, "HTTP 401.*repository not connected"):
+        with pytest.raises(RuntimeError, match='HTTP 401.*repository not connected'):
             cloud.publish()
 
-    def test_invalid_oidc_response_never_uploads(self):
+    def test_invalid_oidc_response_never_uploads(self, cloud_release):
         cloud.urlopen.side_effect = [io.BytesIO(b'{"value":null}')]
-        with self.assertRaisesRegex(ValueError, "valid.*OIDC token"):
+        with pytest.raises(ValueError, match='valid.*OIDC token'):
             cloud.publish()
-        self.assertEqual(cloud.urlopen.call_count, 1)
+        assert cloud.urlopen.call_count == 1
 
-    def test_missing_empty_or_oversized_public_notes_never_request_credentials(self):
+    def test_missing_empty_or_oversized_public_notes_never_request_credentials(self, cloud_release):
         for body in ["Legacy generated notes", format_notes("", "generated"),
                      format_notes("x" * 4001, "generated")]:
-            with self.subTest(body=body[:30]):
-                self.release["body"] = body
-                with self.assertRaises(ValueError):
-                    cloud.publish()
+            cloud_release.release["body"] = body
+            with pytest.raises(ValueError):
+                cloud.publish()
         cloud.gh.assert_not_called()
         cloud.urlopen.assert_not_called()
+
+
+class CloudAssets:
+    def download(self, *args):
+            directory = Path(args[args.index("--dir") + 1])
+            (directory / self.filename).write_bytes(self.artifact)
+            (directory / "SHA256SUMS").write_text(self.checksum)
+
+
+@pytest.fixture
+def cloud_release(tmp_path, monkeypatch):
+    state = CloudAssets()
+    state.root = tmp_path
+    state.filename = "orca-snapmaker-u1-camera-plugin_any.py"
+    state.artifact = b"# downloaded release artifact\n"
+    state.checksum = f"{hashlib.sha256(state.artifact).hexdigest()}  {state.filename}\n"
+    state.release = {"draft": False, "prerelease": False,
+                     "body": format_notes("Release notes", "- fix(ci): internal [commit](https://example.com)") +
+                             "\nSource commit: `abc`.\n"}
+    for name, value in {"ROOT": state.root, "read_version": Mock(return_value="0.3.2"),
+                        "release_by_tag": Mock(return_value=state.release), "git": Mock(return_value="a" * 40),
+                        "verify_commit": Mock(), "gh": Mock(side_effect=state.download), "urlopen": Mock()}.items():
+        monkeypatch.setattr(cloud, name, value)
+    for name, value in {"ACTIONS_ID_TOKEN_REQUEST_URL": "https://oidc.example/?request=1",
+                        "ACTIONS_ID_TOKEN_REQUEST_TOKEN": "request-token",
+                        "GITHUB_EVENT_NAME": "release", "GITHUB_REF_NAME": "v0.3.2"}.items():
+        monkeypatch.setenv(name, value)
+    state.print = Mock()
+    monkeypatch.setattr("builtins.print", state.print)
+    token = io.BytesIO(b'{"value":"signed-oidc-token"}')
+    success = io.BytesIO(b'{}')
+    success.status = 201
+    cloud.urlopen.side_effect = [token, success]
+    return state

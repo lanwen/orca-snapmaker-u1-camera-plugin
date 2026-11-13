@@ -7,7 +7,7 @@ import subprocess
 import sys
 import tempfile
 import tomllib
-import unittest
+import pytest
 
 ROOT = Path(__file__).parents[1]
 
@@ -25,7 +25,7 @@ release.main()
 '''
 
 
-class ReleaseOutputTests(unittest.TestCase):
+class TestReleaseOutput:
     def run_workflow_command(self, workflow, task, expected, plan=None):
         # Execute the actual workflow command, including any shell redirection.
         command = next(line[line.index("mise run release:"):].strip()
@@ -50,12 +50,9 @@ class ReleaseOutputTests(unittest.TestCase):
             result = subprocess.run(["sh", "-eu", "-c", command], env=env,
                                     capture_output=True, text=True, check=True)
             lines = output.read_text().splitlines()
-            self.assertTrue(all("=" in line for line in lines),
-                            "Setup logs must not be parsed as GitHub step outputs")
-            self.assertEqual(dict(line.split("=", 1) for line in lines),
-                             {"earlier": "preserved", **expected})
-            self.assertIn("Dependency verification progress", result.stdout,
-                          "Setup progress stays in the job log")
+            assert all(('=' in line for line in lines)), 'Setup logs must not be parsed as GitHub step outputs'
+            assert dict((line.split('=', 1) for line in lines)) == {'earlier': 'preserved', **expected}
+            assert 'Dependency verification progress' in result.stdout, 'Setup progress stays in the job log'
 
     def test_release_plan_survives_noisy_setup(self):
         plan = {"version": "0.4.1", "branch": "automation/release",
@@ -80,20 +77,18 @@ class ReleaseOutputTests(unittest.TestCase):
         workflow = (ROOT / ".github/workflows/release.yml").read_text()
         validate, publish = workflow.split("  publish:\n", 1)
         publish = publish.split("  next-snapshot:\n", 1)[0]
-        self.assertIn("mise run check", validate)
-        self.assertIn("python scripts/release.py prepare-artifact", validate)
-        self.assertIn("artifact-id: ${{ steps.artifact.outputs.artifact-id }}", validate)
-        self.assertIn("artifact-ids: ${{ needs.validate.outputs.artifact-id }}", publish)
-        self.assertNotIn("run-id:", publish)
-        self.assertNotIn("github-token:", publish)
-        self.assertIn("ref: ${{ github.sha }}", publish)
-        self.assertNotIn("mise", publish)
-        self.assertLess(publish.index("python3 scripts/release.py verify-artifact"),
-                        publish.index("Generate release GitHub App token"))
-        self.assertLess(publish.index("Generate release GitHub App token"),
-                        publish.index("python3 scripts/release.py publish"))
+        assert 'mise run check' in validate
+        assert 'python scripts/release.py prepare-artifact' in validate
+        assert 'artifact-id: ${{ steps.artifact.outputs.artifact-id }}' in validate
+        assert 'artifact-ids: ${{ needs.validate.outputs.artifact-id }}' in publish
+        assert 'run-id:' not in publish
+        assert 'github-token:' not in publish
+        assert 'ref: ${{ github.sha }}' in publish
+        assert 'mise' not in publish
+        assert publish.index('python3 scripts/release.py verify-artifact') < publish.index('Generate release GitHub App token')
+        assert publish.index('Generate release GitHub App token') < publish.index('python3 scripts/release.py publish')
         tasks = tomllib.loads((ROOT / "mise.toml").read_text())["tasks"]
-        self.assertNotIn("depends", tasks["release"])
+        assert 'depends' not in tasks['release']
 
     def test_local_cli_still_prints_version_info_without_github_output(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -103,5 +98,4 @@ class ReleaseOutputTests(unittest.TestCase):
             env.pop("GITHUB_OUTPUT", None)
             result = subprocess.run([sys.executable, str(driver), "info"], env=env,
                                     capture_output=True, text=True, check=True)
-            self.assertEqual(dict(line.split("=", 1) for line in result.stdout.splitlines()),
-                             {"version": "0.4.1.dev0", "final": "false"})
+            assert dict((line.split('=', 1) for line in result.stdout.splitlines())) == {'version': '0.4.1.dev0', 'final': 'false'}
