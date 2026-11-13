@@ -26,12 +26,6 @@ jobs:
         id: snapshot
         if: github.event_name == 'pull_request'
         run: mise run release:classify-pr
-      - name: Probe Linux browser startup
-        if: steps.snapshot.outputs.snapshot_only != 'true'
-        timeout-minutes: 4
-        run: |
-          mise run setup
-          mise exec -- uv run --no-sync python scripts/probe_browser_startup.py
       - run: mise run check
         if: steps.snapshot.outputs.snapshot_only != 'true'
       - name: Verify snapshot diff

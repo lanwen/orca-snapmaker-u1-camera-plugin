@@ -22,7 +22,7 @@ class AccessDenied(RuntimeError):
 
 
 class InvalidResponse(RuntimeError):
-    """The printer response cannot safely supply the requested readings."""
+    """The printer returned data that the plugin cannot read."""
 
 
 @dataclass(frozen=True)
