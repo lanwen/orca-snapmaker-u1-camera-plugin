@@ -40,7 +40,11 @@ Node and pnpm are development tools; Orca users still install one Python file.
 The filename ends in `_any.py` for Orca Cloud's universal platform convention.
 It also writes `dist/SHA256SUMS`.
 `mise run test` builds first and tests the actual generated plugin and Svelte UI.
-`mise run check` runs the Python tests, Oxfmt formatting checks, Oxlint lint checks, Svelte and TypeScript checks, UI behavior tests, and Git whitespace checks.
+`mise run check` runs the Python pytest suite, Oxfmt formatting checks, Oxlint lint checks, Svelte and TypeScript checks, UI behavior tests, and Git whitespace checks.
+For a focused Python run after building, use `mise exec -- uv run --no-sync pytest tests/test_plugin.py`.
+Use `mise exec -- uv run --no-sync pytest --collect-only` to list the Python cases without running them.
+The plugin tests load the generated file in `dist/`; transport deadline tests load the source module separately.
+Release tests use an explicit `release_tree` fixture with temporary project files, isolated Git and uv settings, and mocked GitHub access.
 Edit `src/` and `pyproject.toml`.
 Install only the generated file from `dist/`.
 

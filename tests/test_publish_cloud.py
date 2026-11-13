@@ -7,7 +7,6 @@ import hashlib
 import json
 from pathlib import Path
 import sys
-import tempfile
 import pytest
 from unittest.mock import Mock, patch
 from urllib.error import HTTPError
@@ -70,11 +69,15 @@ class TestCloudPublication:
         cloud.urlopen.side_effect = respond
         assert cloud.publish() == '0.3.2'
 
-    def test_push_identity_or_wrong_release_tag_never_requests_oidc(self, cloud_release):
-        for event, tag in [("push", "main"), ("workflow_dispatch", "v0.3.2"), ("release", "v0.3.1")]:
-            with patch.dict('os.environ', {'GITHUB_EVENT_NAME': event, 'GITHUB_REF_NAME': tag}):
-                with pytest.raises(ValueError, match='release event.*matching version tag'):
-                    cloud.publish()
+    @pytest.mark.parametrize('event,tag', [
+        pytest.param('push', 'main', id='push'),
+        pytest.param('workflow_dispatch', 'v0.3.2', id='manual'),
+        pytest.param('release', 'v0.3.1', id='wrong-tag'),
+    ])
+    def test_push_identity_or_wrong_release_tag_never_requests_oidc(self, cloud_release, event, tag):
+        with patch.dict("os.environ", {"GITHUB_EVENT_NAME": event, "GITHUB_REF_NAME": tag}):
+            with pytest.raises(ValueError, match="release event.*matching version tag"):
+                cloud.publish()
         cloud.urlopen.assert_not_called()
         cloud.release_by_tag.assert_not_called()
 
@@ -100,12 +103,15 @@ class TestCloudPublication:
             cloud.publish()
         assert cloud.urlopen.call_count == 1
 
-    def test_missing_empty_or_oversized_public_notes_never_request_credentials(self, cloud_release):
-        for body in ["Legacy generated notes", format_notes("", "generated"),
-                     format_notes("x" * 4001, "generated")]:
-            cloud_release.release["body"] = body
-            with pytest.raises(ValueError):
-                cloud.publish()
+    @pytest.mark.parametrize('body', [
+        pytest.param('Legacy generated notes', id='missing'),
+        pytest.param(format_notes('', 'generated'), id='empty'),
+        pytest.param(format_notes('x' * 4001, 'generated'), id='oversized'),
+    ])
+    def test_missing_empty_or_oversized_public_notes_never_request_credentials(self, cloud_release, body):
+        cloud_release.release["body"] = body
+        with pytest.raises(ValueError):
+            cloud.publish()
         cloud.gh.assert_not_called()
         cloud.urlopen.assert_not_called()
 

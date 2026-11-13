@@ -33,7 +33,10 @@ class TestDeadline:
             action()
         assert time.monotonic() - started < 0.8
 
-    @pytest.mark.parametrize('data', [b'HTTP/1.1 200 OK\r\nContent-Length: 50\r\n\r\n', b'HTTP/1.1 200 OK\r\nContent-Length: 50\r\n\r\n' + b'x' * 50], ids=['trickled-headers', 'trickled-body'])
+    @pytest.mark.parametrize('data', [
+        pytest.param(b'HTTP/1.1 200 OK\r\nContent-Length: 50\r\n\r\n', id='trickled-headers'),
+        pytest.param(b'HTTP/1.1 200 OK\r\nContent-Length: 50\r\n\r\n' + b'x' * 50, id='trickled-body'),
+    ])
     def test_http_trickled_headers_and_body_have_total_deadline(self, data):
         local, peer = socket.socketpair()
         def server():
@@ -55,7 +58,10 @@ class TestDeadline:
         thread.join(1)
         assert not thread.is_alive()
 
-    @pytest.mark.parametrize('payload', [b'\x81~\x00d' + b'x' * 100, b'\x89\x00' * 100], ids=['trickled-frame', 'control-stream'])
+    @pytest.mark.parametrize('payload', [
+        pytest.param(b'\x81~\x00d' + b'x' * 100, id='trickled-frame'),
+        pytest.param(b'\x89\x00' * 100, id='control-stream'),
+    ])
     def test_websocket_trickled_frame_and_control_stream_have_total_deadline(self, payload):
         local, peer = socket.socketpair()
         ws = websocket.WebSocket()
@@ -73,7 +79,10 @@ class TestDeadline:
         thread.join(1)
         assert not thread.is_alive()
 
-    @pytest.mark.parametrize('scheme', ('http', 'https'), ids=['http', 'https'])
+    @pytest.mark.parametrize('scheme', [
+        pytest.param('http', id='http'),
+        pytest.param('https', id='https'),
+    ])
     def test_websocket_http_and_tls_handshakes_have_total_deadline(self, scheme):
         listener = socket.create_server(('127.0.0.1', 0))
         def serve():

@@ -1,5 +1,6 @@
-import pytest
 """Release-note review follows the changes being released, not just nonempty text."""
+
+import pytest
 
 from contextlib import redirect_stdout
 import io

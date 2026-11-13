@@ -11,7 +11,6 @@ import sys
 import threading
 import time
 import types
-import tempfile
 import pytest
 from unittest.mock import Mock, patch
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -29,17 +28,17 @@ spec.loader.exec_module(plugin)
 
 
 class TestPageIcon:
-    def test_native_tab_icon_is_available_before_loading_page_html(self):
-        with tempfile.TemporaryDirectory() as directory:
-            with patch.object(plugin, "__file__", str(Path(directory) / "camera.py")):
-                page = plugin.U1Page()
-                icon = Path(page.get_icon())
-                assert icon.is_absolute()
-                assert icon.suffix == '.svg'
-                assert icon.parent == Path(directory)
-                expected = (Path(__file__).parents[1] / "docs/branding/u1-logo.svg").read_text().replace("#249b7c", "#FEFEFE")
-                assert icon.read_text() == expected
-                assert page.get_icon() == str(icon)
+    def test_native_tab_icon_is_available_before_loading_page_html(self, tmp_path):
+        directory = str(tmp_path)
+        with patch.object(plugin, "__file__", str(Path(directory) / "camera.py")):
+            page = plugin.U1Page()
+            icon = Path(page.get_icon())
+            assert icon.is_absolute()
+            assert icon.suffix == '.svg'
+            assert icon.parent == Path(directory)
+            expected = (Path(__file__).parents[1] / "docs/branding/u1-logo.svg").read_text().replace("#249b7c", "#FEFEFE")
+            assert icon.read_text() == expected
+            assert page.get_icon() == str(icon)
 
 
 class Endpoint(BaseHTTPRequestHandler):
@@ -122,7 +121,13 @@ class TestWebSocketRedirect:
 
 
 
-    @pytest.mark.parametrize('status', (301, 302, 303, 307, 308), ids=['301', '302', '303', '307', '308'])
+    @pytest.mark.parametrize('status', [
+        pytest.param(301, id='301'),
+        pytest.param(302, id='302'),
+        pytest.param(303, id='303'),
+        pytest.param(307, id='307'),
+        pytest.param(308, id='308'),
+    ])
     def test_real_client_rejects_every_redirect_without_contacting_target(self, websocket_server, status):
         token = "private-oneshot-token"
         target = websocket_server()
@@ -174,7 +179,11 @@ class TestWebSocketLimit:
     def frame(self, payload, opcode=1, fin=True):
         return bytes([(0x80 if fin else 0) | opcode, len(payload)]) + payload
 
-    @pytest.mark.parametrize('header', [b'\x81~' + struct.pack('!H', 513), b'\x82\x7f' + struct.pack('!Q', 2 ** 40), b'\x81\xff' + struct.pack('!Q', 2 ** 40)], ids=['b-x81-struct-pack-H-513', 'b-x82-x7f-struct-pack-Q-2-40', 'b-x81-xff-struct-pack-Q-2-40'])
+    @pytest.mark.parametrize('header', [
+        pytest.param(b'\x81~' + struct.pack('!H', 513), id='oversized-short-frame'),
+        pytest.param(b'\x82\x7f' + struct.pack('!Q', 2 ** 40), id='oversized-long-frame'),
+        pytest.param(b'\x81\xff' + struct.pack('!Q', 2 ** 40), id='oversized-masked-frame'),
+    ])
     def test_oversized_lengths_are_rejected_before_payload_reads(self, header):
         with patch.object(plugin._CameraFrameBuffer, 'RESPONSE_LIMIT', 512):
             ws, reads, pending = self.make_socket(header)
@@ -238,7 +247,20 @@ class TestClient:
         finally:
             monitor.close()
 
-    @pytest.mark.parametrize('code,body,category', [(401, b'private-response-secret', 'access_denied'), (403, b'private-response-secret', 'access_denied'), (500, b'private-response-secret', 'unreachable'), (200, b'{"secret":', 'invalid_response'), (200, b'\xffsecret', 'invalid_response'), (200, b'[]', 'invalid_response'), (200, b'{}', 'invalid_response'), (200, b'{"result":[]}', 'invalid_response'), (200, b'{"result":{"status":[]}}', 'invalid_response'), (200, b'{"result":{"status":{"print_stats":"secret"}}}', 'invalid_response'), (200, b'{"result":{"status":{"print_stats":{"info":["secret"]}}}}', 'invalid_response'), (200, b'x' * 512001, 'invalid_response')], ids=['unauthorized', 'forbidden', 'server-error', 'truncated-json', 'invalid-encoding', 'json-array', 'missing-result', 'invalid-result', 'invalid-status', 'invalid-print-stats', 'invalid-layer-info', 'oversized-response'])
+    @pytest.mark.parametrize('code,body,category', [
+        pytest.param(401, b'private-response-secret', 'access_denied', id='unauthorized'),
+        pytest.param(403, b'private-response-secret', 'access_denied', id='forbidden'),
+        pytest.param(500, b'private-response-secret', 'unreachable', id='server-error'),
+        pytest.param(200, b'{"secret":', 'invalid_response', id='truncated-json'),
+        pytest.param(200, b'\xffsecret', 'invalid_response', id='invalid-encoding'),
+        pytest.param(200, b'[]', 'invalid_response', id='json-array'),
+        pytest.param(200, b'{}', 'invalid_response', id='missing-result'),
+        pytest.param(200, b'{"result":[]}', 'invalid_response', id='invalid-result'),
+        pytest.param(200, b'{"result":{"status":[]}}', 'invalid_response', id='invalid-status'),
+        pytest.param(200, b'{"result":{"status":{"print_stats":"secret"}}}', 'invalid_response', id='invalid-print-stats'),
+        pytest.param(200, b'{"result":{"status":{"print_stats":{"info":["secret"]}}}}', 'invalid_response', id='invalid-layer-info'),
+        pytest.param(200, b'x' * 512001, 'invalid_response', id='oversized-response'),
+    ])
     def test_status_response_failures_use_safe_categories(self, http_endpoint, code, body, category):
         with patch.object(Endpoint, 'status_code', code), patch.object(Endpoint, 'status_body', body):
             message = self.status_message(plugin.Printer(http_endpoint, "secret"))
@@ -264,7 +286,12 @@ class TestClient:
             printer.close()
             peer.close()
 
-    @pytest.mark.parametrize('error,category', [(TimeoutError('url?token=secret'), 'timeout'), (OSError('Authorization: secret'), 'unreachable'), (RuntimeError('http://user:secret@printer'), 'unreachable'), (Exception('private-response-secret'), 'unreachable')], ids=['TimeoutError', 'OSError', 'RuntimeError', 'Exception'])
+    @pytest.mark.parametrize('error,category', [
+        pytest.param(TimeoutError('url?token=secret'), 'timeout', id='deadline'),
+        pytest.param(OSError('Authorization: secret'), 'unreachable', id='network'),
+        pytest.param(RuntimeError('http://user:secret@printer'), 'unreachable', id='runtime-fallback'),
+        pytest.param(Exception('private-response-secret'), 'unreachable', id='unexpected-fallback'),
+    ])
     def test_status_timeout_network_and_unexpected_failures_are_safe(self, http_endpoint, error, category):
         printer = plugin.Printer(http_endpoint)
         printer.http.query_objects = Mock(side_effect=error)
@@ -272,7 +299,14 @@ class TestClient:
         assert message.get('status_error') == category
         assert 'secret' not in str(message)
 
-    @pytest.mark.parametrize('value', ['', 'file:///tmp/a', 'http://user:secret@printer', 'http://printer/path', 'http://printer?token=x', 'http://printer:99999'], ids=['empty', 'file-tmp-a', 'http-user-secret-printer', 'http-printer-path', 'http-printer-token-x', 'http-printer-99999'])
+    @pytest.mark.parametrize('value', [
+        pytest.param('', id='empty'),
+        pytest.param('file:///tmp/a', id='file-tmp-a'),
+        pytest.param('http://user:secret@printer', id='http-user-secret-printer'),
+        pytest.param('http://printer/path', id='http-printer-path'),
+        pytest.param('http://printer?token=x', id='http-printer-token-x'),
+        pytest.param('http://printer:99999', id='http-printer-99999'),
+    ])
     def test_address_validation(self, value):
         assert plugin.printer_url('printer.local:7125') == 'http://printer.local:7125'
         with pytest.raises(ValueError):
@@ -350,7 +384,10 @@ class TestClient:
         assert connect.call_args.kwargs['redirect_limit'] == 0
         assert connect.call_args.kwargs['class_'] is plugin.CameraWebSocket
 
-    @pytest.mark.parametrize('failure', (RuntimeError('rejected'), OSError('disconnected')), ids=['RuntimeError', 'OSError'])
+    @pytest.mark.parametrize('failure', [
+        pytest.param(RuntimeError('rejected'), id='rejected-activation'),
+        pytest.param(OSError('disconnected'), id='disconnected-socket'),
+    ])
     def test_camera_failure_replaces_socket_and_preserves_status(self, http_endpoint, request, failure):
         printer = plugin.Printer(http_endpoint)
         request.addfinalizer(printer.close)
@@ -467,7 +504,14 @@ class TestClient:
         assert result['stats']['progress'] is None
 
 
-    @pytest.mark.parametrize('layer,phase', [(0, 'preparing'), (None, 'unknown'), (0.5, 'unknown'), (True, 'unknown'), (-1, 'unknown'), (101, 'unknown')], ids=['0', 'None', '0-5', 'True', '1', '101'])
+    @pytest.mark.parametrize('layer,phase', [
+        pytest.param(0, 'preparing', id='preparing-layer-zero'),
+        pytest.param(None, 'unknown', id='missing-layer'),
+        pytest.param(0.5, 'unknown', id='fractional-layer'),
+        pytest.param(True, 'unknown', id='boolean-layer'),
+        pytest.param(-1, 'unknown', id='negative-layer'),
+        pytest.param(101, 'unknown', id='above-total-layer'),
+    ])
     def test_orca_time_plan_uses_confirmed_progress_and_model_phase(self, layer, phase):
         metadata = {"slicer": "OrcaSlicer", "estimated_time": 2081}
         result = plugin.print_metrics(estimate_status(), metadata)
@@ -481,29 +525,54 @@ class TestClient:
         assert result['remaining'] is None
         assert result['planned_total'] == 2081
 
-    def test_estimation_rejects_ambiguous_or_invalid_sources(self):
+    @pytest.mark.parametrize("section,field,value",
+        [("display_status", "progress", value) for value in (None, True, -1, 1.1, float("nan"), float("inf"), .365)] +
+        [("virtual_sdcard", "progress", value) for value in (None, .36, True, -1, 2)] +
+        [("gcode_move", "speed_factor", value) for value in (None, True, .5, 2)],
+        ids=["display-missing", "display-boolean", "display-negative", "display-excessive", "display-nan", "display-infinite", "display-fractional-m73",
+             "bytes-missing", "bytes-equals-display", "bytes-boolean", "bytes-negative", "bytes-excessive",
+             "speed-missing", "speed-boolean", "speed-slow", "speed-fast"])
+    def test_estimation_rejects_ambiguous_or_invalid_sources(self, section, field, value):
+        status = estimate_status()
+        status[section][field] = value
         metadata = {"slicer": "OrcaSlicer", "estimated_time": 2081}
-        cases = [("display_status", "progress", value)
-                 for value in (None, True, -1, 1.1, float("nan"), float("inf"), .365)]
-        cases += [("virtual_sdcard", "progress", value) for value in (None, .36, True, -1, 2)]
-        cases += [("gcode_move", "speed_factor", value) for value in (None, True, .5, 2)]
-        for section, field, value in cases:
-            status = estimate_status()
-            status[section][field] = value
-            assert plugin.print_metrics(status, metadata)['remaining'] is None
-        for invalid in (None, [], {"estimated_time": 2081},
-                        {"slicer": "SnapmakerOrca", "estimated_time": 2081}):
-            assert plugin.print_metrics(estimate_status(), invalid)['remaining'] is None
-        for value in (None, True, 0, -1, "2081", float("nan"), float("inf")):
-            result = plugin.print_metrics(estimate_status(), dict(metadata, estimated_time=value))
-            assert result['remaining'] is None
-            assert result['planned_total'] is None
-        for display, byte_progress in [(.360000001, .30), (.36, .3600005)]:
-            status = estimate_status()
-            status["display_status"]["progress"] = display
-            status["virtual_sdcard"]["progress"] = byte_progress
-            remaining = plugin.print_metrics(status, metadata)["remaining"]
-            assert (remaining is not None) == (byte_progress == 0.3)
+        assert plugin.print_metrics(status, metadata)["remaining"] is None
+
+    @pytest.mark.parametrize('invalid', [
+        pytest.param(None, id='missing'),
+        pytest.param([], id='wrong-shape'),
+        pytest.param({'estimated_time': 2081}, id='missing-slicer'),
+        pytest.param({'slicer': 'SnapmakerOrca', 'estimated_time': 2081}, id='unsupported-slicer'),
+    ])
+    def test_estimation_requires_matching_slicer_metadata(self, invalid):
+        assert plugin.print_metrics(estimate_status(), invalid)["remaining"] is None
+
+    @pytest.mark.parametrize('value', [
+        pytest.param(None, id='missing'),
+        pytest.param(True, id='boolean'),
+        pytest.param(0, id='zero'),
+        pytest.param(-1, id='negative'),
+        pytest.param('2081', id='string'),
+        pytest.param(float('nan'), id='nan'),
+        pytest.param(float('inf'), id='infinite'),
+    ])
+    def test_estimation_rejects_invalid_planned_times(self, value):
+        metadata = {"slicer": "OrcaSlicer", "estimated_time": value}
+        result = plugin.print_metrics(estimate_status(), metadata)
+        assert result["remaining"] is None
+        assert result["planned_total"] is None
+
+    @pytest.mark.parametrize('display,byte_progress', [
+        pytest.param(0.360000001, 0.3, id='rounded-m73'),
+        pytest.param(0.36, 0.3600005, id='byte-progress-fallback'),
+    ])
+    def test_estimation_uses_tolerant_m73_detection(self, display, byte_progress):
+        status = estimate_status()
+        status["display_status"]["progress"] = display
+        status["virtual_sdcard"]["progress"] = byte_progress
+        metadata = {"slicer": "OrcaSlicer", "estimated_time": 2081}
+        remaining = plugin.print_metrics(status, metadata)["remaining"]
+        assert (remaining is not None) == (byte_progress == .3)
 
     def test_pause_resume_finishing_and_terminal_estimates(self):
         status = estimate_status()
@@ -609,7 +678,13 @@ class TestClient:
         printer.refresh_metadata()
         assert printer.status()['stats']['remaining'] == pytest.approx(1331.84, abs=0.5 * 10 ** (-7), rel=0)
 
-    @pytest.mark.parametrize('section,field,value', [('print_stats', 'filename', 'next.gcode'), ('print_stats', 'total_duration', 1), ('virtual_sdcard', 'file_position', 1), ('virtual_sdcard', 'file_size', 2000), ('print_stats', 'state', 'complete')], ids=['filename', 'total_duration', 'file_position', 'file_size', 'state'])
+    @pytest.mark.parametrize('section,field,value', [
+        pytest.param('print_stats', 'filename', 'next.gcode', id='filename'),
+        pytest.param('print_stats', 'total_duration', 1, id='total_duration'),
+        pytest.param('virtual_sdcard', 'file_position', 1, id='file_position'),
+        pytest.param('virtual_sdcard', 'file_size', 2000, id='file_size'),
+        pytest.param('print_stats', 'state', 'complete', id='state'),
+    ])
     def test_cached_metadata_is_revalidated_before_enriching_a_fresh_run(self, section, field, value):
         changes = [("print_stats", "filename", "next.gcode"),
                    ("print_stats", "total_duration", 1),
@@ -738,30 +813,40 @@ class TestClient:
         for key in ("material", "material_vendor", "material_subtype", "material_profile"):
             assert result[key] is None
 
-    def test_sliced_profiles_handle_quotes_and_hide_ambiguous_or_missing_details(self):
+    @pytest.mark.parametrize("raw,used,expected", [
+        pytest.param('PLA profile;PETG profile', [100, 200], None, id="ambiguous-profiles"),
+        pytest.param('PLA profile;PLA profile', [100, 200], 'PLA profile', id="same-profile"),
+        pytest.param('PLA profile;Unused profile', [100, 0], 'PLA profile', id="unused-profile"),
+        pytest.param('PLA profile;Unused profile', [100, 200, 300], None, id="inconsistent-usage"),
+        pytest.param('Custom; PLA', [100], 'Custom; PLA', id="semicolon-in-name"),
+        pytest.param('Custom; PLA";"PETG profile', [100, 200], None, id="ambiguous-semicolon"),
+        pytest.param('"PLA profile";"PLA profile"', [100, 200], 'PLA profile', id="quoted-profiles"),
+        pytest.param('NONE', [100], None, id="none-marker"),
+        pytest.param('', [100], None, id="empty"),
+    ])
+    def test_sliced_profiles_handle_quotes_and_hide_ambiguous_or_missing_details(self, raw, used, expected):
         status = {"toolhead": {"extruder": "extruder"},
                   "print_task_config": {"filament_type": ["PLA"], "filament_vendor": ["NONE"],
                                         "filament_sub_type": [42], "extruder_map_table": [0, 0]}}
-        for raw, used, expected in [
-            ('PLA profile;PETG profile', [100, 200], None),
-            ('PLA profile;PLA profile', [100, 200], 'PLA profile'),
-            ('PLA profile;Unused profile', [100, 0], 'PLA profile'),
-            ('PLA profile;Unused profile', [100, 200, 300], None),
-            ('Custom; PLA', [100], 'Custom; PLA'),
-            ('Custom; PLA";"PETG profile', [100, 200], None),
-            ('"PLA profile";"PLA profile"', [100, 200], 'PLA profile'),
-            ('NONE', [100], None),
-            ('', [100], None),
-        ]:
-            metadata = {"slicer": "SnapmakerOrca", "filament_name": raw, "filament_used_mm": used}
-            result = plugin.print_metrics(status, metadata)
-            assert result['material_profile'] == expected
-            assert result['material_vendor'] is None
-            assert result['material_subtype'] is None
-        metadata = {"slicer": "OrcaSlicer", "filament_name": 'PLA profile', "filament_used_mm": [100]}
-        for mapping in (None, [], [True], ["0"], [1]):
-            status["print_task_config"]["extruder_map_table"] = mapping
-            assert plugin.print_metrics(status, metadata)['material_profile'] is None
+        metadata = {"slicer": "SnapmakerOrca", "filament_name": raw, "filament_used_mm": used}
+        result = plugin.print_metrics(status, metadata)
+        assert result["material_profile"] == expected
+        assert result["material_vendor"] is None
+        assert result["material_subtype"] is None
+
+    @pytest.mark.parametrize('mapping', [
+        pytest.param(None, id='missing'),
+        pytest.param([], id='empty'),
+        pytest.param([True], id='boolean'),
+        pytest.param(['0'], id='string'),
+        pytest.param([1], id='wrong-tool'),
+    ])
+    def test_sliced_profiles_require_valid_tool_mapping(self, mapping):
+        status = {"toolhead": {"extruder": "extruder"},
+                  "print_task_config": {"filament_type": ["PLA"], "filament_vendor": ["NONE"],
+                                        "filament_sub_type": [42], "extruder_map_table": mapping}}
+        metadata = {"slicer": "OrcaSlicer", "filament_name": "PLA profile", "filament_used_mm": [100]}
+        assert plugin.print_metrics(status, metadata)["material_profile"] is None
 
     def test_filament_profile_metadata_does_not_require_a_time_estimate(self):
         printer = plugin.Printer("http://printer.local")
@@ -813,7 +898,10 @@ def eventually(predicate):
 
 
 class TestWorkerMetadata:
-    @pytest.mark.parametrize('failure', (False, True), ids=['False', 'True'])
+    @pytest.mark.parametrize('failure', [
+        pytest.param(False, id='metadata-available'),
+        pytest.param(True, id='metadata-failure'),
+    ])
     def test_metadata_enriches_only_the_next_fresh_status(self, failure):
         now, messages, queries = [100.0], [], []
         printer = plugin.Printer("http://printer")
@@ -851,7 +939,10 @@ class TestWorkerMetadata:
         assert all(('status_error' not in m for m in messages))
         printer.http.file_metadata.assert_called_once_with("part.gcode")
 
-    @pytest.mark.parametrize('unload', (False, True), ids=['False', 'True'])
+    @pytest.mark.parametrize('unload', [
+        pytest.param(False, id='target-change'),
+        pytest.param(True, id='unload'),
+    ])
     def test_target_change_and_unload_cancel_blocked_metadata(self, unload):
         local, peer = socket.socketpair()
         entered, next_status = threading.Event(), threading.Event()
@@ -928,7 +1019,10 @@ class TestWorkerMetadata:
             release.set()
             monitor.close()
 
-    @pytest.mark.parametrize('failure', (False, True), ids=['False', 'True'])
+    @pytest.mark.parametrize('failure', [
+        pytest.param(False, id='metadata-available'),
+        pytest.param(True, id='metadata-failure'),
+    ])
     def test_live_status_is_published_before_blocked_metadata(self, failure):
         entered, release = threading.Event(), threading.Event()
         messages = []
@@ -965,7 +1059,10 @@ class TestWorkerMetadata:
 
 
 class TestWorkerSchedule:
-    @pytest.mark.parametrize('failure', ('activation', 'snapshot'), ids=['activation', 'snapshot'])
+    @pytest.mark.parametrize('failure', [
+        pytest.param('activation', id='activation'),
+        pytest.param('snapshot', id='snapshot'),
+    ])
     def test_camera_failures_preserve_status_cadence_and_recover(self, failure):
         now = [100.0]
         messages, status_times, camera_times = [], [], []
@@ -1209,7 +1306,11 @@ class TestWorker:
 
 class TestTarget:
 
-    @pytest.mark.parametrize('choice', ('yes', 'no', 'cancel'), ids=['yes', 'no', 'cancel'])
+    @pytest.mark.parametrize('choice', [
+        pytest.param('yes', id='yes'),
+        pytest.param('no', id='no'),
+        pytest.param('cancel', id='cancel'),
+    ])
     def test_preset_connection_reads_require_consent_and_remember_the_decision(self, make_page, choice):
         page = make_page({"printer_model": "Snapmaker U1", "print_host": "printer.local",
                                "printhost_apikey": "secret"}, {})
@@ -1367,12 +1468,12 @@ class TestTarget:
         page.get_config = lambda: '{"host":"http://other.local"}'
         assert page.selected_target() == ('http://other.local', '')
 
-    def test_saved_selected_preset_supplies_address_and_its_own_key(self, make_page):
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "selected.json"
-            path.write_text(json.dumps({"print_host": "saved-printer.local:7125", "printhost_apikey": "saved-key"}))
-            page = make_page({"printer_model": "Snapmaker U1", "printhost_apikey": "unrelated-key"}, file=str(path))
-            assert page.selected_target() == ('http://saved-printer.local:7125', 'saved-key')
+    def test_saved_selected_preset_supplies_address_and_its_own_key(self, tmp_path, make_page):
+        directory = str(tmp_path)
+        path = Path(directory) / "selected.json"
+        path.write_text(json.dumps({"print_host": "saved-printer.local:7125", "printhost_apikey": "saved-key"}))
+        page = make_page({"printer_model": "Snapmaker U1", "printhost_apikey": "unrelated-key"}, file=str(path))
+        assert page.selected_target() == ('http://saved-printer.local:7125', 'saved-key')
 
     def test_manual_host_works_with_other_presets_without_reading_their_credentials(self, make_page):
         page = make_page({"printer_model": "Bambu Lab A1", "printhost_apikey": "unrelated-key"},

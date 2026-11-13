@@ -4,7 +4,6 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
-import tempfile
 import tomllib
 import pytest
 from types import SimpleNamespace
@@ -22,20 +21,21 @@ release_api = release.api
 
 
 class TestVersion:
-    def test_conventional_commit_version_selection(self):
-        cases = [
-            ("0.2.1.dev0", "0.2.0", "fix(camera): reconnect", "0.2.1"),
-            ("0.2.1.dev0", "0.2.0", "feat(camera): zoom", "0.3.0"),
-            ("0.2.1.dev0", "0.2.0", "refactor!: change API", "0.3.0"),
-            ("1.2.1.dev0", "1.2.0", "fix: change API\n\nBREAKING CHANGE: old API removed", "2.0.0"),
-            ("0.4.0.dev0", "0.2.0", "fix: reconnect", "0.4.0"),
-            ("0.3.0.dev0", None, "feat: initial plugin", "0.3.0"),
-            ("0.3.1.dev0", "0.3.0", "deps: update websocket", "0.3.1"),
-        ]
-        for current, latest, message, expected in cases:
-            assert release_version(current, latest, [parse_change(message)]) == expected
+    @pytest.mark.parametrize("current,latest,message,expected", [
+        pytest.param("0.2.1.dev0", "0.2.0", "fix(camera): reconnect", "0.2.1", id="patch"),
+        pytest.param("0.2.1.dev0", "0.2.0", "feat(camera): zoom", "0.3.0", id="feature"),
+        pytest.param("0.2.1.dev0", "0.2.0", "refactor!: change API", "0.3.0", id="pre-one-breaking"),
+        pytest.param("1.2.1.dev0", "1.2.0", "fix: change API\n\nBREAKING CHANGE: old API removed", "2.0.0", id="breaking-footer"),
+        pytest.param("0.4.0.dev0", "0.2.0", "fix: reconnect", "0.4.0", id="development-floor"),
+        pytest.param("0.3.0.dev0", None, "feat: initial plugin", "0.3.0", id="initial"),
+        pytest.param("0.3.1.dev0", "0.3.0", "deps: update websocket", "0.3.1", id="dependencies"),
+    ])
+    def test_conventional_commit_version_selection(self, current, latest, message, expected):
+        assert release_version(current, latest, [parse_change(message)]) == expected
+
+    def test_multiple_features_share_one_minor_release(self):
         features = [parse_change("feat: one"), parse_change("feat: two")]
-        assert release_version('0.3.1.dev0', '0.3.0', features) == '0.4.0'
+        assert release_version("0.3.1.dev0", "0.3.0", features) == "0.4.0"
 
     def test_generated_changes_and_final_versions_do_not_open_release_prs(self):
         changes = [parse_change("chore(snapshot): start 0.3.1.dev0"), parse_change("chore(release): prepare 0.3.0")]
@@ -43,34 +43,45 @@ class TestVersion:
         assert release_version('0.3.0', '0.2.0', [parse_change('feat: zoom')]) is None
         assert next_snapshot('0.3.0') == '0.3.1.dev0'
 
-    @pytest.mark.parametrize('title', ['Update things', 'feat:', 'fix: '], ids=['Update-things', 'feat', 'fix'])
-    def test_invalid_versions_and_titles(self, title):
-        for version in ["0.3.0-SNAPSHOT", "0.3", "01.0.0", "0.3.0.dev1"]:
-            with pytest.raises(ValueError):
-                parse_version(version)
+    @pytest.mark.parametrize('version', [
+        pytest.param('0.3.0-SNAPSHOT', id='snapshot-suffix'),
+        pytest.param('0.3', id='missing-patch'),
+        pytest.param('01.0.0', id='leading-zero'),
+        pytest.param('0.3.0.dev1', id='nonzero-dev'),
+    ])
+    def test_invalid_versions(self, version):
+        with pytest.raises(ValueError):
+            parse_version(version)
+
+    @pytest.mark.parametrize('title', [
+        pytest.param('Update things', id='nonconventional'),
+        pytest.param('feat:', id='empty-feature'),
+        pytest.param('fix: ', id='empty-fix'),
+    ])
+    def test_invalid_titles(self, title):
         with pytest.raises(ValueError):
             parse_change(title)
 
 
 class TestFixtureIsolation:
-    def test_release_tools_ignore_conflicting_user_configuration(self):
-        with tempfile.TemporaryDirectory() as directory:
-            uv_config = Path(directory) / "uv.toml"
-            uv_config.write_text('exclude-newer = "1970-01-01T00:00:00Z"\n')
-            git_config = Path(directory) / "gitconfig"
-            git_config.write_text('[commit]\n gpgsign = true\n[gpg]\n program = missing-test-signer\n')
-            with patch.dict(os.environ, UV_CONFIG_FILE=str(uv_config), UV_PYTHON="missing-python",
-                            UV_OFFLINE="true", GIT_CONFIG_GLOBAL=str(git_config),
-                            GIT_CONFIG_COUNT="1", GIT_CONFIG_KEY_0="commit.gpgsign", GIT_CONFIG_VALUE_0="true"):
-                with isolated_release_tree(Path(directory) / "fixture") as fixture:
-                    release.set_version(fixture.root, "0.3.0")
-                    fixture.assert_lock_version()
-                    subprocess.run(["git", "init", "-q"], cwd=fixture.root, check=True)
-                    release.git("add", "pyproject.toml", "uv.lock")
-                    release.git("-c", "user.name=Test", "-c", "user.email=test@example.com",
-                                "commit", "-qm", "isolated fixture")
-                    assert os.environ["UV_PYTHON"] == sys.executable
-                    assert "UV_OFFLINE" not in os.environ
+    def test_release_tools_ignore_conflicting_user_configuration(self, tmp_path):
+        directory = str(tmp_path)
+        uv_config = Path(directory) / "uv.toml"
+        uv_config.write_text('exclude-newer = "1970-01-01T00:00:00Z"\n')
+        git_config = Path(directory) / "gitconfig"
+        git_config.write_text('[commit]\n gpgsign = true\n[gpg]\n program = missing-test-signer\n')
+        with patch.dict(os.environ, UV_CONFIG_FILE=str(uv_config), UV_PYTHON="missing-python",
+                        UV_OFFLINE="true", GIT_CONFIG_GLOBAL=str(git_config),
+                        GIT_CONFIG_COUNT="1", GIT_CONFIG_KEY_0="commit.gpgsign", GIT_CONFIG_VALUE_0="true"):
+            with isolated_release_tree(Path(directory) / "fixture") as fixture:
+                release.set_version(fixture.root, "0.3.0")
+                fixture.assert_lock_version()
+                subprocess.run(["git", "init", "-q"], cwd=fixture.root, check=True)
+                release.git("add", "pyproject.toml", "uv.lock")
+                release.git("-c", "user.name=Test", "-c", "user.email=test@example.com",
+                            "commit", "-qm", "isolated fixture")
+                assert os.environ["UV_PYTHON"] == sys.executable
+                assert "UV_OFFLINE" not in os.environ
 
 
 
@@ -243,7 +254,11 @@ class TestSnapshotMerge:
         release.merge_snapshot(3, snapshot_merge.sha, "0.3.1.dev0")
         assert snapshot_merge.github.call_args.args[:2] == ('pr', 'merge')
 
-    @pytest.mark.parametrize('policy', [[], [{'status': 'completed', 'conclusion': 'failure'}], [{'status': 'completed', 'conclusion': 'skipped'}]], ids=['empty', 'status-completed-conclusion-failure', 'status-completed-conclusion-skipped'])
+    @pytest.mark.parametrize('policy', [
+        pytest.param([], id='empty'),
+        pytest.param([{'status': 'completed', 'conclusion': 'failure'}], id='status-completed-conclusion-failure'),
+        pytest.param([{'status': 'completed', 'conclusion': 'skipped'}], id='status-completed-conclusion-skipped'),
+    ])
     def test_code_success_does_not_bypass_missing_or_failed_policy(self, snapshot_merge, policy):
         snapshot_merge.github.reset_mock()
         snapshot_merge.github.side_effect = lambda *args, **kwargs: (
@@ -253,7 +268,10 @@ class TestSnapshotMerge:
             release.merge_snapshot(3, snapshot_merge.sha, "0.3.1.dev0")
         assert not any((call.args[:2] == ('pr', 'merge') for call in snapshot_merge.github.call_args_list))
 
-    @pytest.mark.parametrize('runs', [[], [{'status': 'completed', 'conclusion': 'failure'}]], ids=['empty', 'status-completed-conclusion-failure'])
+    @pytest.mark.parametrize('runs', [
+        pytest.param([], id='empty'),
+        pytest.param([{'status': 'completed', 'conclusion': 'failure'}], id='status-completed-conclusion-failure'),
+    ])
     def test_failed_or_missing_checks_never_merge(self, snapshot_merge, runs):
         snapshot_merge.github.reset_mock()
         snapshot_merge.github.return_value = json.dumps(runs)
@@ -261,19 +279,17 @@ class TestSnapshotMerge:
             release.merge_snapshot(3, snapshot_merge.sha, "0.3.1.dev0")
         assert not any((call.args[:2] == ('pr', 'merge') for call in snapshot_merge.github.call_args_list))
 
-    def test_release_prs_changed_heads_and_unexpected_files_never_merge(self, snapshot_merge):
-        cases = [lambda: snapshot_merge.pr["head"].update(ref="automation/release"),
-                 lambda: snapshot_merge.pr["head"].update(sha="b" * 40),
-                 lambda: snapshot_merge.pr["head"]["repo"].update(full_name="someone/fork"),
-                 lambda: snapshot_merge.files.append({"filename": "src/plugin.py"})]
-        for mutate in cases:
-            original = json.loads(json.dumps(snapshot_merge.pr))
-            files = snapshot_merge.files.copy()
-            mutate()
-            with pytest.raises(ValueError):
-                release.merge_snapshot(3, snapshot_merge.sha, "0.3.1.dev0")
-            snapshot_merge.github.assert_not_called()
-            snapshot_merge.pr, snapshot_merge.files = original, files
+    @pytest.mark.parametrize("mutate", [
+        pytest.param(lambda state: state.pr["head"].update(ref="automation/release"), id="release-branch"),
+        pytest.param(lambda state: state.pr["head"].update(sha="b" * 40), id="changed-head"),
+        pytest.param(lambda state: state.pr["head"]["repo"].update(full_name="someone/fork"), id="fork"),
+        pytest.param(lambda state: state.files.append({"filename": "src/plugin.py"}), id="source-file"),
+    ])
+    def test_release_prs_changed_heads_and_unexpected_files_never_merge(self, snapshot_merge, mutate):
+        mutate(snapshot_merge)
+        with pytest.raises(ValueError):
+            release.merge_snapshot(3, snapshot_merge.sha, "0.3.1.dev0")
+        snapshot_merge.github.assert_not_called()
 
 
 class FakeGitHub:
@@ -336,15 +352,18 @@ class TestPublication:
             release.publish(publication.root / "dist")
         assert publication.github.assets['orca-snapmaker-u1-camera-plugin_any.py'] == (publication.root / 'dist/orca-snapmaker-u1-camera-plugin_any.py').read_bytes()
 
-    def test_wrong_commit_version_or_digest_is_rejected_before_github_access(self, publication):
+    @pytest.mark.parametrize("key,value", [
+        pytest.param("commit", "b" * 40, id="commit"),
+        pytest.param("version", "0.4.0", id="version"),
+        pytest.param("sha256", {}, id="digest"),
+    ])
+    def test_wrong_commit_version_or_digest_is_rejected_before_github_access(self, publication, key, value):
         path = publication.root / "dist/release-manifest.json"
         original = json.loads(path.read_text())
-        for key, value in [("commit", "b" * 40), ("version", "0.4.0"), ("sha256", {})]:
-            path.write_text(json.dumps(dict(original, **{key: value})))
-            with pytest.raises(ValueError, match='release commit, version, and bytes'):
-                release.publish(publication.root / "dist")
-            assert publication.github.calls == []
-        path.write_text(json.dumps(original))
+        path.write_text(json.dumps(dict(original, **{key: value})))
+        with pytest.raises(ValueError, match="release commit, version, and bytes"):
+            release.publish(publication.root / "dist")
+        assert publication.github.calls == []
 
     def test_modified_artifact_and_rewritten_checksum_still_fail_manifest(self, publication):
         artifact = publication.root / "dist/orca-snapmaker-u1-camera-plugin_any.py"
@@ -400,16 +419,20 @@ class TestPublication:
             release.publish(publication.root / "dist")
         assert publication.github.release is None
 
-    def test_only_exact_same_repository_release_merge_is_used(self, publication):
-        for field, value in [("merge_commit_sha", "b" * 40), ("title", "chore(release): prepare 0.4.0"),
-                             ("merged_at", None)]:
-            original = publication.github.pr[field]
-            publication.github.pr[field] = value
-            with pytest.raises(ValueError, match='exact release commit and version'):
-                release.publish(publication.root / "dist")
-            publication.github.pr[field] = original
+    @pytest.mark.parametrize("field,value", [
+        pytest.param("merge_commit_sha", "b" * 40, id="commit"),
+        pytest.param("title", "chore(release): prepare 0.4.0", id="version"),
+        pytest.param("merged_at", None, id="unmerged"),
+    ])
+    def test_only_exact_same_repository_release_merge_is_used(self, publication, field, value):
+        publication.github.pr[field] = value
+        with pytest.raises(ValueError, match="exact release commit and version"):
+            release.publish(publication.root / "dist")
+        assert publication.github.release is None
+
+    def test_foreign_repository_release_merge_is_rejected(self, publication):
         publication.github.pr["head"]["repo"]["full_name"] = "someone/fork"
-        with pytest.raises(ValueError, match='exact release commit and version'):
+        with pytest.raises(ValueError, match="exact release commit and version"):
             release.publish(publication.root / "dist")
         assert publication.github.release is None
 

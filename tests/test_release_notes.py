@@ -21,16 +21,28 @@ class TestReleaseNotes:
         with pytest.raises(ValueError, match='4000'):
             public_notes(format_notes(text + "x", "history"))
 
-    @pytest.mark.parametrize('text', ['', '  \n ', PUBLIC_PLACEHOLDER, '<!-- editor note -->'], ids=['empty', 'n', 'PUBLIC_PLACEHOLDER', 'editor-note'])
+    @pytest.mark.parametrize('text', [
+        pytest.param('', id='empty'),
+        pytest.param('  \n ', id='whitespace'),
+        pytest.param(PUBLIC_PLACEHOLDER, id='placeholder'),
+        pytest.param('<!-- editor note -->', id='comment-only'),
+    ])
     def test_empty_or_comment_only_notes_are_not_publishable(self, text):
         with pytest.raises(ValueError, match='Write public release notes'):
             public_notes(format_notes(text, "history"))
 
-    def test_malformed_markers_fail_instead_of_losing_human_edits(self):
-        start, end = "<!-- orca:public-notes:start -->", "<!-- orca:public-notes:end -->"
-        for body in [start, end, end + start, start + "text" + start + end, start + end + end]:
-            with pytest.raises(ValueError, match='marker'):
-                public_section(body)
-        assert public_section('Legacy generated description') is None
-        with pytest.raises(ValueError, match='Missing tagged'):
+    @pytest.mark.parametrize('body', [
+        pytest.param('<!-- orca:public-notes:start -->', id='missing-end'),
+        pytest.param('<!-- orca:public-notes:end -->', id='missing-start'),
+        pytest.param('<!-- orca:public-notes:end --><!-- orca:public-notes:start -->', id='reversed'),
+        pytest.param('<!-- orca:public-notes:start -->text<!-- orca:public-notes:start --><!-- orca:public-notes:end -->', id='duplicate-start'),
+        pytest.param('<!-- orca:public-notes:start --><!-- orca:public-notes:end --><!-- orca:public-notes:end -->', id='duplicate-end'),
+    ])
+    def test_malformed_markers_fail_instead_of_losing_human_edits(self, body):
+        with pytest.raises(ValueError, match="marker"):
+            public_section(body)
+
+    def test_legacy_description_has_no_public_notes(self):
+        assert public_section("Legacy generated description") is None
+        with pytest.raises(ValueError, match="Missing tagged"):
             public_notes("Legacy generated description")

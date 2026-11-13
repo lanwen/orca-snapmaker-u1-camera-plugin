@@ -9,7 +9,6 @@ from pathlib import Path
 import signal
 import subprocess
 import sys
-import tempfile
 from types import SimpleNamespace
 import pytest
 from unittest.mock import Mock, call, patch
@@ -50,28 +49,28 @@ class TestPreviewReview:
 
 
 class TestBrowserCleanup:
-    def test_profile_removal_retries_recreated_directory_and_busy_files(self):
-        with tempfile.TemporaryDirectory() as directory:
-            profile = Path(directory) / "profile"
-            profile.mkdir()
-            remove = review_preview.shutil.rmtree
-            attempts = []
+    def test_profile_removal_retries_recreated_directory_and_busy_files(self, tmp_path):
+        directory = str(tmp_path)
+        profile = Path(directory) / "profile"
+        profile.mkdir()
+        remove = review_preview.shutil.rmtree
+        attempts = []
 
-            def delayed_remove(path):
-                attempts.append(path)
-                if len(attempts) == 1:
-                    (profile / "late-write").write_text("child flush")
-                    raise OSError(errno.ENOTEMPTY, "directory was repopulated")
-                if len(attempts) == 2:
-                    raise OSError(errno.EBUSY, "child still releasing profile")
-                remove(path)
+        def delayed_remove(path):
+            attempts.append(path)
+            if len(attempts) == 1:
+                (profile / "late-write").write_text("child flush")
+                raise OSError(errno.ENOTEMPTY, "directory was repopulated")
+            if len(attempts) == 2:
+                raise OSError(errno.EBUSY, "child still releasing profile")
+            remove(path)
 
-            with patch.object(review_preview.shutil, "rmtree", side_effect=delayed_remove), \
-                 patch.object(review_preview.time, "sleep") as pause:
-                _remove_profile(profile)
-            assert len(attempts) == 3
-            assert pause.call_count == 2
-            assert not profile.exists()
+        with patch.object(review_preview.shutil, "rmtree", side_effect=delayed_remove), \
+             patch.object(review_preview.time, "sleep") as pause:
+            _remove_profile(profile)
+        assert len(attempts) == 3
+        assert pause.call_count == 2
+        assert not profile.exists()
 
     def test_profile_removal_reports_exhausted_retry_deadline(self):
         error = OSError(errno.ENOTEMPTY, "persistent writer")
@@ -148,19 +147,19 @@ class TestBrowserCleanup:
                     raise failure
         return stop
 
-    def test_body_failure_stays_primary_when_profile_cleanup_fails(self):
+    def test_body_failure_stays_primary_when_profile_cleanup_fails(self, tmp_path):
         original = AssertionError("CSP assertion failed")
-        with tempfile.TemporaryDirectory() as directory:
-            with pytest.raises(AssertionError) as caught:
-                self.run_context(Path(directory), original)
+        directory = str(tmp_path)
+        with pytest.raises(AssertionError) as caught:
+            self.run_context(Path(directory), original)
         assert caught.value is original
         assert 'Browser cleanup failed' in original.__notes__[0]
         assert 'still busy' in original.__notes__[0]
 
-    def test_cleanup_failure_fails_an_otherwise_successful_context(self):
-        with tempfile.TemporaryDirectory() as directory:
-            with pytest.raises(OSError, match='still busy') as caught:
-                self.run_context(Path(directory))
+    def test_cleanup_failure_fails_an_otherwise_successful_context(self, tmp_path):
+        directory = str(tmp_path)
+        with pytest.raises(OSError, match='still busy') as caught:
+            self.run_context(Path(directory))
         assert 'Browser cleanup failed' in caught.value.__notes__[0]
 
     @contextmanager
@@ -188,42 +187,36 @@ class TestBrowserCleanup:
             state.launch, state.connect, state.stop = launch, connect, stop
             yield state
 
-    def test_cold_browser_becoming_ready_after_ten_seconds_launches_once(self):
-        with tempfile.TemporaryDirectory() as directory:
-            profile = Path(directory)
-            with self.fake_startup(profile, ready_at=12) as state:
-                with browser() as client:
-                    assert isinstance(client, DevTools)
-                    assert client.connection is state.connect.return_value
-                state.launch.assert_called_once()
-                state.stop.assert_called_once_with(state.launch.return_value, state.connect.return_value)
-                assert state.elapsed >= 12
-                assert state.elapsed < 12.1
-                assert not profile.exists()
+    def test_cold_browser_becoming_ready_after_ten_seconds_launches_once(self, tmp_path):
+        directory = str(tmp_path)
+        profile = Path(directory)
+        with self.fake_startup(profile, ready_at=12) as state:
+            with browser() as client:
+                assert isinstance(client, DevTools)
+                assert client.connection is state.connect.return_value
+            state.launch.assert_called_once()
+            state.stop.assert_called_once_with(state.launch.return_value, state.connect.return_value)
+            assert state.elapsed >= 12
+            assert state.elapsed < 12.1
+            assert not profile.exists()
 
-    def test_browser_that_never_becomes_ready_has_bounded_startup_and_cleanup(self):
-        with tempfile.TemporaryDirectory() as directory:
-            profile = Path(directory)
-            with self.fake_startup(profile, ready_at=None) as state:
-                with pytest.raises(RuntimeError, match="startup timed out after 30s"):
-                    with browser():
-                        pytest.fail("Browser without a DevTools port cannot become ready")
-                assert state.elapsed >= 30
-                assert state.elapsed < 30.1
-                state.launch.assert_called_once()
-                state.connect.assert_not_called()
-                state.stop.assert_called_once_with(state.launch.return_value, None)
-                assert not profile.exists()
+    def test_browser_that_never_becomes_ready_has_bounded_startup_and_cleanup(self, tmp_path):
+        directory = str(tmp_path)
+        profile = Path(directory)
+        with self.fake_startup(profile, ready_at=None) as state:
+            with pytest.raises(RuntimeError, match="startup timed out after 30s"):
+                with browser():
+                    pytest.fail("Browser without a DevTools port cannot become ready")
+            assert state.elapsed >= 30
+            assert state.elapsed < 30.1
+            state.launch.assert_called_once()
+            state.connect.assert_not_called()
+            state.stop.assert_called_once_with(state.launch.return_value, None)
+            assert not profile.exists()
 
-    def test_browser_exit_reports_executable_return_code_and_output(self):
-        with tempfile.TemporaryDirectory() as directory, \
-             patch.object(review_preview.tempfile, "mkdtemp", return_value=directory), \
-             patch.object(review_preview, "find_browser", return_value="/usr/bin/google-chrome"), \
-             patch.object(review_preview.subprocess, "Popen") as launch, \
-             patch.object(review_preview, "_stop_browser") as stop, \
-             patch.object(review_preview, "_remove_profile") as remove, \
-             patch.object(review_preview.time, "monotonic", return_value=0), \
-             patch.object(review_preview.time, "sleep") as pause:
+    def test_browser_exit_reports_executable_return_code_and_output(self, tmp_path):
+        directory = str(tmp_path)
+        with patch.object(review_preview.tempfile, 'mkdtemp', return_value=directory), patch.object(review_preview, 'find_browser', return_value='/usr/bin/google-chrome'), patch.object(review_preview.subprocess, 'Popen') as launch, patch.object(review_preview, '_stop_browser') as stop, patch.object(review_preview, '_remove_profile') as remove, patch.object(review_preview.time, 'monotonic', return_value=0), patch.object(review_preview.time, 'sleep') as pause:
             def exited(*args, **kwargs):
                 kwargs["stderr"].write(b"browser startup diagnostic")
                 return Mock(poll=Mock(return_value=23))
@@ -236,12 +229,10 @@ class TestBrowserCleanup:
             stop.assert_called_once()
             remove.assert_called_once_with(directory)
 
-    def test_startup_failure_stays_primary_and_cleanup_is_attempted(self):
+    def test_startup_failure_stays_primary_and_cleanup_is_attempted(self, tmp_path):
         original = FileNotFoundError("chrome missing")
-        with tempfile.TemporaryDirectory() as directory, \
-             patch.object(review_preview.tempfile, "mkdtemp", return_value=directory), \
-             patch.object(review_preview, "find_browser", side_effect=original), \
-             patch.object(review_preview, "_remove_profile", side_effect=OSError(errno.ENOTEMPTY, "still busy")) as remove:
+        directory = str(tmp_path)
+        with patch.object(review_preview.tempfile, 'mkdtemp', return_value=directory), patch.object(review_preview, 'find_browser', side_effect=original), patch.object(review_preview, '_remove_profile', side_effect=OSError(errno.ENOTEMPTY, 'still busy')) as remove:
             with pytest.raises(FileNotFoundError) as caught:
                 with browser():
                     pytest.fail('Startup must fail before yielding')
