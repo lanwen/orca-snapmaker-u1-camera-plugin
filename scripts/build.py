@@ -11,7 +11,7 @@ import tomllib
 ROOT = Path(__file__).resolve().parents[1]
 PAGE_MARKER = 'PAGE = "__CAMERA_HTML__"'
 ICON_MARKER = 'ICON = "__CAMERA_SVG__"'
-HTTP_IMPORT = 'from http_client import HttpClient, LightCommand, ObjectQuery, printer_url'
+HTTP_IMPORT = 'from http_client import AccessDenied, HttpClient, InvalidResponse, LightCommand, ObjectQuery, printer_url'
 
 
 def build(output_dir=ROOT / "dist", release_tag=None):

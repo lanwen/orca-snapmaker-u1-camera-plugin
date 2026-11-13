@@ -17,6 +17,14 @@ import websocket
 from websocket._abnf import frame_buffer
 
 
+class AccessDenied(RuntimeError):
+    """The printer rejected HTTP authentication or LAN access."""
+
+
+class InvalidResponse(RuntimeError):
+    """The printer response cannot safely supply the requested readings."""
+
+
 @dataclass(frozen=True)
 class ObjectQuery:
     name: str
@@ -280,7 +288,12 @@ class HttpClient:
         query = "&".join(quote(obj.name, safe="") +
                          ("=" + quote(",".join(obj.fields), safe=",") if obj.fields else "")
                          for obj in objects)
-        return self._query("/printer/objects/query?" + query)["status"]
+        result = self._query("/printer/objects/query?" + query)
+        status = result.get("status") if isinstance(result, dict) else None
+        if not isinstance(status, dict) or any(value is not None and not isinstance(value, dict)
+                                               for value in status.values()):
+            raise InvalidResponse("Printer returned invalid status objects.")
+        return status
 
     def file_metadata(self, filename: str) -> dict:
         return self._query("/server/files/metadata?filename=" + quote(filename, safe=""))
@@ -315,8 +328,12 @@ class HttpClient:
 
     def _query(self, path, payload=None):
         result = self.json(path, payload)
+        if not isinstance(result, dict):
+            raise InvalidResponse("Printer returned an invalid response.")
         if "error" in result:
             raise RuntimeError("Printer rejected the request.")
+        if "result" not in result:
+            raise InvalidResponse("Printer returned an invalid response.")
         return result["result"]
 
     def request(self, path, payload=None, limit=512_000):
@@ -341,19 +358,24 @@ class HttpClient:
                 response = conn.getresponse()
                 try:
                     if response.status in (401, 403):
-                        raise RuntimeError("Printer denied access. Check its API key and LAN permissions.")
+                        raise AccessDenied("Printer denied access. Check its API key and LAN permissions.")
                     if response.status != 200:
                         raise RuntimeError("Printer returned HTTP %s" % response.status)
                     data = response.read(limit + 1)
                     operation.remaining()
                     if len(data) > limit:
-                        raise RuntimeError("Printer response is too large.")
+                        raise InvalidResponse("Printer response is too large.")
                     return data, response.getheader("Last-Modified")
                 finally:
                     response.close()
+        except http.client.HTTPException:
+            raise InvalidResponse("Printer returned an invalid HTTP response.") from None
         finally:
             conn.close()
 
     def json(self, path, payload=None):
         data, _ = self.request(path, payload)
-        return json.loads(data)
+        try:
+            return json.loads(data)
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            raise InvalidResponse("Printer returned invalid JSON.") from None

@@ -4,7 +4,11 @@
   import FanSpeed from './FanSpeed.svelte';
   import Toolheads from './Toolheads.svelte';
   import PrintState from './PrintState.svelte';
-  let { stats, receivedAt }: { stats: PrintStats | null; receivedAt: number } = $props();
+  let {
+    stats,
+    receivedAt,
+    statusError = '',
+  }: { stats: PrintStats | null; receivedAt: number; statusError?: string } = $props();
   const number = (value: unknown): value is number =>
     typeof value === 'number' && Number.isFinite(value) && value >= 0;
   const reportedFan = (fan?: Fan) =>
@@ -121,7 +125,7 @@
   );
   const message = $derived(
     missing
-      ? 'Waiting for status'
+      ? statusError || 'Waiting for status'
       : standby
         ? 'No print running'
         : preparing

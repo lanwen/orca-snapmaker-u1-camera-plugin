@@ -485,6 +485,64 @@ test('idle and missing status never present old job details as current', () => {
   assert.equal(visible(field('elapsed-value')), false);
 });
 
+for (const [category, guidance] of [
+  ['timeout', 'Status timed out. Check the printer connection.'],
+  ['access_denied', 'Access denied. Check the API key and LAN permissions.'],
+  ['invalid_response', 'Invalid status response. Check the printer address.'],
+  ['unreachable', 'Status unavailable. Check the printer address and connection.'],
+  ['untrusted-secret', 'Status unavailable. Check the printer address and connection.'],
+  ['__proto__', 'Status unavailable. Check the printer address and connection.'],
+  [undefined, 'Status unavailable. Check the printer address and connection.'],
+]) {
+  test(`status failure ${category} shows safe guidance and recovers independently of the camera`, () => {
+    start();
+    publish({ generation: 1, stats: metrics, light: true });
+    publish({
+      generation: 1,
+      printer: 'Status unavailable',
+      stats: null,
+      light: null,
+      status_error: category,
+    });
+    assert.equal(visible(field('stats-message')), true);
+    assert.equal(field('stats-message').textContent, guidance);
+    assert.equal(visible(field('hardware-stat')), false);
+    assert.equal(light().disabled, true);
+    publish({ generation: 1, image: 'still live' });
+    settleFrame();
+    publish({ generation: 1, camera: 'Camera unavailable', failed: true });
+    assert.equal(field('stats-message').textContent, guidance);
+    assert.doesNotMatch(document.body.textContent!, /untrusted-secret|__proto__/);
+    publish({ generation: 1, stats: metrics, light: false });
+    assert.equal(visible(field('stats-message')), false);
+    assert.equal(visible(field('hardware-stat')), true);
+    assert.equal(light().disabled, false);
+  });
+}
+
+test('status failures reset on selection and target changes and reject old generations', () => {
+  selectPrinter();
+  publish({ generation: 1, stats: null, status_error: 'timeout' });
+  publish({ type: 'selection_changed' });
+  assert.equal(visible(field('stats-message')), false);
+  assert.doesNotMatch(field('stats-message').textContent!, /timed out/);
+  publish({ generation: 1, stats: null, status_error: 'access_denied' });
+  assert.equal(
+    visible(field('stats-message')),
+    false,
+    'Selection rejects the previous generation before the next target arrives',
+  );
+  selectPrinter(2, 'Next printer');
+  publish({ generation: 2, stats: metrics, light: true });
+  publish({ generation: 1, stats: null, light: null, status_error: 'access_denied' });
+  assert.equal(visible(field('hardware-stat')), true);
+  assert.equal(light().disabled, false);
+  publish({ generation: 2, stats: null, status_error: 'timeout' });
+  selectPrinter(3, 'Third printer');
+  assert.equal(visible(field('stats-message')), false);
+  assert.doesNotMatch(field('stats-message').textContent!, /timed out/);
+});
+
 test('unknown or invalid measurements stay unknown rather than becoming NaN or zero progress', () => {
   selectPrinter();
   publish({

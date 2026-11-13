@@ -5,6 +5,19 @@ type StreamState =
   | 'waiting' // Connecting or interrupted for at most five seconds; show an orange counter.
   | 'error'; // Interrupted for more than five seconds; show the reason with a red outline.
 
+function statusGuidance(category: string | undefined): string {
+  switch (category) {
+    case 'timeout': // The live status operation exceeded its deadline.
+      return 'Status timed out. Check the printer connection.';
+    case 'access_denied': // The printer denied authentication or LAN access.
+      return 'Access denied. Check the API key and LAN permissions.';
+    case 'invalid_response': // The response cannot supply valid printer readings.
+      return 'Invalid status response. Check the printer address.';
+    default: // Unreachable, unknown and missing categories use safe generic guidance.
+      return 'Status unavailable. Check the printer address and connection.';
+  }
+}
+
 export class Camera {
   playing = $state(false);
   supported = $state(false);
@@ -19,6 +32,7 @@ export class Camera {
   issue = $state('');
   notice = $state('');
   lightError = $state('');
+  statusError = $state('');
   private noticeAt: number | null = null;
   seconds = $derived(this.issueAt === null ? 0 : Math.floor((this.now - this.issueAt) / 1000));
   streamState: StreamState = $derived(
@@ -128,7 +142,9 @@ export class Camera {
   private receive = (data: HostMessage) => {
     if (!this.active || document.hidden) return;
     if (data.type === 'selection_changed') {
+      this.generation = -1;
       this.setStats();
+      this.statusError = '';
       this.stop();
       this.notice = this.lightError = '';
       this.noticeAt = null;
@@ -154,6 +170,7 @@ export class Camera {
       }
       if (this.target !== data.target) {
         this.setStats();
+        this.statusError = '';
         this.printer = 'Connecting';
         this.notice = this.lightError = '';
         this.noticeAt = null;
@@ -190,7 +207,6 @@ export class Camera {
     }
     if ('light_error' in data) this.lightError = data.light_error ?? '';
     if (data.printer) this.printer = data.printer;
-    if ('stats' in data) this.setStats(data.stats, true);
     if ('light' in data) {
       this.light = data.light ?? null;
       this.lightDisabled = this.light === null;
@@ -198,6 +214,16 @@ export class Camera {
       if (this.light !== null) {
         this.notice = '';
         this.noticeAt = null;
+      }
+    }
+    if ('stats' in data || 'status_error' in data) {
+      const failed = 'status_error' in data || !data.stats || data.stats.state === 'unavailable';
+      this.setStats(failed ? null : data.stats, true);
+      this.statusError = failed ? statusGuidance(data.status_error) : '';
+      if (failed) {
+        this.light = null;
+        this.lightDisabled = true;
+        this.lightAt = null;
       }
     }
     if (data.failed && data.camera) {

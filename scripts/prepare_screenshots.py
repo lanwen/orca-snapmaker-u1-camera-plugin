@@ -185,6 +185,7 @@ function publishScreenshot() {
   screenshotHandler({generation, printer:screenshotLabels[screenshotFixtures[screenshotState].state],
     light:offline ? null : screenshotLight, light_error:screenshotState === 'light-error' ? 'Could not change light — try again' : '',
     stats:screenshotFixtures[screenshotState],
+    ...(screenshotState === 'unavailable' ? {status_error:'timeout'} : {}),
     image:!needsImage || offline || screenshotState === 'connecting' || (interrupted && !changed) ? undefined : screenshotImage, fps:4.4, frozen:false});
   if (offline) {
     screenshotHandler({generation, failed:true, camera:'Cannot reach printer — check its address and connection'});

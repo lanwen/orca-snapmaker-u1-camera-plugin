@@ -90,7 +90,11 @@
     </div>
   </div>
   <footer>
-    <PrintStats stats={camera?.stats ?? null} receivedAt={camera?.statsAt ?? 0} />
+    <PrintStats
+      stats={camera?.stats ?? null}
+      receivedAt={camera?.statsAt ?? 0}
+      statusError={camera?.statusError ?? ''}
+    />
     <div id="notice" role="status" hidden={!camera?.notice}>{camera?.notice}</div>
     <div class="stream-controls" hidden={!camera?.playing}>
       <div
