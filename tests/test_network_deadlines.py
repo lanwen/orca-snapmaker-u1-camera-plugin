@@ -71,6 +71,8 @@ class DeadlineTests(unittest.TestCase):
                 thread.start()
                 with patch.object(transport, 'NETWORK_TIMEOUT', .15):
                     self.assert_bounded(client.start_monitor)
+                self.assertIsNone(client.ws)
+                self.assertFalse(client.closed)
                 client.close()
                 thread.join(1)
                 self.assertFalse(thread.is_alive())

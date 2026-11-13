@@ -317,13 +317,34 @@ class ClientTests(unittest.TestCase):
         self.assertEqual(connect.call_args.kwargs["redirect_limit"], 0)
         self.assertIs(connect.call_args.kwargs["class_"], plugin.CameraWebSocket)
 
-    def test_camera_rejection(self):
-        printer = plugin.Printer(self.address)
-        ws = Mock()
-        ws.recv.return_value = json.dumps({"id": 1, "error": {"message": "denied"}})
-        with patch.object(plugin.websocket, "create_connection", return_value=ws), \
-                self.assertRaisesRegex(RuntimeError, "rejected"):
-            printer.start_monitor()
+    def test_camera_failure_replaces_socket_and_preserves_status(self):
+        for failure in (RuntimeError("rejected"), OSError("disconnected")):
+            with self.subTest(failure=failure):
+                printer = plugin.Printer(self.address)
+                self.addCleanup(printer.close)
+                failed, recovered = Mock(), Mock()
+                if isinstance(failure, RuntimeError):
+                    failed.recv.return_value = json.dumps({"id": 1, "error": {"message": "denied"}})
+                else:
+                    failed.recv.side_effect = failure
+                recovered.recv.return_value = json.dumps({"id": 2, "result": {}})
+                sockets = iter((failed, recovered))
+
+                def connect_camera(url, **kwargs):
+                    ws = next(sockets)
+                    ws.sock = kwargs["socket"]
+                    ws.close.side_effect = lambda timeout: ws.sock.close()
+                    return ws
+
+                with patch.object(plugin.websocket, "create_connection", side_effect=connect_camera) as connect:
+                    with self.assertRaises(type(failure)):
+                        printer.start_monitor()
+                    self.assertIsNone(printer.http.ws)
+                    failed.close.assert_called_once_with(timeout=0)
+                    self.assertEqual(printer.status()["printer"], "standby")
+                    printer.start_monitor()
+                self.assertEqual(connect.call_count, 2)
+                self.assertIs(printer.http.ws, recovered)
 
     def test_monitor_reuses_connection_matches_ids_and_closes_once(self):
         printer = plugin.Printer(self.address)
@@ -727,6 +748,53 @@ def eventually(predicate):
 
 
 class WorkerScheduleTests(unittest.TestCase):
+    def test_camera_failures_preserve_status_cadence_and_recover(self):
+        for failure in ("activation", "snapshot"):
+            with self.subTest(failure=failure):
+                now = [100.0]
+                messages, status_times, camera_times = [], [], []
+                client = Mock()
+
+                def status():
+                    self.assertFalse(client.close.called)
+                    status_times.append(now[0])
+                    return {"printer": "standby"}
+
+                def camera():
+                    camera_times.append(now[0])
+                    if len(camera_times) <= 3:
+                        raise OSError("http://printer?token=secret")
+                    return {"image": "frame"}
+
+                client.status.side_effect = status
+                if failure == "activation":
+                    client.start_monitor.side_effect = camera
+                    client.snapshot.return_value = {"image": "frame"}
+                else:
+                    client.snapshot.side_effect = camera
+
+                def wait(timeout):
+                    now[0] += .25
+                    monitor.update(("printer", ""), playing=True)
+                    if now[0] >= 110:
+                        monitor.closed = True
+
+                with patch.object(plugin.threading.Thread, "start"), \
+                        patch.object(plugin.time, "monotonic", side_effect=lambda: now[0]):
+                    factory = Mock(return_value=client)
+                    monitor = plugin.Monitor(messages.append, factory)
+                    monitor.condition.wait = wait
+                    monitor.update(("printer", ""), playing=True)
+                    monitor.run()
+                self.assertEqual(status_times, [100, 103, 106, 109])
+                self.assertEqual(sum(m.get("printer") == "standby" for m in messages), 4)
+                self.assertEqual(camera_times, [100, 103, 106, 109])
+                self.assertTrue(any(m.get("image") == "frame" for m in messages))
+                self.assertEqual(sum(m.get("failed", False) for m in messages), 3)
+                self.assertNotIn("secret", str(messages))
+                factory.assert_called_once()
+                client.close.assert_called_once()
+
     def test_camera_activates_immediately_and_renews_after_sixty_seconds(self):
         now = [100]
         client = Mock()
@@ -770,14 +838,16 @@ class WorkerTests(unittest.TestCase):
         self.addCleanup(self.monitor.close)
 
     def test_target_change_and_unload_interrupt_active_http(self):
-        for unload in (False, True):
-            with self.subTest(unload=unload):
+        for operation, unload in ((operation, unload) for operation in
+                                  ("status", "start_monitor", "snapshot") for unload in (False, True)):
+            with self.subTest(operation=operation, unload=unload):
                 local, peer = socket.socketpair()
                 entered = threading.Event()
                 http = plugin.HttpClient("http://printer")
                 first, second = Mock(), Mock()
                 first.close.side_effect = http.close
-                first.status.side_effect = lambda: http.request("/")
+                first.status.return_value = {}
+                getattr(first, operation).side_effect = lambda: http.request("/")
                 second.status.return_value = {}
                 clients = iter((first, second))
                 monitor = plugin.Monitor(Mock(), lambda *args: next(clients))
@@ -786,7 +856,7 @@ class WorkerTests(unittest.TestCase):
                     return operation.track(local)
                 try:
                     with patch.object(plugin.NetworkOperation, "connect", connect):
-                        monitor.update(("first", ""))
+                        monitor.update(("first", ""), playing=True)
                         self.assertTrue(entered.wait(1))
                         started = time.monotonic()
                         if unload:
