@@ -13,7 +13,7 @@ import time
 
 import orca
 
-from http_client import HttpClient, LightCommand, ObjectQuery, printer_url
+from http_client import AccessDenied, HttpClient, InvalidResponse, LightCommand, ObjectQuery, printer_url
 
 
 class UnsupportedPrinter(ValueError):
@@ -279,6 +279,16 @@ class Printer:
         self.http.close()
 
 
+def status_failure(error):
+    if isinstance(error, TimeoutError):
+        return "timeout"  # The live status operation exceeded its deadline.
+    if isinstance(error, AccessDenied):
+        return "access_denied"  # HTTP authentication or LAN access was denied.
+    if isinstance(error, (InvalidResponse, ValueError, TypeError, KeyError, AttributeError)):
+        return "invalid_response"  # Parsing or expected status data was invalid.
+    return "unreachable"  # Network and unexpected failures use safe generic guidance.
+
+
 class Monitor:
     """One worker; short page leases prevent abandoned views from keeping cameras awake."""
 
@@ -387,8 +397,9 @@ class Monitor:
                     if time.monotonic() >= status_at:
                         try:
                             self.emit(generation, client.status())
-                        except Exception:
-                            self.emit(generation, {"printer": "Status unavailable", "light": None, "stats": None})
+                        except Exception as error:
+                            self.emit(generation, {"printer": "Status unavailable", "light": None, "stats": None,
+                                                   "status_error": status_failure(error)})
                         else:
                             if self.current(generation):
                                 client.refresh_metadata()
@@ -413,7 +424,7 @@ class Monitor:
                         self.emit(generation, client.snapshot())
                 except Exception as error:
                     # Do not expose exception URLs/headers, which can contain credentials.
-                    message = str(error) if isinstance(error, RuntimeError) else "Cannot reach printer — check its address, API key, and connection"
+                    message = str(error) if isinstance(error, RuntimeError) else "Cannot reach the printer. Check its address and connection."
                     self.emit(generation, {"camera": message, "failed": True})
                     keepalive_at = 0
                     with self.condition:

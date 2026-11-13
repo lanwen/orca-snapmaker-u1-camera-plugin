@@ -46,10 +46,13 @@ class Endpoint(BaseHTTPRequestHandler):
     modified = "Thu, 01 Jan 1970 00:00:00 GMT"
     requests = []
     payloads = []
+    status_code = 200
+    status_body = None
 
     def do_GET(self):
         self.requests.append((self.path, self.headers.get("X-Api-Key")))
-        self.send_response(302 if self.path == "/redirect" else 401 if self.path == "/denied" else 200)
+        self.send_response(self.status_code if self.path.startswith("/printer/objects/query?") else
+                           302 if self.path == "/redirect" else 401 if self.path == "/denied" else 200)
         if self.path == "/redirect":
             self.send_header("Location", "http://example.com")
         self.send_header("Last-Modified", self.modified)
@@ -58,6 +61,8 @@ class Endpoint(BaseHTTPRequestHandler):
             self.wfile.write(b"\xff\xd8test-jpeg")
         elif self.path == "/large":
             self.wfile.write(b"123456")
+        elif self.path.startswith("/printer/objects/query?") and self.status_body is not None:
+            self.wfile.write(self.status_body)
         elif self.path.startswith("/printer/objects/query?"):
             self.wfile.write(json.dumps({"result": {"status": {
                 "print_stats": {"state": "standby"},
@@ -249,6 +254,74 @@ class ClientTests(unittest.TestCase):
         cls.server.server_close()
         cls.thread.join()
 
+    def status_message(self, printer):
+        messages, arrived = [], threading.Event()
+
+        def publish(message):
+            if "stats" in message:
+                messages.append(message)
+                arrived.set()
+
+        monitor = plugin.Monitor(publish, lambda *target: printer)
+        try:
+            monitor.update((self.address, "secret"), playing=False)
+            self.assertTrue(arrived.wait(1))
+            return messages[0]
+        finally:
+            monitor.close()
+
+    def test_status_response_failures_use_safe_categories(self):
+        for code, body, category in [
+                (401, b'private-response-secret', "access_denied"),
+                (403, b'private-response-secret', "access_denied"),
+                (500, b'private-response-secret', "unreachable"),
+                (200, b'{"secret":', "invalid_response"),
+                (200, b'\xffsecret', "invalid_response"),
+                (200, b'[]', "invalid_response"),
+                (200, b'{}', "invalid_response"),
+                (200, b'{"result":[]}', "invalid_response"),
+                (200, b'{"result":{"status":[]}}', "invalid_response"),
+                (200, b'{"result":{"status":{"print_stats":"secret"}}}', "invalid_response"),
+                (200, b'{"result":{"status":{"print_stats":{"info":["secret"]}}}}', "invalid_response"),
+                (200, b'x' * 512_001, "invalid_response")]:
+            with self.subTest(code=code, shape=body[:30]), \
+                    patch.object(Endpoint, "status_code", code), \
+                    patch.object(Endpoint, "status_body", body):
+                message = self.status_message(plugin.Printer(self.address, "secret"))
+                self.assertEqual(message.get("status_error"), category)
+                self.assertIsNone(message["stats"])
+                self.assertIsNone(message["light"])
+                self.assertNotIn("secret", str(message))
+                self.assertNotIn(self.address, str(message))
+
+    def test_status_deadline_uses_timeout_category(self):
+        local, peer = socket.socketpair()
+        printer = plugin.Printer("http://printer")
+
+        def connect(operation, *args):
+            return operation.track(local)
+
+        try:
+            with patch.object(plugin.NetworkOperation, "connect", connect), \
+                    patch.object(plugin, "NETWORK_TIMEOUT", .1):
+                message = self.status_message(printer)
+            self.assertEqual(message["status_error"], "timeout")
+        finally:
+            printer.close()
+            peer.close()
+
+    def test_status_timeout_network_and_unexpected_failures_are_safe(self):
+        for error, category in [(TimeoutError("url?token=secret"), "timeout"),
+                                (OSError("Authorization: secret"), "unreachable"),
+                                (RuntimeError("http://user:secret@printer"), "unreachable"),
+                                (Exception("private-response-secret"), "unreachable")]:
+            with self.subTest(error=type(error).__name__):
+                printer = plugin.Printer(self.address)
+                printer.http.query_objects = Mock(side_effect=error)
+                message = self.status_message(printer)
+                self.assertEqual(message.get("status_error"), category)
+                self.assertNotIn("secret", str(message))
+
     def test_address_validation(self):
         self.assertEqual(plugin.printer_url("printer.local:7125"), "http://printer.local:7125")
         for value in ["", "file:///tmp/a", "http://user:secret@printer", "http://printer/path", "http://printer?token=x", "http://printer:99999"]:
@@ -301,8 +374,16 @@ class ClientTests(unittest.TestCase):
         self.assertEqual(Endpoint.requests[-1], ("/echo", "secret", "application/json"))
 
     def test_http_denied_access_has_a_clear_error(self):
-        with self.assertRaisesRegex(RuntimeError, "denied access"):
-            plugin.HttpClient(self.address).request("/denied")
+        for code in (401, 403):
+            for api_key in (None, "secret"):
+                with self.subTest(code=code, configured=bool(api_key)), \
+                        patch.object(Endpoint, "status_code", code), \
+                        patch.object(Endpoint, "status_body", b"private-response-secret"):
+                    with self.assertRaisesRegex(plugin.AccessDenied, "denied access") as raised:
+                        plugin.HttpClient(self.address, api_key).request("/printer/objects/query?")
+                    self.assertEqual(str(raised.exception),
+                                     "The printer denied access. Check its connection settings.")
+                    self.assertEqual(Endpoint.requests[-1][1], api_key)
 
     def test_keepalive_and_oneshot_authentication(self):
         ws = Mock()
@@ -833,6 +914,7 @@ class WorkerMetadataTests(unittest.TestCase):
                 self.assertEqual([m["stats"]["planned_total"] for m in messages],
                                  [None, None if failure else 2081])
                 self.assertNotIn("secret", str(messages))
+                self.assertTrue(all("status_error" not in m for m in messages))
                 printer.http.file_metadata.assert_called_once_with("part.gcode")
 
     def test_target_change_and_unload_cancel_blocked_metadata(self):
@@ -1172,6 +1254,18 @@ class WorkerTests(unittest.TestCase):
         client.set_light.assert_called_once_with(True)
         client.start_monitor.assert_not_called()
         client.snapshot.assert_not_called()
+
+    def test_status_failure_does_not_interrupt_camera(self):
+        client = Mock()
+        client.status.side_effect = TimeoutError("token=secret")
+        client.snapshot.return_value = {"image": "frame"}
+        self.monitor.client_factory = lambda *target: client
+        self.monitor.update(("printer", ""), playing=True)
+        eventually(lambda: any("image" in m for m in self.messages))
+        self.assertTrue(any(m.get("status_error") == "timeout" for m in self.messages))
+        self.assertFalse(any(m.get("failed") for m in self.messages))
+        self.assertNotIn("secret", str(self.messages))
+        client.refresh_metadata.assert_not_called()
 
     def test_light_failure_does_not_interrupt_camera_or_expose_exception_details(self):
         generation = self.monitor.update(("printer", ""), playing=True)

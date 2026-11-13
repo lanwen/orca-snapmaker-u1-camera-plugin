@@ -9,6 +9,8 @@ class CSPHost: NSObject, WKNavigationDelegate {
     func start(_ page: String) throws {
         let config = WKWebViewConfiguration()
         config.userContentController.addUserScript(WKUserScript(source: """
+            // This offline active-page harness must not depend on WindowServer occlusion.
+            Object.defineProperty(document, 'hidden', {get: () => false});
             window.cspBridgeMessages = [];
             window.orca = {
                 onMessage(callback) { window.cspReceive = callback; },
