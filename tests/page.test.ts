@@ -487,7 +487,7 @@ test('idle and missing status never present old job details as current', () => {
 
 for (const [category, guidance] of [
   ['timeout', 'Status timed out. Check the printer connection.'],
-  ['access_denied', 'Access denied. Check the API key and LAN permissions.'],
+  ['access_denied', 'The printer denied access. Check its connection settings.'],
   ['invalid_response', 'Invalid status response. Check the printer address.'],
   ['unreachable', 'Status unavailable. Check the printer address and connection.'],
   ['untrusted-secret', 'Status unavailable. Check the printer address and connection.'],

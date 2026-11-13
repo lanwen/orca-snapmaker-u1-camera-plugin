@@ -424,7 +424,7 @@ class Monitor:
                         self.emit(generation, client.snapshot())
                 except Exception as error:
                     # Do not expose exception URLs/headers, which can contain credentials.
-                    message = str(error) if isinstance(error, RuntimeError) else "Cannot reach printer — check its address, API key, and connection"
+                    message = str(error) if isinstance(error, RuntimeError) else "Cannot reach the printer. Check its address and connection."
                     self.emit(generation, {"camera": message, "failed": True})
                     keepalive_at = 0
                     with self.condition:

@@ -358,7 +358,7 @@ class HttpClient:
                 response = conn.getresponse()
                 try:
                     if response.status in (401, 403):
-                        raise AccessDenied("Printer denied access. Check its API key and LAN permissions.")
+                        raise AccessDenied("The printer denied access. Check its connection settings.")
                     if response.status != 200:
                         raise RuntimeError("Printer returned HTTP %s" % response.status)
                     data = response.read(limit + 1)

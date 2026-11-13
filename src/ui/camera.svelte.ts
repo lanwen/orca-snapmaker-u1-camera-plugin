@@ -10,7 +10,7 @@ function statusGuidance(category: string | undefined): string {
     case 'timeout': // The live status operation exceeded its deadline.
       return 'Status timed out. Check the printer connection.';
     case 'access_denied': // The printer denied authentication or LAN access.
-      return 'Access denied. Check the API key and LAN permissions.';
+      return 'The printer denied access. Check its connection settings.';
     case 'invalid_response': // The response cannot supply valid printer readings.
       return 'Invalid status response. Check the printer address.';
     default: // Unreachable, unknown and missing categories use safe generic guidance.

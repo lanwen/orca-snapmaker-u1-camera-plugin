@@ -374,8 +374,16 @@ class ClientTests(unittest.TestCase):
         self.assertEqual(Endpoint.requests[-1], ("/echo", "secret", "application/json"))
 
     def test_http_denied_access_has_a_clear_error(self):
-        with self.assertRaisesRegex(RuntimeError, "denied access"):
-            plugin.HttpClient(self.address).request("/denied")
+        for code in (401, 403):
+            for api_key in (None, "secret"):
+                with self.subTest(code=code, configured=bool(api_key)), \
+                        patch.object(Endpoint, "status_code", code), \
+                        patch.object(Endpoint, "status_body", b"private-response-secret"):
+                    with self.assertRaisesRegex(plugin.AccessDenied, "denied access") as raised:
+                        plugin.HttpClient(self.address, api_key).request("/printer/objects/query?")
+                    self.assertEqual(str(raised.exception),
+                                     "The printer denied access. Check its connection settings.")
+                    self.assertEqual(Endpoint.requests[-1][1], api_key)
 
     def test_keepalive_and_oneshot_authentication(self):
         ws = Mock()
