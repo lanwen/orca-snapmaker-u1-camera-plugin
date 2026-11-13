@@ -558,6 +558,75 @@ test('light toggles are host-confirmed and work without starting playback', () =
   );
 });
 
+for (const confirmed of [false, true]) {
+  for (const withStats of [false, true]) {
+    test(`light ${confirmed} expires and recovers with ${withStats ? 'combined' : 'light-only'} updates`, () => {
+      selectPrinter();
+      publish({ generation: 1, light: confirmed, ...(withStats ? { stats: metrics } : {}) });
+      assert.equal(light().disabled, false);
+      advance(6000);
+      click(button('play'));
+      publish({ generation: 1, image: 'frame' });
+      settleFrame();
+      selectPrinter();
+      publish({ generation: 1, stats: metrics });
+      advance(5000);
+      assert.equal(light().disabled, true, 'Unrelated messages cannot renew the light reading');
+      assert.equal(
+        light().getAttribute('aria-checked'),
+        'false',
+        'Expired light has no current value',
+      );
+      const commands = sent.filter((message) => message.type === 'light').length;
+      click(light());
+      assert.equal(sent.filter((message) => message.type === 'light').length, commands);
+      publish({ generation: 0, light: confirmed });
+      assert.equal(light().disabled, true, 'An old generation cannot restore the control');
+      publish({ generation: 1, light: !confirmed });
+      assert.equal(light().disabled, false);
+      assert.equal(light().getAttribute('aria-checked'), String(!confirmed));
+      click(light());
+      assert.deepEqual(lastMessage(), { type: 'light', enabled: confirmed });
+    });
+  }
+}
+
+test('light-only updates renew light freshness while stopped without renewing statistics', () => {
+  selectPrinter();
+  publish({ generation: 1, light: true, stats: metrics });
+  advance(6000);
+  publish({ generation: 1, light: false });
+  advance(5000);
+  assert.equal(light().disabled, false);
+  assert.equal(light().getAttribute('aria-checked'), 'false');
+  assert.equal(visible(field('hardware-stat')), false, 'Light updates do not renew statistics');
+  advance(6000);
+  assert.equal(light().disabled, true);
+  publish({ generation: 1, light: true });
+  assert.equal(light().disabled, false);
+  assert.equal(light().getAttribute('aria-checked'), 'true');
+  assert.equal(
+    sent.some((message) => message.type === 'activity' && message.playing),
+    false,
+  );
+});
+
+test('hidden light updates cannot restore an expired light on return', () => {
+  selectPrinter();
+  publish({ generation: 1, light: true });
+  setVisible(false);
+  advance(11000);
+  publish({ generation: 1, light: true });
+  setVisible(true);
+  publish({ generation: 1, stats: metrics });
+  assert.equal(light().disabled, true);
+  assert.equal(light().getAttribute('aria-checked'), 'false');
+  assert.equal(visible(button('play')), true, 'Returning does not start camera playback');
+  publish({ generation: 1, light: false });
+  assert.equal(light().disabled, false);
+  assert.equal(light().getAttribute('aria-checked'), 'false');
+});
+
 test('an unavailable light cannot send commands and keeps its last confirmed state', () => {
   assert.equal(light().disabled, true);
   const initialMessages = sent.length;

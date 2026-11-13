@@ -33,6 +33,7 @@ export class Camera {
   );
   light = $state<boolean | null>(null);
   lightDisabled = $state(true);
+  private lightAt: number | null = null;
   stats = $state<PrintStats | null>(null);
   statsAt = $state(0);
   private pendingNotice = '';
@@ -84,7 +85,7 @@ export class Camera {
   };
 
   setLight = (enabled: boolean) => {
-    if (this.active && !document.hidden && this.light !== null) {
+    if (this.active && !document.hidden && !this.lightDisabled && this.light !== null) {
       this.lightError = '';
       this.bridge.postMessage({ type: 'light', enabled });
     }
@@ -100,6 +101,11 @@ export class Camera {
     this.now = Date.now();
     if (this.noticeAt !== null && this.now - this.noticeAt > 5000) this.notice = this.pendingNotice;
     if (this.statsAt && Date.now() - this.statsAt > 10000) this.setStats(null, true);
+    if (this.lightAt !== null && this.now - this.lightAt > 10000) {
+      this.light = null;
+      this.lightDisabled = true;
+      this.lightAt = null;
+    }
     if (document.hidden) {
       if (this.active) this.hide();
       return;
@@ -120,7 +126,7 @@ export class Camera {
   };
 
   private receive = (data: HostMessage) => {
-    if (!this.active) return;
+    if (!this.active || document.hidden) return;
     if (data.type === 'selection_changed') {
       this.setStats();
       this.stop();
@@ -153,6 +159,7 @@ export class Camera {
         this.noticeAt = null;
         this.light = null;
         this.lightDisabled = true;
+        this.lightAt = null;
       }
       this.generation = data.generation;
       this.target = data.target;
@@ -187,6 +194,7 @@ export class Camera {
     if ('light' in data) {
       this.light = data.light ?? null;
       this.lightDisabled = this.light === null;
+      this.lightAt = this.light !== null ? Date.now() : null;
       if (this.light !== null) {
         this.notice = '';
         this.noticeAt = null;
