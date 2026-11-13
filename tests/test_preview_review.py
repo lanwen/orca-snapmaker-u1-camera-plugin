@@ -1,5 +1,6 @@
 """Exercise the browser review's result checks and DevTools protocol handling."""
 
+from contextlib import contextmanager
 import errno
 import io
 import json
@@ -10,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from types import SimpleNamespace
 from unittest.mock import Mock, call, patch
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
@@ -163,13 +165,67 @@ class BrowserCleanupTests(unittest.TestCase):
                 self.run_context(Path(directory))
         self.assertIn("Browser cleanup failed", caught.exception.__notes__[0])
 
+    @contextmanager
+    def fake_startup(self, profile, ready_at):
+        state = SimpleNamespace(elapsed=0)
+        response = io.BytesIO(json.dumps([{"type": "page", "url": "about:blank",
+                                          "webSocketDebuggerUrl": "ws://localhost/page/test"}]).encode())
+        opener = Mock()
+        opener.open.return_value.__enter__ = Mock(return_value=response)
+        opener.open.return_value.__exit__ = Mock(return_value=False)
+
+        def sleep(seconds):
+            state.elapsed += seconds
+            if ready_at is not None and state.elapsed >= ready_at:
+                (profile / "DevToolsActivePort").write_text("1234\n/browser/test")
+
+        clock = SimpleNamespace(monotonic=lambda: state.elapsed, sleep=sleep)
+        with patch.object(review_preview, "time", clock), \
+             patch.object(review_preview.tempfile, "mkdtemp", return_value=str(profile)), \
+             patch.object(review_preview, "find_browser", return_value="chrome"), \
+             patch.object(review_preview.subprocess, "Popen", return_value=Mock(poll=Mock(return_value=None))) as launch, \
+             patch.object(review_preview.urllib.request, "build_opener", return_value=opener), \
+             patch.object(review_preview.websocket, "create_connection") as connect, \
+             patch.object(review_preview, "_stop_browser") as stop:
+            state.launch, state.connect, state.stop = launch, connect, stop
+            yield state
+
+    def test_cold_browser_becoming_ready_after_ten_seconds_launches_once(self):
+        with tempfile.TemporaryDirectory() as directory:
+            profile = Path(directory)
+            with self.fake_startup(profile, ready_at=12) as state:
+                with browser() as client:
+                    self.assertIsInstance(client, DevTools)
+                    self.assertIs(client.connection, state.connect.return_value)
+                state.launch.assert_called_once()
+                state.stop.assert_called_once_with(state.launch.return_value, state.connect.return_value)
+                self.assertGreaterEqual(state.elapsed, 12)
+                self.assertLess(state.elapsed, 12.1)
+                self.assertFalse(profile.exists())
+
+    def test_browser_that_never_becomes_ready_has_bounded_startup_and_cleanup(self):
+        with tempfile.TemporaryDirectory() as directory:
+            profile = Path(directory)
+            with self.fake_startup(profile, ready_at=None) as state:
+                with self.assertRaisesRegex(RuntimeError, "startup timed out after 30s"):
+                    with browser():
+                        self.fail("Browser without a DevTools port cannot become ready")
+                self.assertGreaterEqual(state.elapsed, 30)
+                self.assertLess(state.elapsed, 30.1)
+                state.launch.assert_called_once()
+                state.connect.assert_not_called()
+                state.stop.assert_called_once_with(state.launch.return_value, None)
+                self.assertFalse(profile.exists())
+
     def test_browser_exit_reports_executable_return_code_and_output(self):
         with tempfile.TemporaryDirectory() as directory, \
              patch.object(review_preview.tempfile, "mkdtemp", return_value=directory), \
              patch.object(review_preview, "find_browser", return_value="/usr/bin/google-chrome"), \
              patch.object(review_preview.subprocess, "Popen") as launch, \
-             patch.object(review_preview, "_stop_browser"), \
-             patch.object(review_preview, "_remove_profile"):
+             patch.object(review_preview, "_stop_browser") as stop, \
+             patch.object(review_preview, "_remove_profile") as remove, \
+             patch.object(review_preview.time, "monotonic", return_value=0), \
+             patch.object(review_preview.time, "sleep") as pause:
             def exited(*args, **kwargs):
                 kwargs["stderr"].write(b"browser startup diagnostic")
                 return Mock(poll=Mock(return_value=23))
@@ -177,6 +233,10 @@ class BrowserCleanupTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "/usr/bin/google-chrome.*exit code 23.*browser startup diagnostic"):
                 with browser():
                     self.fail("Exited browser cannot become ready")
+            launch.assert_called_once()
+            pause.assert_not_called()
+            stop.assert_called_once()
+            remove.assert_called_once_with(directory)
 
     def test_startup_failure_stays_primary_and_cleanup_is_attempted(self):
         original = FileNotFoundError("chrome missing")
