@@ -509,6 +509,8 @@ class ClientTests(unittest.TestCase):
         printer.http.file_metadata = Mock(return_value={"slicer": "OrcaSlicer", "estimated_time": 2081,
                                                         "modified": 1})
         with patch.object(plugin.time, "monotonic", return_value=100) as clock:
+            self.assertIsNone(printer.status()["stats"]["planned_total"])
+            printer.refresh_metadata()
             self.assertAlmostEqual(printer.status()["stats"]["remaining"], 1331.84)
             queries = printer.http.query_objects.call_args.args
             for name in ("fan_generic cavity_fan", "fan", "fan_generic e1_fan", "fan_generic e2_fan", "fan_generic e3_fan", "heater_fan power_fan", *("heater_fan e%d_nozzle_fan" % tool for tool in range(4))):
@@ -518,17 +520,23 @@ class ClientTests(unittest.TestCase):
             self.assertIn(plugin.ObjectQuery("virtual_sdcard", ("progress", "file_position", "file_size")), queries)
             for state in ("paused", "printing"):
                 status["print_stats"]["state"] = state
-                printer.status()
+                self.assertEqual(printer.status()["stats"]["planned_total"], 2081)
+                printer.refresh_metadata()
             self.assertEqual(printer.http.file_metadata.call_count, 1)
             clock.return_value = 130
             printer.http.file_metadata.return_value = {"slicer": "OrcaSlicer", "estimated_time": 3000,
                                                         "modified": 2}
+            self.assertIsNone(printer.status()["stats"]["planned_total"])
+            printer.refresh_metadata()
             self.assertEqual(printer.status()["stats"]["planned_total"], 3000)
             printer.http.file_metadata.side_effect = RuntimeError("Unavailable")
             clock.return_value = 160
             self.assertIsNone(printer.status()["stats"]["planned_total"])
+            printer.refresh_metadata()
+            self.assertIsNone(printer.status()["stats"]["planned_total"])
             before = printer.http.file_metadata.call_count
             printer.status()
+            printer.refresh_metadata()
             self.assertEqual(printer.http.file_metadata.call_count, before)
             for section, field, value in [("print_stats", "filename", "second.gcode"),
                                           ("print_stats", "total_duration", 1),
@@ -537,8 +545,10 @@ class ClientTests(unittest.TestCase):
                 before = printer.http.file_metadata.call_count
                 status[section][field] = value
                 self.assertIsNone(printer.status()["stats"]["planned_total"])
+                printer.refresh_metadata()
                 self.assertEqual(printer.http.file_metadata.call_count, before + 1)
                 printer.status()
+                printer.refresh_metadata()
                 self.assertEqual(printer.http.file_metadata.call_count, before + 1)
             # Same-name reprint after completion fetches immediately, even after failure.
             status["print_stats"]["state"] = "complete"
@@ -546,16 +556,22 @@ class ClientTests(unittest.TestCase):
             status["print_stats"]["state"] = "printing"
             before = printer.http.file_metadata.call_count
             printer.status()
+            printer.refresh_metadata()
             self.assertEqual(printer.http.file_metadata.call_count, before + 1)
             clock.return_value = 190
             printer.http.file_metadata.side_effect = None
             printer.http.file_metadata.return_value = []
+            printer.status()
+            printer.refresh_metadata()
             self.assertIsNone(printer.status()["stats"]["planned_total"])
             before = printer.http.file_metadata.call_count
             printer.status()
+            printer.refresh_metadata()
             self.assertEqual(printer.http.file_metadata.call_count, before)
             clock.return_value = 220
             printer.http.file_metadata.return_value = {"slicer": "OrcaSlicer", "estimated_time": 2081}
+            printer.status()
+            printer.refresh_metadata()
             self.assertEqual(printer.status()["stats"]["planned_total"], 2081)
 
     def test_metadata_size_must_match_the_active_reader_when_available(self):
@@ -563,10 +579,38 @@ class ClientTests(unittest.TestCase):
         printer.http.query_objects = Mock(return_value=self.estimate_status())
         printer.http.file_metadata = Mock(return_value={"slicer": "OrcaSlicer", "estimated_time": 2081,
                                                         "size": 2000})
+        printer.status()
+        printer.refresh_metadata()
         self.assertIsNone(printer.status()["stats"]["planned_total"])
         printer.metadata_retry_at = 0
         printer.http.file_metadata.return_value["size"] = 1000
+        printer.status()
+        printer.refresh_metadata()
         self.assertAlmostEqual(printer.status()["stats"]["remaining"], 1331.84)
+
+    def test_cached_metadata_is_revalidated_before_enriching_a_fresh_run(self):
+        changes = [("print_stats", "filename", "next.gcode"),
+                   ("print_stats", "total_duration", 1),
+                   ("virtual_sdcard", "file_position", 1),
+                   ("virtual_sdcard", "file_size", 2000),
+                   ("print_stats", "state", "complete")]
+        for section, field, value in changes:
+            with self.subTest(field=field):
+                printer = plugin.Printer("http://printer")
+                status = self.estimate_status()
+                printer.http.query_objects = Mock(return_value=status)
+                def metadata(filename):
+                    status[section][field] = value
+                    return {"estimated_time": 2081, "size": 1000}
+
+                printer.http.file_metadata = Mock(side_effect=metadata)
+                self.assertIsNone(printer.status()["stats"]["planned_total"])
+                printer.refresh_metadata()
+                self.assertIsNone(printer.status()["stats"]["planned_total"])
+                if field == "state":
+                    status[section][field] = "printing"
+                    self.assertIsNone(printer.status()["stats"]["planned_total"])
+                self.assertEqual(printer.http.file_metadata.call_count, 1)
 
     def test_file_metadata_encodes_filename_and_uses_authenticated_transport(self):
         client = plugin.HttpClient("http://printer.local", "secret")
@@ -708,6 +752,8 @@ class ClientTests(unittest.TestCase):
                        "print_task_config": {"extruder_map_table": [0]}})
         printer.http.query_objects = Mock(return_value=status)
         printer.http.file_metadata = Mock(return_value={"slicer": "OrcaSlicer", "filament_name": "PLA profile"})
+        self.assertIsNone(printer.status()["stats"]["material_profile"])
+        printer.refresh_metadata()
         result = printer.status()["stats"]
         self.assertEqual(result["material_profile"], "PLA profile")
         self.assertIsNone(result["planned_total"])
@@ -717,6 +763,8 @@ class ClientTests(unittest.TestCase):
         printer.http.file_metadata.return_value["size"] = 2000
         status["virtual_sdcard"]["file_size"] = 1000
         printer.metadata_retry_at = 0
+        printer.status()
+        printer.refresh_metadata()
         self.assertIsNone(printer.status()["stats"]["material_profile"])
 
     def test_print_metrics_missing_or_invalid_values_remain_unknown(self):
@@ -745,6 +793,161 @@ def eventually(predicate):
     while not predicate() and time.monotonic() < deadline:
         time.sleep(0.01)
     assert predicate(), "Worker did not reach expected state"
+
+
+class WorkerMetadataTests(unittest.TestCase):
+    def test_metadata_enriches_only_the_next_fresh_status(self):
+        for failure in (False, True):
+            with self.subTest(failure=failure):
+                now, messages, queries = [100.0], [], []
+                printer = plugin.Printer("http://printer")
+
+                def query(*objects):
+                    queries.append(now[0])
+                    status = ClientTests().estimate_status()
+                    status["heater_bed"] = {"temperature": 60 + len(queries)}
+                    return status
+
+                def publish(message):
+                    if "stats" in message:
+                        messages.append(message)
+                        if len(messages) == 2:
+                            monitor.closed = True
+
+                def wait(timeout):
+                    now[0] += .25
+                    monitor.update(("printer", ""), playing=False)
+
+                printer.http.query_objects = Mock(side_effect=query)
+                printer.http.file_metadata = Mock(return_value={"estimated_time": 2081})
+                if failure:
+                    printer.http.file_metadata.side_effect = OSError("http://printer?token=secret")
+                with patch.object(plugin.threading.Thread, "start"), \
+                        patch.object(plugin.time, "monotonic", side_effect=lambda: now[0]):
+                    monitor = plugin.Monitor(publish, lambda *target: printer)
+                    monitor.condition.wait = wait
+                    monitor.update(("printer", ""), playing=False)
+                    monitor.run()
+                self.assertEqual(queries, [100, 103])
+                self.assertEqual([m["stats"]["bed"]["temperature"] for m in messages], [61, 62])
+                self.assertEqual([m["stats"]["planned_total"] for m in messages],
+                                 [None, None if failure else 2081])
+                self.assertNotIn("secret", str(messages))
+                printer.http.file_metadata.assert_called_once_with("part.gcode")
+
+    def test_target_change_and_unload_cancel_blocked_metadata(self):
+        for unload in (False, True):
+            with self.subTest(unload=unload):
+                local, peer = socket.socketpair()
+                entered, next_status = threading.Event(), threading.Event()
+                messages = []
+                printer = plugin.Printer("http://first")
+                printer.http.query_objects = Mock(return_value=ClientTests().estimate_status())
+                printer.http.file_metadata = lambda filename: printer.http.json("/metadata")
+                second = Mock()
+
+                def status():
+                    next_status.set()
+                    return {"printer": "standby", "stats": {"planned_total": None}}
+
+                second.status.side_effect = status
+                clients = iter((printer, second))
+                monitor = plugin.Monitor(messages.append, lambda *target: next(clients))
+
+                def connect(operation, *args):
+                    entered.set()
+                    return operation.track(local)
+
+                try:
+                    with patch.object(plugin.NetworkOperation, "connect", connect):
+                        monitor.update(("first", ""), playing=False)
+                        self.assertTrue(entered.wait(1))
+                        self.assertTrue(any("stats" in m for m in messages))
+                        started = time.monotonic()
+                        if unload:
+                            monitor.close()
+                            self.assertFalse(monitor.thread.is_alive())
+                        else:
+                            monitor.update(("second", ""), playing=False)
+                            self.assertTrue(next_status.wait(.5))
+                        self.assertLess(time.monotonic() - started, .7)
+                        self.assertTrue(printer.http.closed)
+                        self.assertIsNone(printer.metadata)
+                        self.assertFalse(any(m.get("failed") for m in messages))
+                finally:
+                    monitor.close()
+                    peer.close()
+
+    def test_late_metadata_cannot_enrich_a_changed_target(self):
+        entered, release, published = threading.Event(), threading.Event(), threading.Event()
+        first, second = plugin.Printer("http://first"), plugin.Printer("http://second")
+        for printer in (first, second):
+            printer.http.query_objects = Mock(return_value=ClientTests().estimate_status())
+        second.http.file_metadata = Mock(return_value={})
+
+        def metadata(filename):
+            entered.set()
+            release.wait()
+            return {"estimated_time": 2081}
+
+        first.http.file_metadata = Mock(side_effect=metadata)
+        messages = []
+
+        def publish(message):
+            messages.append(message)
+            if message.get("generation") == 2 and "stats" in message:
+                published.set()
+
+        clients = iter((first, second))
+        monitor = plugin.Monitor(publish, lambda *target: next(clients))
+        try:
+            monitor.update(("first", ""), playing=False)
+            self.assertTrue(entered.wait(1))
+            monitor.update(("second", ""), playing=False)
+            release.set()
+            self.assertTrue(published.wait(1))
+            live = [m for m in messages if "stats" in m]
+            self.assertEqual([m["generation"] for m in live], [1, 2])
+            self.assertTrue(all(m["stats"]["planned_total"] is None for m in live))
+        finally:
+            release.set()
+            monitor.close()
+
+    def test_live_status_is_published_before_blocked_metadata(self):
+        for failure in (False, True):
+            with self.subTest(failure=failure):
+                entered, release = threading.Event(), threading.Event()
+                messages = []
+                printer = plugin.Printer("http://printer")
+                status = ClientTests().estimate_status()
+                status.update({"heater_bed": {"temperature": 60},
+                               "fan_generic cavity_fan": {"speed": .5},
+                               "led cavity_led": {"color_data": [[0, 0, 0, 1]]}})
+                printer.http.query_objects = Mock(return_value=status)
+
+                def metadata(filename):
+                    entered.set()
+                    release.wait()
+                    if failure:
+                        raise OSError("metadata unavailable")
+                    return {"estimated_time": 2081, "slicer": "OrcaSlicer"}
+
+                printer.http.file_metadata = Mock(side_effect=metadata)
+                monitor = plugin.Monitor(messages.append, lambda *target: printer)
+                try:
+                    monitor.update(("printer", ""), playing=False)
+                    self.assertTrue(entered.wait(1))
+                    live = [message for message in messages if "stats" in message]
+                    self.assertEqual(len(live), 1, "Live status must arrive while metadata is still blocked")
+                    self.assertEqual(live[0]["stats"]["bed"]["temperature"], 60)
+                    self.assertEqual(live[0]["stats"]["progress"], .36)
+                    self.assertEqual(live[0]["stats"]["current_layer"], 30)
+                    self.assertEqual(live[0]["stats"]["aux_fan"]["speed"], .5)
+                    self.assertTrue(live[0]["light"])
+                    self.assertIsNone(live[0]["stats"]["planned_total"])
+                finally:
+                    release.set()
+                    monitor.close()
 
 
 class WorkerScheduleTests(unittest.TestCase):
