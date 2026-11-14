@@ -7,6 +7,7 @@ import re
 import socket
 import struct
 from pathlib import Path
+from queue import Queue
 import sys
 import threading
 import time
@@ -1063,6 +1064,186 @@ class TestWorkerMetadata:
 
 
 class TestWorkerSchedule:
+    def test_idle_worker_waits_for_a_local_recheck(self, scheduled_worker):
+        state = scheduled_worker
+        state.monitor.run()
+        assert state.waits == [300]
+        state.factory.assert_not_called()
+
+    def test_idle_timeouts_recheck_without_work_and_update_wakes_immediately(self, scheduled_worker):
+        state = scheduled_worker
+        created_at = []
+        def create(*target):
+            created_at.append(state.now)
+            return state.client
+        state.factory.side_effect = create
+        def wait(timeout):
+            state.waits.append(timeout)
+            if len(state.waits) == 1:
+                state.now += timeout
+            elif len(state.waits) == 2:
+                state.now += .1
+                state.monitor.update(("printer", ""), playing=False)
+            else:
+                state.monitor.closed = True
+        state.monitor.condition.wait = wait
+        state.monitor.run()
+        assert state.waits == [300, 300, 3]
+        assert created_at == [400.1]
+        state.factory.assert_called_once_with("printer", "")
+        state.client.status.assert_called_once()
+
+    @pytest.mark.parametrize("duration,expected", [
+        pytest.param(0, 3, id="next-status"),
+        pytest.param(1, 2.5, id="lease-before-status"),
+    ])
+    def test_stopped_camera_waits_for_status_or_lease(self, scheduled_worker, duration, expected):
+        state = scheduled_worker
+        def status():
+            state.now += duration
+            return {"printer": "standby"}
+        state.client.status.side_effect = status
+        state.monitor.update(("printer", ""), playing=False)
+        state.monitor.run()
+        assert state.waits == [expected]
+        state.client.start_monitor.assert_not_called()
+        state.client.snapshot.assert_not_called()
+        state.client.close.assert_called_once()
+
+    def test_factory_retry_expires_into_a_bounded_idle_wait(self, scheduled_worker):
+        state = scheduled_worker
+        attempts = []
+        def fail(*target):
+            attempts.append(state.now)
+            raise OSError("unavailable")
+        state.factory.side_effect = fail
+        def wait(timeout=None):
+            state.waits.append(timeout)
+            if len(state.waits) >= 3:
+                state.monitor.closed = True
+            else:
+                state.now += timeout
+        state.monitor.condition.wait = wait
+        state.monitor.update(("printer", ""), playing=False)
+        state.monitor.run()
+        assert state.waits == [3, .5, 300]
+        assert attempts == [100, 103]
+        assert sum(message.get("failed", False) for message in state.messages) == 2
+
+    def test_generation_change_does_not_inherit_a_failed_factory_retry(self, scheduled_worker):
+        state = scheduled_worker
+        attempts = []
+        def create(*target):
+            attempts.append((target, state.now))
+            if len(attempts) == 1:
+                raise OSError("unavailable")
+            return state.client
+        state.factory.side_effect = create
+        def wait(timeout):
+            state.waits.append(timeout)
+            if len(state.waits) == 1:
+                state.now += .25
+                state.monitor.update(("second", ""), playing=False)
+            else:
+                state.monitor.closed = True
+        state.monitor.condition.wait = wait
+        state.monitor.update(("first", ""), playing=False)
+        state.monitor.run()
+        assert attempts == [(("first", ""), 100), (("second", ""), 100.25)]
+        assert state.waits == [3, 3]
+        assert not any(message.get("generation") == 1 and "printer" in message
+                       for message in state.messages)
+
+    def test_camera_retry_keeps_independent_status_deadlines(self, scheduled_worker):
+        state = scheduled_worker
+        status_times, camera_times = [], []
+        def status():
+            status_times.append(state.now)
+            return {}
+        def snapshot():
+            camera_times.append(state.now)
+            if len(camera_times) == 2:
+                raise OSError("camera unavailable")
+            return {"image": "frame"}
+        state.client.status.side_effect = status
+        state.client.snapshot.side_effect = snapshot
+        def wait(timeout):
+            state.waits.append(timeout)
+            if len(state.waits) == 1:
+                state.now = 101
+                state.monitor.frame_loaded(generation)
+            elif len(state.waits) <= 3:
+                state.now += timeout
+                state.monitor.update(("printer", ""), playing=True)
+            else:
+                state.monitor.closed = True
+        state.monitor.condition.wait = wait
+        generation = state.monitor.update(("printer", ""), playing=True)
+        state.monitor.run()
+        assert state.waits == [3, 2, 1, 2]
+        assert status_times == [100, 103]
+        assert camera_times == [100, 101, 104]
+        assert state.client.start_monitor.call_count == 2
+
+    def test_camera_renews_while_the_previous_frame_awaits_acknowledgement(self, scheduled_worker):
+        state = scheduled_worker
+        renewals = []
+        def renew():
+            renewals.append(state.now)
+            if len(renewals) == 2:
+                state.monitor.closed = True
+        def snapshot():
+            state.now = 159.5
+            state.monitor.update(("printer", ""), playing=True)
+            return {"image": "frame"}
+        state.client.start_monitor.side_effect = renew
+        state.client.snapshot.side_effect = snapshot
+        def wait(timeout):
+            state.waits.append(timeout)
+            if len(state.waits) > 2:
+                state.monitor.closed = True
+                return
+            state.now += timeout
+            state.monitor.update(("printer", ""), playing=True)
+        state.monitor.condition.wait = wait
+        state.monitor.update(("printer", ""), playing=True)
+        state.monitor.run()
+        assert state.waits == [.5]
+        assert renewals == [100, 160]
+        state.client.snapshot.assert_called_once()
+
+    def test_metadata_failure_still_schedules_status_after_operation_completion(self, scheduled_worker):
+        state = scheduled_worker
+        def metadata():
+            state.now += 1
+            state.monitor.update(("printer", ""), playing=True)
+            if state.client.refresh_metadata.call_count > 1:
+                state.monitor.closed = True
+            raise RuntimeError("metadata unavailable")
+        state.client.refresh_metadata.side_effect = metadata
+        state.monitor.update(("printer", ""), playing=True)
+        state.monitor.run()
+        assert state.waits == [3]
+        state.client.status.assert_called_once()
+        state.client.start_monitor.assert_not_called()
+        state.client.snapshot.assert_not_called()
+        kinds = ["status" if "printer" in message else "failure"
+                 for message in state.messages if "printer" in message or "failed" in message]
+        assert kinds == ["status", "failure"]
+
+    def test_light_arriving_during_status_is_reconsidered_before_sleep(self, scheduled_worker):
+        state = scheduled_worker
+        def status():
+            if state.client.status.call_count == 1:
+                state.monitor.update(("printer", ""), True, playing=False)
+            return {}
+        state.client.status.side_effect = status
+        state.monitor.update(("printer", ""), playing=False)
+        state.monitor.run()
+        state.client.set_light.assert_called_once_with(True)
+        assert state.client.status.call_count == 2
+        assert state.waits == [3]
+
     @pytest.mark.parametrize('failure', [
         pytest.param('activation', id='activation'),
         pytest.param('snapshot', id='snapshot'),
@@ -1171,6 +1352,42 @@ class TestWorker:
             monitor.close()
             peer.close()
         first.close.assert_called_once()
+
+    @pytest.mark.parametrize("action", ["light", "frame", "target", "close"])
+    def test_waiting_worker_rechecks_notifications_before_its_deadline(self, worker, action):
+        monitor = worker.monitor
+        waits = Queue()
+        with monitor.condition:
+            wait = monitor.condition.wait
+            def observe(timeout=None):
+                waits.put(timeout)
+                return wait(timeout)
+            monitor.condition.wait = observe
+            generation = monitor.update(("first", ""), playing=True)
+        timeout = waits.get(timeout=1)
+        assert timeout > 1, "The next status deadline, rather than a polling tick, blocks the worker"
+        first = worker.clients[0]
+        assert first.snapshot.call_count == 1
+        if action == "close":
+            monitor.close()
+            assert not monitor.thread.is_alive()
+        else:
+            if action == "light":
+                monitor.update(("first", ""), True, playing=True)
+            elif action == "frame":
+                monitor.frame_loaded(generation)
+            else:
+                monitor.update(("second", ""), playing=True)
+            assert waits.get(timeout=1) > 0
+            if action == "light":
+                first.set_light.assert_called_once_with(True)
+                assert first.snapshot.call_count == 1
+            elif action == "frame":
+                assert first.snapshot.call_count == 2
+            else:
+                first.close.assert_called_once()
+                assert len(worker.clients) == 2
+                assert worker.clients[1].target == ("second", "")
 
     def test_pause_resume_target_change_and_unload(self, worker):
         worker.monitor.update(("first", ""), playing=True)
@@ -1605,6 +1822,24 @@ def websocket_server():
             server.server_close()
             thread.join(1)
             assert not thread.is_alive()
+
+
+@pytest.fixture
+def scheduled_worker(monkeypatch):
+    state = types.SimpleNamespace(now=100.0, waits=[], messages=[])
+    state.client = Mock()
+    state.client.status.return_value = {"printer": "standby"}
+    state.client.snapshot.return_value = {"image": "frame"}
+    state.factory = Mock(return_value=state.client)
+    monkeypatch.setattr(plugin, "time", types.SimpleNamespace(monotonic=lambda: state.now))
+    monkeypatch.setattr(plugin, "threading", types.SimpleNamespace(
+        Condition=threading.Condition, Thread=lambda **kwargs: Mock()))
+    state.monitor = plugin.Monitor(state.messages.append, state.factory)
+    def wait(timeout=None):
+        state.waits.append(timeout)
+        state.monitor.closed = True
+    state.monitor.condition.wait = wait
+    return state
 
 
 @pytest.fixture

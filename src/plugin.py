@@ -356,21 +356,31 @@ class Monitor:
                 with self.condition:
                     if self.closed:
                         return
-                    target = self.target if time.monotonic() < self.expires else None
+                    now = time.monotonic()
+                    target = self.target if now < self.expires else None
                     selected_generation = self.generation
                     playing = self.playing
-                if client is not None and (not target or generation != selected_generation):
-                    self.close_client(client)
-                    client = None
-                    retry_at = 0
-                if not target:
-                    with self.condition:
-                        self.condition.wait(timeout=0.2)
-                    continue
-                if client is None and time.monotonic() < retry_at:
-                    with self.condition:
-                        self.condition.wait(timeout=0.2)
-                    continue
+                    if generation != selected_generation:
+                        retry_at = 0
+                    if client is not None and (not target or generation != selected_generation):
+                        self.close_client(client)
+                        client = None
+                        retry_at = 0
+                    if not target:
+                        self.condition.wait(timeout=300)
+                        continue
+                    if client is None:
+                        if now < retry_at:
+                            self.condition.wait(timeout=min(self.expires, retry_at) - now)
+                            continue
+                    else:
+                        camera_due = playing and now >= retry_at and (now >= keepalive_at or self.frame_ready)
+                        if self.light is None and now < status_at and not camera_due:
+                            deadlines = [self.expires, status_at]
+                            if playing:
+                                deadlines.append(retry_at if now < retry_at else keepalive_at)
+                            self.condition.wait(timeout=min(deadlines) - now)
+                            continue
                 try:
                     if client is None:
                         generation = selected_generation
@@ -403,12 +413,11 @@ class Monitor:
                         else:
                             if self.current(generation):
                                 client.refresh_metadata()
-                        status_at = time.monotonic() + 3
+                        finally:
+                            status_at = time.monotonic() + 3
                     if not self.current(generation):
                         continue
                     if not playing or time.monotonic() < retry_at:
-                        with self.condition:
-                            self.condition.wait(timeout=0.2)
                         continue
                     if time.monotonic() >= keepalive_at:
                         client.start_monitor()
@@ -430,10 +439,6 @@ class Monitor:
                     with self.condition:
                         self.frame_ready = True
                     retry_at = time.monotonic() + 3 if self.current(generation) else 0
-                with self.condition:
-                    # Image-load acknowledgements wake this immediately; no frame-rate cap.
-                    if time.monotonic() < retry_at or not (self.playing and self.frame_ready):
-                        self.condition.wait(timeout=0.2)
         finally:
             if client is not None:
                 self.close_client(client)
