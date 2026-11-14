@@ -367,7 +367,7 @@ class Monitor:
                         client = None
                         retry_at = 0
                     if not target:
-                        self.condition.wait()
+                        self.condition.wait(timeout=300)
                         continue
                     if client is None:
                         if now < retry_at:

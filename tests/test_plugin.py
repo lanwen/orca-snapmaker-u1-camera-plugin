@@ -1064,11 +1064,34 @@ class TestWorkerMetadata:
 
 
 class TestWorkerSchedule:
-    def test_idle_worker_waits_for_a_notification(self, scheduled_worker):
+    def test_idle_worker_waits_for_a_local_recheck(self, scheduled_worker):
         state = scheduled_worker
         state.monitor.run()
-        assert state.waits == [None]
+        assert state.waits == [300]
         state.factory.assert_not_called()
+
+    def test_idle_timeouts_recheck_without_work_and_update_wakes_immediately(self, scheduled_worker):
+        state = scheduled_worker
+        created_at = []
+        def create(*target):
+            created_at.append(state.now)
+            return state.client
+        state.factory.side_effect = create
+        def wait(timeout):
+            state.waits.append(timeout)
+            if len(state.waits) == 1:
+                state.now += timeout
+            elif len(state.waits) == 2:
+                state.now += .1
+                state.monitor.update(("printer", ""), playing=False)
+            else:
+                state.monitor.closed = True
+        state.monitor.condition.wait = wait
+        state.monitor.run()
+        assert state.waits == [300, 300, 3]
+        assert created_at == [400.1]
+        state.factory.assert_called_once_with("printer", "")
+        state.client.status.assert_called_once()
 
     @pytest.mark.parametrize("duration,expected", [
         pytest.param(0, 3, id="next-status"),
@@ -1087,7 +1110,7 @@ class TestWorkerSchedule:
         state.client.snapshot.assert_not_called()
         state.client.close.assert_called_once()
 
-    def test_factory_retry_expires_into_an_indefinite_idle_wait(self, scheduled_worker):
+    def test_factory_retry_expires_into_a_bounded_idle_wait(self, scheduled_worker):
         state = scheduled_worker
         attempts = []
         def fail(*target):
@@ -1096,14 +1119,14 @@ class TestWorkerSchedule:
         state.factory.side_effect = fail
         def wait(timeout=None):
             state.waits.append(timeout)
-            if timeout is None or len(state.waits) >= 20:
+            if len(state.waits) >= 3:
                 state.monitor.closed = True
             else:
                 state.now += timeout
         state.monitor.condition.wait = wait
         state.monitor.update(("printer", ""), playing=False)
         state.monitor.run()
-        assert state.waits == [3, .5, None]
+        assert state.waits == [3, .5, 300]
         assert attempts == [100, 103]
         assert sum(message.get("failed", False) for message in state.messages) == 2
 
