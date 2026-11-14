@@ -402,7 +402,8 @@ class Monitor:
                             self.client = client
                             if self.closed or generation != self.generation:
                                 self.close_client(client)
-                        keepalive_at = status_at = 0
+                        keepalive_at = 0
+                        status_at = time.monotonic()
                     if not self.current(generation):
                         continue
                     with self.condition:
@@ -414,10 +415,15 @@ class Monitor:
                             client.set_light(light)
                         except Exception:
                             self.emit(generation, {"light_error": "Could not change light — try again"})
-                        status_at = 0
+                        status_at = time.monotonic()
                     if not self.current(generation):
                         continue
-                    if time.monotonic() >= status_at:
+                    now = time.monotonic()
+                    if now >= status_at:
+                        # Skip missed ticks before I/O; never replay a backlog of polls.
+                        status_at += (int((now - status_at) // 3) + 1) * 3
+                        if status_at <= now:
+                            status_at += 3
                         try:
                             self.emit(generation, client.status())
                         except Exception as error:
@@ -426,8 +432,6 @@ class Monitor:
                         else:
                             if self.current(generation):
                                 client.refresh_metadata()
-                        finally:
-                            status_at = time.monotonic() + 3
                     if not self.current(generation):
                         continue
                     if not playing or time.monotonic() < retry_at:

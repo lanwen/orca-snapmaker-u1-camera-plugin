@@ -1093,17 +1093,21 @@ class TestWorkerSchedule:
         state.factory.assert_called_once_with("printer", "")
         state.client.status.assert_called_once()
 
-    @pytest.mark.parametrize("duration,expected", [
-        pytest.param(0, 3, id="next-status"),
-        pytest.param(1, 2.5, id="lease-before-status"),
+    @pytest.mark.parametrize("duration,command_duration,expected", [
+        pytest.param(0, 0, 3, id="next-status"),
+        pytest.param(1, 0, 2, id="status-after-work"),
+        pytest.param(0, 1, 2.5, id="lease-before-forced-readback"),
     ])
-    def test_stopped_camera_waits_for_status_or_lease(self, scheduled_worker, duration, expected):
+    def test_stopped_camera_waits_for_status_or_lease(self, scheduled_worker, duration, command_duration, expected):
         state = scheduled_worker
         def status():
             state.now += duration
             return {"printer": "standby"}
         state.client.status.side_effect = status
-        state.monitor.update(("printer", ""), playing=False)
+        def command(enabled):
+            state.now += command_duration
+        state.client.set_light.side_effect = command
+        state.monitor.update(("printer", ""), True if command_duration else None, playing=False)
         state.monitor.run()
         assert state.waits == [expected]
         state.client.start_monitor.assert_not_called()
@@ -1215,7 +1219,7 @@ class TestWorkerSchedule:
         assert renewals == [100, 160]
         state.client.snapshot.assert_called_once()
 
-    def test_metadata_failure_still_schedules_status_after_operation_completion(self, scheduled_worker):
+    def test_metadata_failure_preserves_the_next_status_phase(self, scheduled_worker):
         state = scheduled_worker
         def metadata():
             state.now += 1
@@ -1226,7 +1230,7 @@ class TestWorkerSchedule:
         state.client.refresh_metadata.side_effect = metadata
         state.monitor.update(("printer", ""), playing=True)
         state.monitor.run()
-        assert state.waits == [3]
+        assert state.waits == [2]
         state.client.status.assert_called_once()
         state.client.start_monitor.assert_not_called()
         state.client.snapshot.assert_not_called()
@@ -1322,6 +1326,243 @@ class TestWorkerSchedule:
             monitor.run()
         assert activations == [1, 1, 2]
         client.close.assert_called_once()
+
+
+class TestWorkerPolling:
+    def advance(self, state, seconds):
+        end = state.now + seconds
+        while state.now < end:
+            state.now = min(state.now + 1, end)
+            assert state.monitor.renew(state.monitor.target, state.monitor.generation,
+                                       playing=state.monitor.playing)
+
+    def test_short_status_durations_do_not_accumulate_phase_drift(self, scheduled_worker):
+        state = scheduled_worker
+        starts, durations = [], [.25, .5, .75, .1]
+        def status():
+            starts.append(state.now)
+            self.advance(state, durations[len(starts) - 1])
+            return {}
+        def wait(timeout):
+            state.waits.append(timeout)
+            if len(starts) == len(durations):
+                state.monitor.closed = True
+            else:
+                self.advance(state, timeout)
+        state.client.status.side_effect = status
+        state.monitor.condition.wait = wait
+        state.monitor.update(("printer", ""), playing=False)
+        state.monitor.run()
+        assert starts == [100, 103, 106, 109]
+        assert state.waits == pytest.approx([2.75, 2.5, 2.25, 2.9])
+        state.client.snapshot.assert_not_called()
+
+    def test_long_status_skips_missed_ticks_without_a_catchup_burst(self, scheduled_worker):
+        state = scheduled_worker
+        starts, ends = [], []
+        running = False
+        def status():
+            nonlocal running
+            assert not running
+            running = True
+            starts.append(state.now)
+            self.advance(state, 7 if len(starts) == 1 else .25)
+            ends.append(state.now)
+            running = False
+            return {}
+        def wait(timeout):
+            state.waits.append(timeout)
+            if len(starts) == 2:
+                state.monitor.closed = True
+            else:
+                self.advance(state, timeout)
+        state.client.status.side_effect = status
+        state.monitor.condition.wait = wait
+        state.monitor.update(("printer", ""), playing=False)
+        state.monitor.run()
+        assert starts == [100, 107]
+        assert ends == [107, 107.25]
+        assert state.waits == [1.75]
+
+    @pytest.mark.parametrize("duration", [1, 7], ids=["short", "missed-ticks"])
+    @pytest.mark.parametrize("fails", [False, True], ids=["metadata-success", "metadata-failure"])
+    def test_metadata_cannot_hide_live_status_or_accumulate_poll_drift(self, scheduled_worker, duration, fails):
+        state = scheduled_worker
+        starts, events = [], []
+        def status():
+            starts.append(state.now)
+            self.advance(state, .25)
+            return {"printer": "standby"}
+        def publish(data):
+            state.messages.append(data)
+            if "printer" in data:
+                events.append("live-status")
+        def metadata():
+            events.append("metadata")
+            if state.client.refresh_metadata.call_count == 1:
+                self.advance(state, duration)
+                if fails:
+                    raise RuntimeError("metadata unavailable")
+        def wait(timeout):
+            state.waits.append(timeout)
+            if len(starts) == 2:
+                state.monitor.closed = True
+            else:
+                self.advance(state, timeout)
+        state.monitor.publish = publish
+        state.client.status.side_effect = status
+        state.client.refresh_metadata.side_effect = metadata
+        state.monitor.condition.wait = wait
+        state.monitor.update(("printer", ""), playing=False)
+        state.monitor.run()
+        assert starts == [100, 103 if duration == 1 else 107.25]
+        assert state.waits == ([1.75, 2.75] if duration == 1 else [1.5])
+        assert events == ["live-status", "metadata", "live-status", "metadata"]
+        assert sum(message.get("failed", False) for message in state.messages) == int(fails)
+        state.client.start_monitor.assert_not_called()
+
+    @pytest.mark.parametrize("operation", ["start_monitor", "snapshot"], ids=["activation", "snapshot"])
+    def test_camera_overrun_allows_one_current_status_then_a_future_slot(self, scheduled_worker, operation):
+        state = scheduled_worker
+        starts = []
+        def status():
+            starts.append(state.now)
+            self.advance(state, .25)
+            return {}
+        def camera():
+            self.advance(state, 7)
+            return {"image": "frame"}
+        state.client.status.side_effect = status
+        getattr(state.client, operation).side_effect = camera
+        state.monitor.update(("printer", ""), playing=True)
+        state.monitor.run()
+        assert starts == [100, 107.25]
+        assert state.waits == [1.5]
+        state.client.start_monitor.assert_called_once()
+        state.client.snapshot.assert_called_once()
+
+    def test_status_errors_advance_the_same_phase_without_metadata_or_overlap(self, scheduled_worker):
+        state = scheduled_worker
+        starts = []
+        def status():
+            starts.append(state.now)
+            self.advance(state, .75)
+            raise TimeoutError("request expired")
+        def wait(timeout):
+            state.waits.append(timeout)
+            if len(starts) == 3:
+                state.monitor.closed = True
+            else:
+                self.advance(state, timeout)
+        state.client.status.side_effect = status
+        state.monitor.condition.wait = wait
+        state.monitor.update(("printer", ""), playing=False)
+        state.monitor.run()
+        assert starts == [100, 103, 106]
+        assert state.waits == [2.25] * 3
+        assert [message["status_error"] for message in state.messages if "status_error" in message] == ["timeout"] * 3
+        state.client.refresh_metadata.assert_not_called()
+
+    def test_light_readback_resets_phase_after_the_command(self, scheduled_worker):
+        state = scheduled_worker
+        starts = []
+        def status():
+            starts.append(state.now)
+            self.advance(state, .5)
+            return {}
+        def wait(timeout):
+            state.waits.append(timeout)
+            if len(starts) == 1:
+                self.advance(state, 1)
+                assert state.monitor.renew(("printer", ""), state.monitor.generation, True, playing=False)
+            elif len(starts) == 2:
+                self.advance(state, timeout)
+            else:
+                state.monitor.closed = True
+        state.client.status.side_effect = status
+        state.client.set_light.side_effect = lambda enabled: self.advance(state, .25)
+        state.monitor.condition.wait = wait
+        state.monitor.update(("printer", ""), playing=False)
+        state.monitor.run()
+        assert starts == [100, 101.75, 104.75]
+        assert state.waits == [2.5] * 3
+        state.client.set_light.assert_called_once_with(True)
+        state.factory.assert_called_once()
+
+    @pytest.mark.parametrize("change", ["target", "playback"])
+    def test_new_session_resets_phase_instead_of_inheriting_the_previous_target(self, scheduled_worker, change):
+        state = scheduled_worker
+        starts = []
+        def status():
+            starts.append(state.now)
+            self.advance(state, .25)
+            return {}
+        def wait(timeout):
+            state.waits.append(timeout)
+            if len(starts) == 1:
+                self.advance(state, 1)
+                target = ("second", "") if change == "target" else ("printer", "")
+                state.monitor.update(target, playing=change == "playback")
+            else:
+                state.monitor.closed = True
+        state.client.status.side_effect = status
+        state.monitor.condition.wait = wait
+        state.monitor.update(("printer", ""), playing=False)
+        state.monitor.run()
+        assert starts == [100, 101.25]
+        assert state.waits == [2.75, 2.75]
+        assert state.factory.call_count == 2
+        assert state.monitor.generation == 2
+
+    def test_lease_expiry_during_status_does_not_publish_or_start_a_new_poll(self, scheduled_worker):
+        state = scheduled_worker
+        def status():
+            state.now += 4
+            return {"printer": "standby"}
+        state.client.status.side_effect = status
+        state.monitor.update(("printer", ""), playing=False)
+        state.monitor.run()
+        assert state.waits == [300]
+        state.client.status.assert_called_once()
+        state.client.refresh_metadata.assert_not_called()
+        state.client.close.assert_called_once()
+        assert not any("printer" in message for message in state.messages)
+
+    @pytest.mark.parametrize("duration", [3, 6], ids=["one-tick", "two-ticks"])
+    def test_completion_on_a_tick_allows_one_current_poll_without_a_burst(self, scheduled_worker, duration):
+        state = scheduled_worker
+        starts = []
+        def status():
+            starts.append(state.now)
+            if len(starts) == 1:
+                self.advance(state, duration)
+            elif len(starts) > 2:
+                state.monitor.closed = True
+            return {}
+        state.client.status.side_effect = status
+        state.monitor.update(("printer", ""), playing=False)
+        state.monitor.run()
+        assert starts == [100, 100 + duration]
+        assert state.waits == [3]
+
+    def test_overdue_poll_start_always_advances_to_a_strictly_future_phase_slot(self, scheduled_worker):
+        state = scheduled_worker
+        state.now = 2 ** 20 - 3.1
+        phase = state.now
+        starts = []
+        def status():
+            starts.append(state.now)
+            if len(starts) > 2:
+                state.monitor.closed = True
+            return {}
+        state.client.status.side_effect = status
+        state.client.start_monitor.side_effect = lambda: self.advance(state, 6)
+        state.monitor.update(("printer", ""), playing=True)
+        state.monitor.run()
+        assert starts == [phase, phase + 6]
+        assert state.waits == pytest.approx([3])
+        state.client.start_monitor.assert_called_once()
+        state.client.snapshot.assert_called_once()
 
 
 class TestWorker:
