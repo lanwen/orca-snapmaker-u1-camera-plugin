@@ -486,7 +486,8 @@ def review(directory, output, states, widths, gifs=False):
                       document.querySelector('#printer').textContent === document.querySelector('#stats-state').textContent,
                     headerOverlap:(() => {
                       const target=document.querySelector('#target');
-                      const original=target.textContent;
+                      const text=target.firstChild;
+                      const original=text.nodeValue;
                       const fits=() => {
                         const title=document.querySelector('h1').getBoundingClientRect();
                         const delivery=document.querySelector('#status-delivery');
@@ -504,9 +505,9 @@ def review(directory, output, states, widths, gifs=False):
                       };
                       try {
                         if (!fits()) return true;
-                        target.textContent='Workshop printer with a deliberately long address and preset name '.repeat(10);
+                        text.nodeValue='Workshop printer with a deliberately long address and preset name '.repeat(10);
                         return !fits() || target.scrollWidth <= target.clientWidth;
-                      } finally { target.textContent=original; }
+                      } finally { text.nodeValue=original; }
                     })(),
                     connecting:!document.querySelector('#empty').hidden,
                     lightError:document.querySelector('.light-area').dataset.error === 'true',
