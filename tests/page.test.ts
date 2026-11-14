@@ -134,9 +134,44 @@ test('opening the page monitors status but requires an explicit Play to fetch ca
   assert.equal(visible(button('play')), true);
   assert.equal(visible(button('stop')), false);
   click(button('play'));
-  assert.deepEqual(lastMessage(), { type: 'activity', active: true, playing: true });
+  assert.deepEqual(lastMessage(), { type: 'activity', active: true, playing: true, generation: 1 });
   assert.equal(visible(button('play')), false);
   assert.equal(visible(button('stop')), true);
+});
+
+test('activity renewals carry the selected generation while a reappearing page handshakes afresh', () => {
+  selectPrinter(4);
+  advance(1000);
+  assert.deepEqual(lastMessage(), {
+    type: 'activity',
+    active: true,
+    playing: false,
+    generation: 4,
+  });
+  setVisible(false);
+  assert.deepEqual(lastMessage(), { type: 'activity', active: false, generation: 4 });
+  setVisible(true);
+  assert.deepEqual(lastMessage(), { type: 'activity', active: true, playing: false });
+  publish({ type: 'selection_changed' });
+  assert.deepEqual(lastMessage(), { type: 'activity', active: true, playing: false });
+});
+
+test('an unavailable target restarts the handshake so corrected configuration can recover', () => {
+  selectPrinter(7);
+  publish({ error: 'Connection details are missing.', supported: true });
+  advance(1000);
+  assert.deepEqual(lastMessage(), { type: 'activity', active: true, playing: false });
+  selectPrinter(8, 'Recovered printer');
+  publish({ generation: 8, stats: metrics, light: false });
+  advance(1000);
+  assert.deepEqual(lastMessage(), {
+    type: 'activity',
+    active: true,
+    playing: false,
+    generation: 8,
+  });
+  assert.equal(button('play').disabled, false);
+  assert.equal(visible(field('hardware-stat')), true);
 });
 
 test('print statistics display incoming measurements while the camera is stopped', () => {
@@ -615,12 +650,12 @@ test('light toggles are host-confirmed and work without starting playback', () =
   selectPrinter();
   publish({ generation: 1, light: false });
   click(light());
-  assert.deepEqual(lastMessage(), { type: 'light', enabled: true });
+  assert.deepEqual(lastMessage(), { type: 'light', enabled: true, generation: 1 });
   assert.equal(light().getAttribute('aria-checked'), 'false', 'A request is not confirmation');
   publish({ generation: 1, light: true });
   assert.equal(light().getAttribute('aria-checked'), 'true');
   click(light());
-  assert.deepEqual(lastMessage(), { type: 'light', enabled: false });
+  assert.deepEqual(lastMessage(), { type: 'light', enabled: false, generation: 1 });
   const failure = 'The printer rejected the light command';
   publish({ generation: 1, light_error: failure });
   assert.equal(
@@ -670,7 +705,7 @@ for (const confirmed of [false, true]) {
       assert.equal(light().disabled, false);
       assert.equal(light().getAttribute('aria-checked'), String(!confirmed));
       click(light());
-      assert.deepEqual(lastMessage(), { type: 'light', enabled: confirmed });
+      assert.deepEqual(lastMessage(), { type: 'light', enabled: confirmed, generation: 1 });
     });
   }
 }
@@ -706,7 +741,8 @@ test('hidden light updates cannot restore an expired light on return', () => {
   assert.equal(light().disabled, true);
   assert.equal(light().getAttribute('aria-checked'), 'false');
   assert.equal(visible(button('play')), true, 'Returning does not start camera playback');
-  publish({ generation: 1, light: false });
+  selectPrinter(2);
+  publish({ generation: 2, light: false });
   assert.equal(light().disabled, false);
   assert.equal(light().getAttribute('aria-checked'), 'false');
 });
@@ -732,7 +768,7 @@ test('an unavailable light cannot send commands and keeps its last confirmed sta
   assert.equal(light().disabled, false);
   assert.equal(light().getAttribute('aria-checked'), 'false');
   click(light());
-  assert.deepEqual(lastMessage(), { type: 'light', enabled: true });
+  assert.deepEqual(lastMessage(), { type: 'light', enabled: true, generation: 1 });
 });
 
 for (const outcome of ['load', 'error'] as const) {
@@ -799,14 +835,17 @@ test('replacing a pending frame releases it and ignores its late load callback',
 });
 
 test('repeated playback and visibility cycles leave no frame URLs outstanding', () => {
-  selectPrinter();
+  let generation = 1;
+  selectPrinter(generation);
   for (let cycle = 0; cycle < 20; cycle++) {
     click(button('play'));
-    publish({ generation: 1, image: 'frame' });
+    selectPrinter(++generation);
+    publish({ generation, image: 'frame' });
     if (cycle % 2 === 0) settleFrame();
     if (cycle % 3 === 0) {
       setVisible(false);
       setVisible(true);
+      selectPrinter(++generation);
     } else click(button('stop'));
     assert.equal(activeURLs.size, 0);
     assert.equal(visible(button('play')), true);
@@ -913,7 +952,7 @@ test('visibility stops monitoring once, ignores late loads, and returning requir
   start();
   publish({ generation: 1, image: 'frame' });
   setVisible(false);
-  assert.deepEqual(lastMessage(), { type: 'activity', active: false });
+  assert.deepEqual(lastMessage(), { type: 'activity', active: false, generation: 1 });
   const inactiveCount = sent.length;
   settleFrame();
   advance(5000);
@@ -988,7 +1027,7 @@ test('unmount ends monitoring and later browser events or host messages cannot r
   const pendingLoad = image().onload!;
   const pendingImage = image();
   await unmount(app);
-  assert.deepEqual(lastMessage(), { type: 'activity', active: false });
+  assert.deepEqual(lastMessage(), { type: 'activity', active: false, generation: 1 });
   const messageCount = sent.length;
   advance(5000);
   flushSync(() => {

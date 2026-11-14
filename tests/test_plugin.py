@@ -21,7 +21,7 @@ orca = types.ModuleType("orca")
 orca.pages = types.SimpleNamespace(PagesPluginCapabilityBase=object)
 orca.base = object
 orca.plugin = lambda cls: cls
-orca.LifecycleEvent = types.SimpleNamespace(DeviceSelected="device", PresetSelected="preset")
+orca.LifecycleEvent = types.SimpleNamespace(DeviceSelected="device", PresetSelected="preset", PresetSaved="saved")
 sys.modules["orca"] = orca
 spec = importlib.util.spec_from_file_location("plugin", Path(__file__).parents[1] / "dist" / "orca-snapmaker-u1-camera-plugin_any.py")
 plugin = importlib.util.module_from_spec(spec)
@@ -1193,8 +1193,11 @@ class TestWorkerSchedule:
             if len(renewals) == 2:
                 state.monitor.closed = True
         def snapshot():
+            for deadline in range(101, 160):
+                state.now = deadline
+                assert state.monitor.renew(("printer", ""), state.monitor.generation, playing=True)
             state.now = 159.5
-            state.monitor.update(("printer", ""), playing=True)
+            assert state.monitor.renew(("printer", ""), state.monitor.generation, playing=True)
             return {"image": "frame"}
         state.client.start_monitor.side_effect = renew
         state.client.snapshot.side_effect = snapshot
@@ -1304,8 +1307,10 @@ class TestWorkerSchedule:
             if len(activations) == 3:
                 monitor.closed = True
             else:
-                now[0] = 159 if len(activations) == 1 else 160
-                monitor.update(("printer", ""), playing=True)
+                deadline = 159 if len(activations) == 1 else 160
+                while now[0] < deadline:
+                    now[0] += 1
+                    assert monitor.renew(("printer", ""), monitor.generation, playing=True)
                 monitor.frame_ready = True
             return {"image": "frame"}
 
@@ -1525,6 +1530,289 @@ class TestWorker:
         worker.clients[1].snapshot.assert_not_called()
 
 
+class TestHeartbeat:
+    def test_unchanged_activity_resolves_only_at_the_fixed_refresh_deadline(self, heartbeat_page):
+        state = heartbeat_page
+        for second in range(11):
+            state.now = 100 + second
+            state.activity()
+        assert state.resolve.call_count == 6
+        assert state.saved.call_count == 6
+        assert len(state.targets) == 1
+        assert state.monitor.generation == state.targets[0]["generation"]
+        assert state.monitor.expires == 113.5
+
+    def test_selected_json_is_read_only_at_the_fixed_refresh_deadline(self, heartbeat_page, tmp_path):
+        state = heartbeat_page
+        selected = tmp_path / "selected.json"
+        selected.write_text(json.dumps({"print_host": "saved.local", "printhost_apikey": "saved-key"}))
+        preset = orca.host.preset_bundle().current_printer_preset()
+        preset.file = str(selected)
+        state.saved.side_effect = state.saved_function
+        reads = []
+        open_file = Path.open
+        def read(path, *args, **kwargs):
+            if path == selected:
+                reads.append(state.now)
+            return open_file(path, *args, **kwargs)
+        with patch.object(Path, "open", read):
+            for second in range(11):
+                state.now = 100 + second
+                state.activity()
+        assert reads == [100, 102, 104, 106, 108, 110]
+        assert state.monitor.target == ("http://saved.local", "saved-key")
+        assert len(state.targets) == 1
+
+    def test_absent_target_uses_a_bounded_negative_resolution(self, heartbeat_page):
+        state = heartbeat_page
+        state.saved.return_value = ("", "")
+        for second in range(11):
+            state.now = 100 + second
+            state.activity()
+        assert state.resolve.call_count == 6
+        assert state.saved.call_count == 6
+        assert not state.targets
+        assert state.monitor.target is None
+        state.config["host"] = "manual.local"
+        state.activity()
+        assert state.monitor.target == ("http://manual.local", "")
+
+    def test_manual_config_change_during_consent_stops_old_session_before_prompt(self, heartbeat_page):
+        state = heartbeat_page
+        state.activity()
+        state.config.clear()
+        preset = orca.host.preset_bundle().current_printer_preset()
+        preset.config_value.reset_mock()
+        def confirm(*args, **kwargs):
+            assert state.monitor.target is None
+            state.config["host"] = "manual.local"
+            return "yes"
+        orca.host.ui.message.side_effect = confirm
+        state.activity()
+        assert state.monitor.target is None
+        assert not any(call.args[0] in ("print_host", "printhost_apikey")
+                       for call in preset.config_value.call_args_list)
+        state.activity()
+        assert state.monitor.target == ("http://manual.local", "")
+
+    def test_config_change_invalidates_before_resolution_and_keeps_manual_host_keyless(self, heartbeat_page):
+        state = heartbeat_page
+        state.activity()
+        previous = state.monitor.generation
+        state.config["host"] = "manual.local"
+        state.activity()
+        assert state.monitor.target == ("http://manual.local", "")
+        assert state.monitor.generation > previous
+        assert len(state.targets) == 2
+        assert state.saved.call_count == 1
+        state.saved.assert_called_once()
+
+    @pytest.mark.parametrize("field,value", [
+        pytest.param("print_host", "changed.local", id="address"),
+        pytest.param("printhost_apikey", "changed-key", id="key"),
+    ])
+    def test_api_connection_changes_refresh_by_the_bounded_fallback(self, heartbeat_page, field, value):
+        state = heartbeat_page
+        state.values.update(print_host="printer.local", printhost_apikey="initial-key")
+        state.activity()
+        previous = state.monitor.generation
+        state.values[field] = value
+        state.now += 1
+        state.activity()
+        assert state.monitor.generation == previous
+        state.now += 1
+        state.activity()
+        assert state.monitor.target == ("http://changed.local" if field == "print_host" else "http://printer.local",
+                                        value if field == "printhost_apikey" else "initial-key")
+        assert state.monitor.generation > previous
+        assert len(state.targets) == 2
+
+    def test_saved_connection_changes_refresh_without_a_selection_event(self, heartbeat_page):
+        state = heartbeat_page
+        state.activity()
+        state.saved.return_value = ("changed.local", "changed-key")
+        state.now += 2
+        state.activity()
+        assert state.monitor.target == ("http://changed.local", "changed-key")
+        assert len(state.targets) == 2
+
+    @pytest.mark.parametrize("allowed", [False, None])
+    def test_permission_revocation_blocks_reads_and_old_frame_renewals(self, heartbeat_page, allowed):
+        state = heartbeat_page
+        state.activity(playing=True)
+        generation = state.monitor.generation
+        state.config["allow_preset_connection"] = allowed
+        state.activity()
+        assert state.monitor.target is None
+        calls = state.saved.call_count
+        expires = state.monitor.expires
+        state.page.on_message({"type": "frame", "generation": generation})
+        assert state.monitor.expires == expires
+        assert state.saved.call_count == calls == 1
+        assert state.page.post_message.call_args.args[0]["error"]
+
+    def test_restored_permission_recovers_with_a_fresh_page_handshake(self, heartbeat_page):
+        state = heartbeat_page
+        state.activity()
+        old_generation = state.monitor.generation
+        state.config["allow_preset_connection"] = False
+        state.activity()
+        assert state.monitor.target is None
+        state.config["allow_preset_connection"] = True
+        state.page.on_message({"type": "activity", "active": True, "playing": False})
+        assert state.monitor.target == ("http://printer.local", "initial-key")
+        assert state.monitor.generation > old_generation
+        expires = state.monitor.expires
+        state.page.on_message({"type": "activity", "active": True, "playing": True,
+                               "generation": old_generation})
+        assert state.monitor.expires == expires
+        assert not state.monitor.playing
+
+    def test_frames_refresh_permissions_even_without_activity_ticks(self, heartbeat_page):
+        state = heartbeat_page
+        state.activity(playing=True)
+        generation = state.monitor.generation
+        state.config["allow_preset_connection"] = False
+        state.now += 2.01
+        state.page.on_message({"type": "frame", "generation": generation})
+        assert state.monitor.target is None
+        assert state.saved.call_count == 1
+
+    def test_expired_frame_cannot_reactivate_a_session(self, heartbeat_page):
+        state = heartbeat_page
+        state.activity(playing=True)
+        generation = state.monitor.generation
+        state.now += 3.5
+        expires = state.monitor.expires
+        state.page.on_message({"type": "frame", "generation": generation})
+        assert state.monitor.expires == expires
+        assert not state.monitor.current(generation)
+        state.activity()
+        assert state.monitor.current(state.monitor.generation)
+        assert state.monitor.generation > generation
+        assert len(state.targets) == 2
+
+    def test_stale_activity_and_light_cannot_renew_or_command_a_new_generation(self, heartbeat_page):
+        state = heartbeat_page
+        state.activity()
+        generation = state.monitor.generation
+        state.page.on_lifecycle_event(orca.LifecycleEvent.DeviceSelected, types.SimpleNamespace())
+        expires = state.monitor.expires
+        for message in [{"type": "activity", "active": True, "playing": True},
+                        {"type": "activity", "active": False},
+                        {"type": "light", "enabled": True}]:
+            state.page.on_message(dict(message, generation=generation))
+        assert state.monitor.target is None
+        assert state.monitor.expires == expires
+        assert state.monitor.light is None
+        assert state.resolve.call_count == 1
+
+    @pytest.mark.parametrize("event", ["DeviceSelected", "PresetSelected", "PresetSaved"])
+    def test_supported_events_invalidate_and_resolve_on_the_next_ui_callback(self, heartbeat_page, event):
+        state = heartbeat_page
+        state.activity()
+        state.saved.return_value = ("selected.local", "selected-key")
+        state.page.on_lifecycle_event(getattr(orca.LifecycleEvent, event), types.SimpleNamespace(msg="printer"))
+        assert state.monitor.target is None
+        state.page.on_message({"type": "activity", "active": True, "playing": False})
+        assert state.monitor.target == ("http://selected.local", "selected-key")
+        assert state.saved.call_count == 2
+
+    def test_hide_show_reload_and_playback_transitions_reannounce_before_work(self, heartbeat_page):
+        state = heartbeat_page
+        state.activity()
+        first = state.monitor.generation
+        state.activity(playing=True)
+        assert state.monitor.generation > first
+        assert len(state.targets) == 2
+        state.page.on_message({"type": "activity", "active": False, "generation": state.monitor.generation})
+        assert state.monitor.target is None
+        state.page.on_message({"type": "activity", "active": True, "playing": False})
+        assert len(state.targets) == 3
+        state.page.get_ui()
+        assert state.monitor.target is None
+        state.page.on_message({"type": "activity", "active": True, "playing": False})
+        assert len(state.targets) == 4
+        state.page.on_unload()
+        assert state.page.monitor is None
+
+    def test_light_command_uses_validated_session_without_resolution_or_announcement(self, heartbeat_page):
+        state = heartbeat_page
+        state.activity()
+        state.page.on_message({"type": "light", "enabled": True, "generation": state.monitor.generation})
+        assert state.monitor.light is True
+        assert state.resolve.call_count == 1
+        assert len(state.targets) == 1
+
+    def test_unchanged_direct_update_does_not_repeat_the_target_announcement(self, heartbeat_page):
+        state = heartbeat_page
+        state.activity()
+        state.monitor.update(state.monitor.target, playing=False)
+        assert len(state.targets) == 1
+
+    @pytest.mark.parametrize("kind", ["activity", "light"])
+    def test_selection_at_renewal_boundary_cannot_restore_or_command_the_old_target(self, heartbeat_page, kind):
+        state = heartbeat_page
+        state.activity()
+        generation = state.monitor.generation
+        def renew(*args):
+            state.page.on_lifecycle_event(orca.LifecycleEvent.DeviceSelected, types.SimpleNamespace())
+            return False
+        state.monitor.renew = renew
+        state.page.on_message({"type": kind, "generation": generation, "active": True,
+                               "playing": False, "enabled": True})
+        assert state.monitor.target is None
+        assert state.monitor.light is None
+        assert len(state.targets) == 1
+
+    def test_selection_at_initial_application_boundary_cannot_restore_the_old_target(self, heartbeat_page):
+        state = heartbeat_page
+        activity_target = state.page.activity_target
+        def resolve(*args, **kwargs):
+            result = activity_target(*args, **kwargs)
+            state.page.on_lifecycle_event(orca.LifecycleEvent.DeviceSelected, types.SimpleNamespace())
+            return result
+        state.page.activity_target = resolve
+        state.activity()
+        assert state.monitor.target is None
+        assert not state.targets
+
+    def test_revocation_during_address_lookup_prevents_key_reads(self, heartbeat_page):
+        state = heartbeat_page
+        preset = orca.host.preset_bundle().current_printer_preset()
+        def value(name):
+            if name == "print_host":
+                state.config["allow_preset_connection"] = False
+                return "printer.local"
+            return state.values.get(name)
+        preset.config_value.side_effect = value
+        state.activity()
+        assert state.monitor.target is None
+        assert "printhost_apikey" not in [call.args[0] for call in preset.config_value.call_args_list]
+        assert not state.targets
+
+    def test_config_change_during_resolution_is_not_cached_against_the_old_target(self, heartbeat_page):
+        state = heartbeat_page
+        def resolve(*args):
+            state.config["host"] = "manual.local"
+            return ("http://obsolete.local", "obsolete-key")
+        state.resolve.side_effect = resolve
+        state.activity()
+        assert state.monitor.target is None
+        assert not state.targets
+        assert state.page.post_message.call_args.args[0]["error"]
+
+    def test_selection_event_during_resolution_cannot_restart_the_old_target(self, heartbeat_page):
+        state = heartbeat_page
+        def resolve(*args):
+            state.page.on_lifecycle_event(orca.LifecycleEvent.DeviceSelected, types.SimpleNamespace())
+            return ("http://obsolete.local", "obsolete-key")
+        state.resolve.side_effect = resolve
+        state.activity()
+        assert state.monitor.target is None
+        assert not state.targets
+
+
 class TestTarget:
 
     @pytest.mark.parametrize('choice', [
@@ -1593,7 +1881,7 @@ class TestTarget:
         config["allow_preset_connection"] = False
         preset = orca.host.preset_bundle().current_printer_preset()
         preset.config_value.reset_mock()
-        page.monitor = Mock()
+        page.monitor = Mock(condition=threading.Condition(), target=None, generation=0)
         page.on_lifecycle_event(orca.LifecycleEvent.PresetSelected, types.SimpleNamespace(msg="printer"))
         with patch.object(plugin, "saved_connection") as read_file:
             page.on_message({"type": "activity", "active": True, "playing": True})
@@ -1702,7 +1990,7 @@ class TestTarget:
         assert page.selected_target() == ('http://u1.local', '')
         with patch.object(orca.host, "preset_bundle", side_effect=RuntimeError("No preset available")):
             assert page.selected_target() == ('http://u1.local', '')
-        page.monitor = Mock()
+        page.monitor = Mock(condition=threading.Condition(), target=None, generation=0)
         page.on_message({"type": "activity", "active": True, "playing": True})
         page.monitor.update.assert_called_once_with(("http://u1.local", ""), None, True)
         page.get_config = lambda: '{"host":"file:///tmp/invalid"}'
@@ -1711,7 +1999,7 @@ class TestTarget:
 
     def test_other_printer_without_manual_host_reports_address_warning(self, make_page):
         page = make_page({"printer_model": "Bambu Lab A1", "print_host": "other-printer.local"})
-        page.monitor = Mock()
+        page.monitor = Mock(condition=threading.Condition(), target=None, generation=0)
         for message in [{"type": "activity", "active": True, "playing": True},
                         {"type": "light", "enabled": True}]:
             page.on_message(message)
@@ -1721,7 +2009,7 @@ class TestTarget:
 
     def test_u1_without_address_reports_configuration_warning(self, make_page):
         page = make_page({"printer_model": "Snapmaker U1"})
-        page.monitor = Mock()
+        page.monitor = Mock(condition=threading.Condition(), target=None, generation=0)
         page.on_message({"type": "activity", "active": True, "playing": True})
         page.monitor.update.assert_called_once_with(None)
         assert page.post_message.call_args.args[0]['supported']
@@ -1740,7 +2028,7 @@ class TestTarget:
 
     def test_printer_selection_stops_monitor_and_refreshes_page(self):
         page = plugin.U1Page()
-        page.monitor = Mock()
+        page.monitor = Mock(condition=threading.Condition(), target=None, generation=0)
         page.post_message = Mock()
         page.on_lifecycle_event(orca.LifecycleEvent.PresetSelected, types.SimpleNamespace(msg="printer"))
         page.monitor.update.assert_called_once_with(None)
@@ -1889,3 +2177,27 @@ def make_page(monkeypatch):
         return page
 
     return create
+
+
+@pytest.fixture
+def heartbeat_page(make_page, monkeypatch):
+    state = types.SimpleNamespace(now=100.0, values={"printer_model": "Snapmaker U1"},
+                                  config={"allow_preset_connection": True}, targets=[])
+    monkeypatch.setattr(plugin, "time", types.SimpleNamespace(monotonic=lambda: state.now))
+    monkeypatch.setattr(plugin, "threading", types.SimpleNamespace(
+        Condition=threading.Condition, Thread=lambda **kwargs: Mock()))
+    state.page = make_page(state.values, state.config, file="/profiles/selected.json")
+    state.monitor = plugin.Monitor(state.targets.append)
+    state.page.monitor = state.monitor
+    state.saved_function = plugin.saved_connection
+    state.saved = Mock(return_value=("printer.local", "initial-key"))
+    monkeypatch.setattr(plugin, "saved_connection", state.saved)
+    state.resolve = Mock(wraps=state.page.selected_target)
+    monkeypatch.setattr(state.page, "selected_target", state.resolve)
+    def activity(playing=False):
+        state.page.on_message({"type": "activity", "active": True, "playing": playing,
+                               "generation": state.monitor.generation} if state.monitor.target else
+                              {"type": "activity", "active": True, "playing": playing})
+    state.activity = activity
+    yield state
+    state.monitor.close()

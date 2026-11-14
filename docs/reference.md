@@ -113,6 +113,18 @@ The plugin therefore asks explicitly before accessing connection settings, even 
 - [Snapmaker's Fluidd light controls](https://github.com/Snapmaker/u1-fluidd/blob/main/src/components/widgets/outputs/OutputLed.vue)
 - [Snapmaker's Fluidd adaptive camera](https://github.com/Snapmaker/u1-fluidd/blob/main/src/components/widgets/camera/services/MjpegstreamerAdaptiveCamera.vue)
 
+## Page activity and connection changes
+
+Activity messages renew the current generation without repeating target announcements or full connection discovery.
+The page checks its effective plugin configuration on every activity or light callback.
+Device selection, printer preset selection, and preset-save events invalidate the resolved connection immediately.
+Orca does not expose a plugin configuration-change event, and preset connection fields can change without a selection event.
+
+The UI callback therefore resolves connection details again after two seconds, including a saved selected-preset file when needed.
+The refresh deadline does not move with routine renewals, so normal one-second activity detects unannounced changes within about three seconds.
+For a live generation, frame callbacks also refresh connection details after two seconds instead of retaining unchecked credentials.
+The callback copies connection values before background work and never passes live host or preset handles to the worker.
+
 ## Network deadlines
 
 Each HTTP request and camera-monitor WebSocket operation has a two-second elapsed deadline.
