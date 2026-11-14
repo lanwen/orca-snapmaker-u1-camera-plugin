@@ -191,15 +191,23 @@ test('header status uses compact labels and only elapsed time after a successful
   assert.equal(field('status-delivery-value').textContent, 'Waiting');
   selectPrinter();
   publish({ generation: 1, stats: null, status_error: 'timeout' });
-  assert.equal(field('status-delivery-value').textContent, 'Unavailable');
+  assert.equal(visible(field('status-delivery-value')), false);
+  assert.equal(field('printer').textContent, field('stats-state').textContent);
   assert.equal(visible(field('status-age')), false);
   publish({ generation: 1, stats: metrics });
-  assert.equal(field('status-delivery-value').textContent, 'Current');
+  assert.equal(field('status-delivery').dataset.state, 'fresh');
+  assert.equal(visible(field('status-delivery-value')), false);
+  assert.equal(visible(field('status-age')), false);
   advance(3000);
   publish({ generation: 1, stats: null, status_error: 'timeout' });
   assert.equal(visible(field('status-delivery-value')), false);
   assert.equal(field('status-age').textContent, '…3s');
+  assert.equal(field('printer').nextElementSibling, field('status-age'));
+  assert.equal(field('status-age').parentElement?.matches('.printer-meta'), true);
   assert.equal(field('status-age').closest('[aria-live]:not([aria-live="off"])'), null);
+  publish({ generation: 1, stats: metrics });
+  assert.equal(visible(field('status-delivery-value')), false);
+  assert.equal(visible(field('status-age')), false);
 });
 
 test('status delivery waits for an actual reading rather than a target, heartbeat or camera frame', () => {

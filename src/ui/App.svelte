@@ -12,13 +12,6 @@
       ? null
       : Math.max(0, Math.floor(((camera?.now ?? 0) - camera.lastSuccessfulStatusAt) / 1000)),
   );
-  const deliveryValue = $derived(
-    camera?.statusDelivery === 'fresh'
-      ? 'Current'
-      : camera?.statusDelivery === 'retrying'
-        ? 'Unavailable'
-        : 'Waiting',
-  );
   const deliveryAnnouncement = $derived(
     camera?.statusDelivery === 'retrying'
       ? 'Printer status unavailable. Waiting for a new reading.'
@@ -56,6 +49,7 @@
         <span
           id="status-delivery"
           data-state={camera?.statusDelivery}
+          class:sr-only={camera?.statusDelivery !== 'waiting'}
           hidden={!camera?.statusDelivery}
         >
           <span id="status-delivery-label" class="sr-only" role="status" aria-atomic="true"
@@ -64,17 +58,7 @@
           <span
             id="status-delivery-value"
             aria-hidden="true"
-            hidden={camera?.statusDelivery === 'retrying' && lastUpdateAge !== null}
-            >{deliveryValue}</span
-          >
-          <span
-            id="status-age"
-            aria-live="off"
-            aria-label={lastUpdateAge === null
-              ? undefined
-              : 'Last successful printer status ' + age(lastUpdateAge) + ' ago'}
-            hidden={camera?.statusDelivery !== 'retrying' || lastUpdateAge === null}
-            >{lastUpdateAge === null ? '' : '…' + age(lastUpdateAge)}</span
+            hidden={camera?.statusDelivery !== 'waiting'}>Waiting</span
           >
         </span>
       </div>
@@ -85,6 +69,15 @@
           stats={camera?.stats ?? null}
           fallback={camera?.printer ?? 'Connecting'}
         />
+        <span
+          id="status-age"
+          aria-live="off"
+          aria-label={lastUpdateAge === null
+            ? undefined
+            : 'Last successful printer status ' + age(lastUpdateAge) + ' ago'}
+          hidden={camera?.statusDelivery !== 'retrying' || lastUpdateAge === null}
+          >{lastUpdateAge === null ? '' : '…' + age(lastUpdateAge)}</span
+        >
       </div>
     </div>
     <div class="light-area" data-error={Boolean(camera?.lightError) || undefined}>
@@ -227,9 +220,6 @@
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
   }
-  #status-delivery[data-state='fresh'] {
-    color: #b4c9c3;
-  }
   header > div:first-child {
     min-width: 0;
   }
@@ -245,7 +235,20 @@
     --print-state-font-size: 12px;
     display: flex;
     align-items: center;
-    gap: 6px 12px;
+    gap: 6px;
+  }
+  #target {
+    margin-right: 6px;
+  }
+  .printer-meta :global(#printer),
+  #status-age {
+    flex: 0 0 auto;
+  }
+  #status-age {
+    color: #a7b5c2;
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
   }
   #play,
   #warning {

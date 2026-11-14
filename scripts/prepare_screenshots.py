@@ -189,7 +189,8 @@ function publishScreenshot() {
     return;
   }
   const offline = screenshotState === 'printer-unavailable';
-  screenshotHandler({type:'target', generation, target:'Workshop · Snapmaker U1'});
+  screenshotHandler({type:'target', generation, target:screenshotState === 'status-retrying'
+    ? 'Workshop printer with a long preset name · printer.example.invalid' : 'Workshop · Snapmaker U1'});
   const statusPreview = screenshotState.startsWith('status-');
   if (changed && ['status-retrying', 'status-expired', 'status-recovered'].includes(screenshotState)) {
     screenshotHandler({generation, stats:screenshotFixtures.printing, light:true});

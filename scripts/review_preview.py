@@ -493,9 +493,14 @@ def review(directory, output, states, widths, gifs=False):
                         const freshness=delivery.getBoundingClientRect();
                         const address=target.getBoundingClientRect();
                         const phase=document.querySelector('#printer').getBoundingClientRect();
+                        const age=document.querySelector('#status-age');
+                        const timer=age.getBoundingClientRect();
+                        const waiting=delivery.dataset.state === 'waiting';
                         const light=document.querySelector('.light-area').getBoundingClientRect();
-                        return Math.max(title.right, freshness.right, address.right, phase.right) < light.left &&
-                          address.right <= phase.left && (!delivery.getClientRects().length || title.right <= freshness.left);
+                        return Math.max(title.right, waiting ? freshness.right : 0, address.right, phase.right, age.hidden ? 0 : timer.right) < light.left &&
+                          address.right <= phase.left && (!waiting || title.right <= freshness.left) &&
+                          (age.hidden || (phase.right <= timer.left && Math.abs(phase.y+phase.height/2-timer.y-timer.height/2) <= 1)) &&
+                          (waiting || getComputedStyle(delivery).position === 'absolute');
                       };
                       try {
                         if (!fits()) return true;
