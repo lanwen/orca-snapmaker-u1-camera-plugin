@@ -35,6 +35,16 @@ The page uses `visibilitychange` and `pagehide` to stop playback when leaving th
 App and keyboard focus do not control playback.
 Test the embedded webview when upgrading Orca or using another platform.
 
+## Status and observed pause timers
+
+The header timer after “Status unavailable” measures the current interruption, starting at the first failed reading or the known ten-second expiry deadline.
+Initial waiting has no interruption timer; a successful reading clears it.
+A timer after “Paused” measures time since the page observed a transition from continuous fresh printing or preparation readings into paused state.
+A first paused reading has no timer because its start is unknown; a status gap clears any observed pause timer.
+This is not the printer's exact current pause duration.
+The checked [printer statistics API](https://github.com/Snapmaker/u1-klipper/blob/7ac453b50fe6779b2ec0b759038a17da5e6d671d/klippy/extras/print_stats.py#L315-L339) and [pause API](https://github.com/Snapmaker/u1-klipper/blob/7ac453b50fe6779b2ec0b759038a17da5e6d671d/klippy/extras/pause_resume.py#L57-L60) do not expose the current pause start.
+The difference between total and printing duration also includes preparation and previous pauses, so it cannot supply the current pause duration.
+
 ## Print duration and finish estimates
 
 `planned_total` is the original positive, finite slicer `estimated_time` from the active file's bounded metadata response.

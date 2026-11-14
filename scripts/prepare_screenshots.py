@@ -22,7 +22,8 @@ PREVIEW_LABELS = {
     "top-cover-missing": "Top cover disconnected",  # Optional cover is not detected.
     "preparing": "Heating",  # Preparation with heaters below target.
     "preparing-warm": "Preparing (warm)",  # Preparation after warm-up.
-    "paused": "Paused",  # Interrupted print without a finish estimate.
+    "paused": "Paused (start unknown)",  # A first paused reading cannot establish its start.
+    "paused-observed": "Pause observed (12s)",  # Continuous fresh readings establish the observed pause.
     "finishing": "Finishing",  # Full slicer progress while still active.
     "complete": "Complete",  # Finished print with final measurements.
     "cancelled": "Cancelled",  # Stopped job with partial progress.
@@ -30,8 +31,8 @@ PREVIEW_LABELS = {
     "standby": "Standby",  # Idle printer with current temperatures.
     "unavailable": "Status unavailable",  # Missing printer status, independent of the camera.
     "status-waiting": "Waiting for status",  # Video before the first printer reading.
-    "status-retrying": "Status retry after success",  # Failed status with last-success history.
-    "status-no-success": "Status retry before success",  # Failed status without invented history.
+    "status-retrying": "Status retry after success",  # Elapsed time in the current failed-status interruption.
+    "status-no-success": "Status retry before success",  # First failed status starts an interruption timer.
     "status-expired": "Status expired",  # Video continues after measurements expire.
     "status-recovered": "Status recovered",  # Successful delivery after an interruption.
     "phase-unknown": "Unknown phase",  # Active print without reliable layers.
@@ -103,6 +104,7 @@ def screenshot_page(camera=None):
                                material_profile="Polymaker PolyLite PETG @Snapmaker U1 (0.4 nozzle)",
                                bed={"temperature": 60, "target": 60},
                                hotend={"temperature": 170, "target": 170})
+    fixtures["paused-observed"] = dict(fixtures["paused"])
     # Captured completed-job values from the U1; camera image remains illustrative.
     fixtures["complete"] = dict(fixtures["printing"], state="complete", progress=1, material_profile=None,
                                  current_layer=86, elapsed=5118, printing_duration=4950,
@@ -192,15 +194,23 @@ function publishScreenshot() {
   screenshotHandler({type:'target', generation, target:screenshotState === 'status-retrying'
     ? 'Workshop printer with a long preset name · printer.example.invalid' : 'Workshop · Snapmaker U1'});
   const statusPreview = screenshotState.startsWith('status-');
-  if (changed && ['status-retrying', 'status-expired', 'status-recovered'].includes(screenshotState)) {
+  if (changed && ['status-retrying', 'status-expired', 'status-recovered', 'paused-observed'].includes(screenshotState)) {
     screenshotHandler({generation, stats:screenshotFixtures.printing, light:true});
-    screenshotOffset = 12000;
   }
-  if (changed && screenshotState === 'status-recovered') {
+  if (changed && ['unavailable', 'status-retrying', 'status-no-success', 'status-recovered'].includes(screenshotState)) {
+    screenshotOffset = ['status-retrying', 'status-recovered'].includes(screenshotState) ? 3000 : 0;
     screenshotHandler({generation, stats:null, status_error:'timeout', light:null});
+    screenshotOffset += 12000;
+  }
+  if (changed && screenshotState === 'status-expired') screenshotOffset = 22000;
+  if (changed && screenshotState === 'paused-observed') {
+    for (const at of [3000, 9000]) {
+      screenshotOffset = at;
+      screenshotHandler({generation, stats:screenshotFixtures['paused-observed']});
+    }
     screenshotOffset = 15000;
   }
-  screenshotHandler({generation, printer:screenshotLabels[screenshotFixtures[screenshotState].state],
+  screenshotHandler({generation, ...(screenshotState === 'status-waiting' ? {} : {printer:screenshotLabels[screenshotFixtures[screenshotState].state]}),
     ...(!statusPreview || screenshotState === 'status-recovered' ? {light:offline ? null : screenshotLight} : {}), light_error:screenshotState === 'light-error' ? 'Could not change light — try again' : '',
     ...(!statusPreview || screenshotState === 'status-recovered' ? {stats:screenshotFixtures[screenshotState]} : {}),
     ...(['unavailable', 'status-retrying', 'status-no-success'].includes(screenshotState) ? {stats:null, status_error:'timeout', light:null} : {}),

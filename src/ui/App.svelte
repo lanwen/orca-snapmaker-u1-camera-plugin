@@ -7,17 +7,27 @@
 
   let image: HTMLImageElement;
   let camera = $state<Camera>();
-  const lastUpdateAge = $derived(
-    camera?.lastSuccessfulStatusAt == null
-      ? null
-      : Math.max(0, Math.floor(((camera?.now ?? 0) - camera.lastSuccessfulStatusAt) / 1000)),
+  const timerStart = $derived(
+    camera?.statusDelivery === 'retrying'
+      ? camera.statusInterruptedAt
+      : (camera?.pauseObservedAt ?? null),
+  );
+  const stateAge = $derived(
+    timerStart === null ? null : Math.max(0, Math.floor(((camera?.now ?? 0) - timerStart) / 1000)),
+  );
+  const timerMeaning = $derived(
+    camera?.statusDelivery === 'retrying'
+      ? 'Time since printer status became unavailable'
+      : 'Time since the printer pause was observed',
   );
   const deliveryAnnouncement = $derived(
     camera?.statusDelivery === 'retrying'
       ? 'Printer status unavailable. Waiting for a new reading.'
-      : camera?.statusDelivery === 'fresh'
-        ? 'Printer status current.'
-        : 'Waiting for printer status.',
+      : camera?.pauseObservedAt != null
+        ? 'Printer pause observed. Timer shows time since it was observed.'
+        : camera?.statusDelivery === 'fresh'
+          ? 'Printer status current.'
+          : 'Waiting for printer status.',
   );
   function age(seconds: number) {
     return seconds < 60
@@ -72,11 +82,9 @@
         <span
           id="status-age"
           aria-live="off"
-          aria-label={lastUpdateAge === null
-            ? undefined
-            : 'Last successful printer status ' + age(lastUpdateAge) + ' ago'}
-          hidden={camera?.statusDelivery !== 'retrying' || lastUpdateAge === null}
-          >{lastUpdateAge === null ? '' : '…' + age(lastUpdateAge)}</span
+          title={timerMeaning}
+          aria-label={stateAge === null ? undefined : timerMeaning + ': ' + age(stateAge)}
+          hidden={stateAge === null}>{stateAge === null ? '' : '…' + age(stateAge)}</span
         >
       </div>
     </div>

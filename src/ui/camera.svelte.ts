@@ -50,7 +50,8 @@ export class Camera {
   private lightAt: number | null = null;
   stats = $state<PrintStats | null>(null);
   statsAt = $state(0);
-  lastSuccessfulStatusAt = $state<number | null>(null);
+  statusInterruptedAt = $state<number | null>(null);
+  pauseObservedAt = $state<number | null>(null);
   private active = $state(false);
   statusDelivery: StatusDelivery | null = $derived(
     !this.active || this.targetUnavailable
@@ -59,7 +60,7 @@ export class Camera {
         ? 'fresh'
         : this.stats?.state === 'unavailable' ||
             this.statusError ||
-            this.lastSuccessfulStatusAt !== null
+            this.statusInterruptedAt !== null
           ? 'retrying'
           : 'waiting',
   );
@@ -74,15 +75,38 @@ export class Camera {
   ) {}
 
   private setStats(stats: PrintStats | null = null, unavailable = false) {
+    const at = Date.now();
+    const previous = this.stats;
+    const continuous =
+      previous &&
+      previous.state !== 'unavailable' &&
+      at >= this.statsAt &&
+      at - this.statsAt < 10000;
+    if (stats && stats.state !== 'unavailable') {
+      this.pauseObservedAt =
+        stats.state === 'paused' && continuous
+          ? previous.state === 'paused'
+            ? this.pauseObservedAt
+            : ['printing', 'preparing'].includes(previous.state)
+              ? at
+              : null
+          : null;
+      this.statusInterruptedAt = null;
+      this.statsAt = at;
+    } else {
+      this.pauseObservedAt = null;
+      if (unavailable)
+        this.statusInterruptedAt ??=
+          previous && previous.state !== 'unavailable' ? Math.min(at, this.statsAt + 10000) : at;
+      else this.statusInterruptedAt = null;
+      this.statsAt = 0;
+    }
     this.stats = stats ?? (unavailable ? { state: 'unavailable' } : null);
-    this.statsAt = this.stats && this.stats.state !== 'unavailable' ? Date.now() : 0;
-    if (this.stats && this.stats.state !== 'unavailable')
-      this.lastSuccessfulStatusAt = this.statsAt;
+    this.now = at;
   }
 
   private resetStatus() {
     this.setStats();
-    this.lastSuccessfulStatusAt = null;
     this.statusError = '';
     this.printer = 'Connecting';
     this.light = null;
