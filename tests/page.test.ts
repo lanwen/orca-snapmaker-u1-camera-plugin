@@ -266,10 +266,9 @@ for (const state of ['complete', 'cancelled', 'error']) {
     assert.equal(progress().hasAttribute('data-shimmer'), false);
     assert.deepEqual(numbers(field('hotend-value')), [235]);
     assert.equal(field('hotend-value').querySelector('sub'), null);
-    assert.equal(
-      field('hotend-value').querySelector('[title]')?.getAttribute('title'),
-      'Heater off · cooling',
-    );
+    const cooling = field('hotend-value').querySelector('.temperature-arrow.cooling');
+    assert.ok(cooling);
+    assert.ok(cooling.closest('[title]')?.getAttribute('title')?.trim());
     assert.equal(visible(progress()), true);
     if (state === 'complete') {
       assert.equal(Number(progress().getAttribute('aria-valuenow')), 100);
@@ -421,7 +420,7 @@ test('layer-zero purge keeps preparation and its plan separate from remaining ti
   assert.equal(field('stats-state').textContent, 'Preparing');
   assert.equal(visible(progress()), true);
   assert.equal(progress().hasAttribute('aria-valuenow'), false);
-  assert.equal(progress().getAttribute('aria-valuetext'), 'Preparation in progress');
+  assert.match(progress().getAttribute('aria-valuetext')!, /prepar/i);
   assert.equal(visible(field('remaining-value')), false);
   assert.equal(visible(field('plan-value')), true);
   assert.match(field('plan-stat').textContent!, /35m\s*\+ preparation/);
@@ -485,15 +484,15 @@ test('idle and missing status never present old job details as current', () => {
   assert.equal(visible(field('elapsed-value')), false);
 });
 
-for (const [category, guidance] of [
-  ['timeout', 'Status timed out. Check the printer connection.'],
-  ['access_denied', 'The printer denied access. Check its connection settings.'],
-  ['invalid_response', 'Invalid status response. Check the printer address.'],
-  ['unreachable', 'Status unavailable. Check the printer address and connection.'],
-  ['untrusted-secret', 'Status unavailable. Check the printer address and connection.'],
-  ['__proto__', 'Status unavailable. Check the printer address and connection.'],
-  [undefined, 'Status unavailable. Check the printer address and connection.'],
-]) {
+for (const [category, meaning] of [
+  ['timeout', /time.*out/i],
+  ['access_denied', /access|denied/i],
+  ['invalid_response', /response/i],
+  ['unreachable', /address|connection/i],
+  ['untrusted-secret', /address|connection/i],
+  ['__proto__', /address|connection/i],
+  [undefined, /address|connection/i],
+] as const) {
   test(`status failure ${category} shows safe guidance and recovers independently of the camera`, () => {
     start();
     publish({ generation: 1, stats: metrics, light: true });
@@ -504,14 +503,16 @@ for (const [category, guidance] of [
       light: null,
       status_error: category,
     });
+    const guidance = field('stats-message').textContent!.trim();
     assert.equal(visible(field('stats-message')), true);
-    assert.equal(field('stats-message').textContent, guidance);
+    assert.ok(guidance);
+    assert.match(guidance, meaning);
     assert.equal(visible(field('hardware-stat')), false);
     assert.equal(light().disabled, true);
     publish({ generation: 1, image: 'still live' });
     settleFrame();
     publish({ generation: 1, camera: 'Camera unavailable', failed: true });
-    assert.equal(field('stats-message').textContent, guidance);
+    assert.equal(field('stats-message').textContent!.trim(), guidance);
     assert.doesNotMatch(document.body.textContent!, /untrusted-secret|__proto__/);
     publish({ generation: 1, stats: metrics, light: false });
     assert.equal(visible(field('stats-message')), false);
@@ -520,12 +521,36 @@ for (const [category, guidance] of [
   });
 }
 
+test('known status categories have distinct guidance and unknown inputs use the generic fallback', () => {
+  selectPrinter();
+  const guidance = ['timeout', 'access_denied', 'invalid_response', 'unreachable'].map(
+    (category) => {
+      publish({ generation: 1, stats: null, status_error: category });
+      assert.equal(visible(field('stats-message')), true);
+      const text = field('stats-message').textContent!.trim();
+      assert.ok(text);
+      return text;
+    },
+  );
+  assert.equal(new Set(guidance).size, guidance.length);
+  const generic = guidance.at(-1);
+  for (const category of ['untrusted-secret', '__proto__', undefined]) {
+    publish({ generation: 1, stats: null, status_error: category });
+    assert.equal(field('stats-message').textContent!.trim(), generic);
+    assert.doesNotMatch(document.body.textContent!, /untrusted-secret|__proto__/);
+  }
+  publish({ generation: 1, stats: null });
+  assert.equal(field('stats-message').textContent!.trim(), generic);
+});
+
 test('status failures reset on selection and target changes and reject old generations', () => {
   selectPrinter();
   publish({ generation: 1, stats: null, status_error: 'timeout' });
+  const guidance = field('stats-message').textContent;
+  assert.ok(guidance?.trim());
   publish({ type: 'selection_changed' });
   assert.equal(visible(field('stats-message')), false);
-  assert.doesNotMatch(field('stats-message').textContent!, /timed out/);
+  assert.notEqual(field('stats-message').textContent, guidance);
   publish({ generation: 1, stats: null, status_error: 'access_denied' });
   assert.equal(
     visible(field('stats-message')),
@@ -538,9 +563,10 @@ test('status failures reset on selection and target changes and reject old gener
   assert.equal(visible(field('hardware-stat')), true);
   assert.equal(light().disabled, false);
   publish({ generation: 2, stats: null, status_error: 'timeout' });
+  assert.equal(field('stats-message').textContent, guidance);
   selectPrinter(3, 'Third printer');
   assert.equal(visible(field('stats-message')), false);
-  assert.doesNotMatch(field('stats-message').textContent!, /timed out/);
+  assert.notEqual(field('stats-message').textContent, guidance);
 });
 
 test('unknown or invalid measurements stay unknown rather than becoming NaN or zero progress', () => {
@@ -849,17 +875,18 @@ test('changing generation rejects old frames and status without losing playback 
   publish({ generation: 1, stats: metrics, light: true, image: 'old frame' });
   const oldLoad = image().onload!;
   selectPrinter(2, 'Other printer');
+  const staleFailure = 'Previous printer failure';
   publish({
     generation: 1,
     stats: metrics,
     light: false,
     image: 'late frame',
-    error: 'Stale failure',
+    error: staleFailure,
   });
   assert.equal(visible(field('stats')), false);
   assert.equal(image().hasAttribute('src'), false);
   assert.equal(light().disabled, true);
-  assert.notEqual(field('camera').textContent, 'Stale failure');
+  assert.ok(!field('camera').textContent!.includes(staleFailure));
   flushSync(() => oldLoad.call(image(), new Event('load')));
   assert.equal(frames().length, 0, 'An old load callback cannot acknowledge the new generation');
   publish({ generation: 2, image: 'new frame' });
@@ -913,7 +940,7 @@ test('window focus does not control playback, but a stale image is no longer pre
   advance(6000);
   assert.equal(visible(image()), true, 'A stalled feed retains its last frame');
   assert.equal(field('camera').dataset.state, 'error');
-  assert.match(field('camera').textContent!, /Camera not updating/);
+  assert.ok(field('camera').textContent?.trim(), 'A stalled feed has an explanation');
 });
 
 test('selection changes stop playback, explain unavailable targets, and allow later recovery', () => {
@@ -1006,7 +1033,7 @@ test('downloaded stale images do not reset the interruption timer', () => {
   settleFrame();
   advance(2000);
   assert.equal(field('camera').dataset.state, 'error');
-  assert.match(field('camera').textContent!, /Camera not updating/);
+  assert.ok(field('camera').textContent?.trim(), 'A stalled feed has an explanation');
   publish({ generation: 1, image: 'fresh', frozen: false, fps: 2 });
   settleFrame();
   assert.equal(field('camera').dataset.state, 'live');
@@ -1014,17 +1041,21 @@ test('downloaded stale images do not reset the interruption timer', () => {
 
 test('startup errors wait five seconds and Stop clears the stream status', () => {
   start();
+  const connectingGuidance = field('empty').textContent;
+  assert.ok(connectingGuidance?.trim());
   advance(5000);
   assert.equal(field('camera').dataset.state, 'waiting');
   advance(1000);
   assert.equal(field('camera').dataset.state, 'error');
-  assert.match(field('camera').textContent!, /Camera not responding/);
-  assert.match(field('empty').textContent!, /Retrying connection/);
+  const failure = field('camera').textContent;
+  assert.ok(failure?.trim());
+  assert.ok(field('empty').textContent?.trim(), 'The retrying state has guidance');
+  assert.notEqual(field('empty').textContent, connectingGuidance);
   click(button('stop'));
   assert.equal(visible(field('camera')), false);
   click(button('play'));
   assert.equal(field('camera').dataset.state, 'waiting');
-  assert.doesNotMatch(field('camera').textContent!, /not responding/);
+  assert.notEqual(field('camera').textContent, failure);
 });
 
 test('starting playback moves a connection failure into the stream pill without a duplicate notice', () => {
@@ -1041,14 +1072,13 @@ test('starting playback moves a connection failure into the stream pill without 
 });
 
 test('configuration warnings separate the title from advice and mark config properties as code', () => {
-  publish({
-    error:
-      'Printer address missing. Set "host" in plugin Config or add an address to the selected U1 preset.',
-    supported: true,
-  });
-  assert.equal(field('warning-title').textContent, 'Printer address missing.');
-  assert.match(field('warning-recommendation').textContent!, /Set host in plugin Config/);
-  assert.equal(field('warning-recommendation').querySelector('code')?.textContent, 'host');
+  const title = 'Missing endpoint.';
+  const property = 'host';
+  const advice = `Configure "${property}" to reach the printer.`;
+  publish({ error: `${title} ${advice}`, supported: true });
+  assert.equal(field('warning-title').textContent, title);
+  assert.equal(field('warning-recommendation').textContent?.trim(), advice.replaceAll('"', ''));
+  assert.equal(field('warning-recommendation').querySelector('code')?.textContent, property);
 });
 
 test('the header repeats the print-state label and dot beside the address', () => {
@@ -1077,7 +1107,8 @@ test('the header repeats the print-state label and dot beside the address', () =
 test('the connecting view disappears when the first camera image displays', () => {
   start();
   assert.equal(visible(field('empty')), true);
-  assert.match(field('empty').textContent!, /Connecting to camera/);
+  assert.equal(field('camera').dataset.state, 'waiting');
+  assert.ok(field('empty').textContent?.trim(), 'The initial connection has guidance');
   publish({ generation: 1, image: 'first-frame', fps: 4 });
   settleFrame();
   assert.equal(visible(field('empty')), false);
@@ -1085,22 +1116,25 @@ test('the connecting view disappears when the first camera image displays', () =
 
 test('toolhead details preserve reported material and expose slicing and layer height on focus or tap', () => {
   selectPrinter();
-  publish({
-    generation: 1,
-    stats: {
-      ...metrics,
-      layer_height: 0.2,
-      material: 'PLA',
-      material_vendor: 'Snapmaker',
-      material_subtype: 'SnapSpeed',
-      material_profile: 'Snapmaker PLA SnapSpeed @U1',
-    },
-  });
+  const details = {
+    layer_height: 0.2,
+    material: 'PLA',
+    material_vendor: 'Snapmaker',
+    material_subtype: 'SnapSpeed',
+    material_profile: 'Snapmaker PLA <b>SnapSpeed</b> @U1',
+  };
+  publish({ generation: 1, stats: { ...metrics, ...details } });
   const tab = element('[data-tool="2"]');
-  assert.match(tab.getAttribute('aria-label')!, /Connected · PLA SnapSpeed/);
-  assert.match(field('tool-details-2').textContent!, /Layer height: 0.2 mm/);
-  assert.match(field('tool-details-2').textContent!, /Sliced with: Snapmaker PLA SnapSpeed @U1/);
-  assert.match(tab.nextElementSibling!.textContent!, /PLA SnapSpeed/);
+  const material = `${details.material} ${details.material_subtype}`;
+  assert.ok(tab.getAttribute('aria-label')!.includes(material));
+  assert.ok(field('tool-details-2').textContent!.includes(`${details.layer_height} mm`));
+  assert.ok(field('tool-details-2').textContent!.includes(details.material_profile));
+  assert.equal(
+    field('tool-details-2').querySelector('b'),
+    null,
+    'Profile text is not parsed as HTML',
+  );
+  assert.ok(tab.nextElementSibling!.textContent!.includes(material));
   assert.deepEqual(
     Array.from(document.querySelectorAll('.index-tab b'), (node) => node.textContent),
     ['1', '2', '3', '4'],

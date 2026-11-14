@@ -16,3 +16,15 @@ exclude-newer = "3 days"
 name = "pypi"
 url = "https://pypi.org/simple"
 default = true
+
+[dependency-groups]
+dev = [
+    "pytest>=9.2.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-ra"

@@ -80,7 +80,7 @@ Merged source PRs can supply a human-facing changelog sentence between the Why m
 Automation appends these sentences as plain text under **Unreviewed suggestions**, without PR attribution links.
 It preserves existing suggestion edits and uses source PR comments to avoid duplicates on refresh.
 Keep these comments when editing suggestions.
-Legacy PRs without Why markers and unfinished templates simply have no suggestion.
+PRs without Why markers and unfinished templates simply have no suggestion.
 Copy or edit relevant suggestions into **Public notes**; suggestions are never published automatically.
 A new suggestion resets the review task even when the generated change list is unchanged.
 A visible checklist near the top explains what must be completed before merging.

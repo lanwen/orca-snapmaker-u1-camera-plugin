@@ -40,7 +40,11 @@ Node and pnpm are development tools; Orca users still install one Python file.
 The filename ends in `_any.py` for Orca Cloud's universal platform convention.
 It also writes `dist/SHA256SUMS`.
 `mise run test` builds first and tests the actual generated plugin and Svelte UI.
-`mise run check` runs the Python tests, Oxfmt formatting checks, Oxlint lint checks, Svelte and TypeScript checks, UI behavior tests, and Git whitespace checks.
+`mise run check` runs the Python pytest suite, Oxfmt formatting checks, Oxlint lint checks, Svelte and TypeScript checks, UI behavior tests, and Git whitespace checks.
+For a focused Python run after building, use `mise exec -- uv run --no-sync pytest tests/test_plugin.py`.
+Use `mise exec -- uv run --no-sync pytest --collect-only` to list the Python cases without running them.
+The plugin tests load the generated file in `dist/`; transport deadline tests load the source module separately.
+Release tests use an explicit `release_tree` fixture with temporary project files, isolated Git and uv settings, and mocked GitHub access.
 Edit `src/` and `pyproject.toml`.
 Install only the generated file from `dist/`.
 
@@ -59,7 +63,7 @@ Run `mise exec -- pnpm format` to format the frontend, or `mise exec -- pnpm for
 Run `mise exec -- pnpm lint` for Oxlint alone, or `mise exec -- pnpm check:types` for Svelte and TypeScript checks.
 Oxfmt covers Svelte, TypeScript, JavaScript, CSS, and the frontend HTML and JSON files.
 Oxlint checks JavaScript, TypeScript, and Svelte script blocks; `svelte-check` supplies template diagnostics.
-The lint command rejects dynamic code execution, JavaScript URLs, legacy prototype mutation, and direct HTML insertion through browser APIs.
+The lint command rejects dynamic code execution, JavaScript URLs, access to the `__proto__` property, and direct HTML insertion through browser APIs.
 Selected `eslint-plugin-security` rules also check for unsafe regular expressions, bidirectional control characters, unsafe child-process calls, dynamic `require` calls, and unsafe Buffer and random-byte APIs.
 HTML insertion is deliberately prohibited in scripts: use Svelte markup for structure and text bindings or `textContent` for data.
 These are static source checks; they do not audit dependency vulnerabilities, scan secrets, analyze Python, or inspect Svelte template HTML injection.
