@@ -205,7 +205,13 @@ def check_toolheads(client):
       const tabs = root.querySelectorAll('.index-tab');
       if (tabs.length !== 4) errors.push('Four toolhead tabs are required');
       const fixture = structuredClone(screenshotFixtures[screenshotState]);
-      const generation = screenshotStates.indexOf(screenshotState) + 1;
+      const generation = screenshotGeneration;
+      const postMessage = window.orca.postMessage;
+      // Keep fixture heartbeats from replacing controlled toolhead samples.
+      window.orca.postMessage = message => {
+        if (message.type !== 'activity') postMessage.call(window.orca, message);
+      };
+      try {
       const update = async stats => { screenshotFixtures[screenshotState] = stats; screenshotHandler({generation, stats}); await wait(); };
       const checkTemperatures = () => {
         const bed = root.querySelector('.bed-temperature').getBoundingClientRect();
@@ -287,7 +293,10 @@ def check_toolheads(client):
       }
       await update({state:'unavailable'});
       if (root.getClientRects().length) errors.push('Offline hardware information is visible');
-      screenshotFixtures[screenshotState] = fixture; publishScreenshot(); await wait();
+      } finally {
+        window.orca.postMessage = postMessage;
+        screenshotFixtures[screenshotState] = fixture; publishScreenshot(); await wait();
+      }
       return errors;
     })()""")
     if result:
@@ -482,8 +491,33 @@ def review(directory, output, states, widths, gifs=False):
                     headerStatus:rect(document.querySelector('#printer')),
                     address:rect(document.querySelector('#target')),
                     heading:rect(document.querySelector('h1')),
-                    labelsMatch:!document.querySelector('#stats').getClientRects().length ||
+                    labelsMatch:!document.querySelector('#stats-state').getClientRects().length ||
                       document.querySelector('#printer').textContent === document.querySelector('#stats-state').textContent,
+                    headerOverlap:(() => {
+                      const target=document.querySelector('#target');
+                      const text=target.firstChild;
+                      const original=text.nodeValue;
+                      const fits=() => {
+                        const title=document.querySelector('h1').getBoundingClientRect();
+                        const delivery=document.querySelector('#status-delivery');
+                        const freshness=delivery.getBoundingClientRect();
+                        const address=target.getBoundingClientRect();
+                        const phase=document.querySelector('#printer').getBoundingClientRect();
+                        const age=document.querySelector('#status-age');
+                        const timer=age.getBoundingClientRect();
+                        const waiting=delivery.dataset.state === 'waiting';
+                        const light=document.querySelector('.light-area').getBoundingClientRect();
+                        return Math.max(title.right, waiting ? freshness.right : 0, address.right, phase.right, age.hidden ? 0 : timer.right) < light.left &&
+                          address.right <= phase.left && (!waiting || title.right <= freshness.left) &&
+                          (age.hidden || (phase.right <= timer.left && Math.abs(phase.y+phase.height/2-timer.y-timer.height/2) <= 1)) &&
+                          (waiting || getComputedStyle(delivery).position === 'absolute');
+                      };
+                      try {
+                        if (!fits()) return true;
+                        text.nodeValue='Workshop printer with a deliberately long address and preset name '.repeat(10);
+                        return !fits() || target.scrollWidth <= target.clientWidth;
+                      } finally { text.nodeValue=original; }
+                    })(),
                     connecting:!document.querySelector('#empty').hidden,
                     lightError:document.querySelector('.light-area').dataset.error === 'true',
                     warning:!document.querySelector('#warning').hidden,
@@ -498,7 +532,7 @@ def review(directory, output, states, widths, gifs=False):
                     overflow:[...document.querySelectorAll('#stats,#plan-stat,#remaining-stat,#finish-value,#camera,.light-area,#warning-label,.printer-meta')]
                       .filter(e => e.getClientRects().length && e.scrollWidth > e.clientWidth+(e.id === 'stats' ? 9 : 1)).map(e => e.id)};
                 })()""")
-                if state in {"unavailable", "printer-unavailable"} and client.evaluate("Boolean(document.querySelector('#hardware-stat')?.getClientRects().length)"):
+                if state in {"unavailable", "printer-unavailable", "status-waiting", "status-retrying", "status-no-success", "status-expired"} and client.evaluate("Boolean(document.querySelector('#hardware-stat')?.getClientRects().length)"):
                     errors.append(f"{state} at {width}px: Hardware information is visible without status")
                 if state in {"standby", "complete"} and client.evaluate("Boolean(document.querySelector('.index-stack')?.getClientRects().length || document.querySelector('.filament-traces')?.getClientRects().length)"):
                     errors.append(f"{state} at {width}px: Toolhead tabs are visible without a running print")
@@ -518,6 +552,8 @@ def review(directory, output, states, widths, gifs=False):
                 rows.append(row)
                 results.append(row)
                 try:
+                    if row["headerOverlap"]:
+                        raise ValueError("Printer title, freshness, address, job state, or light overlap")
                     if row["fpsWrapped"]:
                         raise ValueError("Camera FPS label wraps")
                     if not row["islandsAligned"]:
@@ -596,6 +632,10 @@ def review(directory, output, states, widths, gifs=False):
                     client.evaluate(f"{tab}.blur()")
                     client.evaluate("new Promise(resolve => setTimeout(resolve, 280))")
                 client.screenshot(output / row["screenshot"])
+                row["header"] = f"{state}-{width}-header.png"
+                clip = client.evaluate("(() => { const r=document.querySelector('header').getBoundingClientRect(); return {x:r.x,y:r.y,width:r.width,height:r.height,scale:1}; })()")
+                data = client.call("Page.captureScreenshot", {"format":"png", "clip":clip})["data"]
+                (output / row["header"]).write_bytes(base64.b64decode(data))
                 client.evaluate("document.querySelector('#stop').scrollIntoView({block:'nearest'})")
                 stop = client.evaluate("(() => { const r=document.querySelector('#stop').getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2}; })()")
                 client.call("Input.dispatchMouseEvent", {"type": "mouseMoved", **stop})
@@ -611,7 +651,7 @@ def review(directory, output, states, widths, gifs=False):
     (output / "report.json").write_text(json.dumps(report, indent=2) + "\n")
     images = "".join(f'<figure><figcaption>{html.escape(row["state"])} · {row["width"]}px '
                      + (f'<a href="{row["gif"]}">Animation</a>' if "gif" in row else '') + '</figcaption>'
-                     f'<a href="{row["viewport"]}"><img src="{row["screenshot"]}" alt="{html.escape(row["state"])}"></a></figure>' for row in results)
+                     f'<a href="{row["viewport"]}"><img src="{row["header"]}" alt="{html.escape(row["state"])} header"><br><img src="{row["screenshot"]}" alt="{html.escape(row["state"])}"></a></figure>' for row in results)
     (output / "index.html").write_text('<!doctype html><meta charset="utf-8"><title>Print state review</title>'
         '<style>body{background:#10151b;color:#edf3f9;font:16px system-ui}figure{margin:24px}img{max-width:100%}</style>'
         '<h1>Print state review</h1><p>Offline sample data. Geometry and motion results: <a href="report.json">report.json</a>.</p>' + images)
