@@ -13,6 +13,9 @@
   The plugin does not send a global camera-stop command, which could interrupt another viewer.
   The printer stops producing images after its own monitoring timeout unless another viewer keeps it awake.
 - A 3.5-second activity lease stops abandoned monitoring if the webview loses its connection to the plugin.
+- Live status polls follow monotonic three-second deadlines rather than waiting three seconds after each request.
+  Status, metadata, and camera operations share one worker, so a poll cannot preempt in-flight I/O.
+  After an overrun, one current poll runs when the worker is free and missed ticks are skipped.
 - Image timestamps older than five seconds mark the stream as frozen.
   Without timestamps, receiving identical images does not by itself establish that the camera is frozen.
 - The stream indicator shows a blue dot with FPS while fresh images arrive and an orange elapsed-seconds counter during interruptions.
