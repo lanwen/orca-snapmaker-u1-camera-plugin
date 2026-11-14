@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.8.1
+
+- fix: align status polls with monotonic deadlines (#98) ([8525fc4](https://github.com/lanwen/orca-snapmaker-u1-camera-plugin/commit/8525fc4c97425fab6e74770694770cf86c0e2053))
+- fix: renew page sessions without repeated connection discovery (#97) ([52c1d98](https://github.com/lanwen/orca-snapmaker-u1-camera-plugin/commit/52c1d98e2b1e47589ae2a4c0b1657c7df0484edf))
+- fix: sleep until the next useful worker deadline (#96) ([163bfef](https://github.com/lanwen/orca-snapmaker-u1-camera-plugin/commit/163bfef9cb5f44438a501b5a643797dabdba199c))
+- test: migrate to pytest and assert observable behavior (#93) ([039a63c](https://github.com/lanwen/orca-snapmaker-u1-camera-plugin/commit/039a63c7434c9e88fb11d0a0a1ec2bc68acb5a1c))
+- test: allow bounded cold Chrome startup (#94) ([75db79c](https://github.com/lanwen/orca-snapmaker-u1-camera-plugin/commit/75db79c7df141b9ae3ad2a7e2ae7b9b21ba5fa66))
+- fix: explain printer status failures safely (#91) ([64456cf](https://github.com/lanwen/orca-snapmaker-u1-camera-plugin/commit/64456cfbd52f3dbca94b8784e4b1666709ba8420))
+- fix: publish live status before optional metadata (#90) ([f5d7deb](https://github.com/lanwen/orca-snapmaker-u1-camera-plugin/commit/f5d7deb7aed7b4768b8bb7e4dbdad9c20ba4fdd2))
+- fix: expire stale chamber light readings (#89) ([65f84ef](https://github.com/lanwen/orca-snapmaker-u1-camera-plugin/commit/65f84ef4c65c79dabb554ac3873803e551c911da))
+- fix: keep status polling active during camera failures (#88) ([8d78a7c](https://github.com/lanwen/orca-snapmaker-u1-camera-plugin/commit/8d78a7c1ee3b1495665cc03ad4dc6b3358fae44e))
+- test: report Chrome startup failures with process diagnostics (#77) ([9bf840f](https://github.com/lanwen/orca-snapmaker-u1-camera-plugin/commit/9bf840f8344ca246f5543b9b57256d599cc003ec))
+
 ## 0.8.0
 
 - docs: add project skill for preparing release notes (#75) ([e3466df](https://github.com/lanwen/orca-snapmaker-u1-camera-plugin/commit/e3466dfa820f5db3e929763b67897196efb6ebc2))
