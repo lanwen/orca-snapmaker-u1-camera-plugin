@@ -149,6 +149,11 @@ const stubImageURLs = (window) => {
       error: 'error',
       standby: 'standby',
       unavailable: 'unavailable',
+      'status-waiting': 'unavailable',
+      'status-retrying': 'unavailable',
+      'status-no-success': 'unavailable',
+      'status-expired': 'unavailable',
+      'status-recovered': 'printing',
       'phase-unknown': 'printing',
       'plan-only': 'printing',
       'preparing-no-plan': 'preparing',
@@ -180,6 +185,22 @@ const stubImageURLs = (window) => {
         doc.getElementById('image').dispatchEvent(new preview.window.Event('load'));
       await settle();
       assert.equal(doc.getElementById('stats').dataset.state, rendered, state);
+      if (state.startsWith('status-')) {
+        const delivery = doc.getElementById('status-delivery');
+        const age = doc.getElementById('status-age');
+        assert.equal(
+          delivery.dataset.state,
+          state === 'status-waiting'
+            ? 'waiting'
+            : state === 'status-recovered'
+              ? 'fresh'
+              : 'retrying',
+        );
+        assert.equal(age.hidden, !['status-retrying', 'status-expired'].includes(state));
+        if (!age.hidden) assert.match(age.textContent, /12s/);
+        assert.equal(doc.getElementById('hardware-stat').hidden, state !== 'status-recovered');
+        assert.equal(doc.querySelector('[role="switch"]').disabled, state !== 'status-recovered');
+      }
       if (state === 'connecting') {
         assert.equal(doc.getElementById('image').hidden, true);
         assert.equal(doc.getElementById('empty').hidden, false);

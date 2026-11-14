@@ -1,4 +1,4 @@
-import type { HostMessage, OrcaBridge, PrintStats } from './types';
+import type { HostMessage, OrcaBridge, PrintStats, StatusDelivery } from './types';
 
 type StreamState =
   | 'live' // Fresh images are arriving; show FPS with a blue dot.
@@ -50,8 +50,20 @@ export class Camera {
   private lightAt: number | null = null;
   stats = $state<PrintStats | null>(null);
   statsAt = $state(0);
+  lastSuccessfulStatusAt = $state<number | null>(null);
+  private active = $state(false);
+  statusDelivery: StatusDelivery | null = $derived(
+    !this.active || this.targetUnavailable
+      ? null
+      : this.stats && this.stats.state !== 'unavailable'
+        ? 'fresh'
+        : this.stats?.state === 'unavailable' ||
+            this.statusError ||
+            this.lastSuccessfulStatusAt !== null
+          ? 'retrying'
+          : 'waiting',
+  );
   private pendingNotice = '';
-  private active = false;
   private generation = -1;
   private lastFrame = 0;
   private frameURL: string | null = null;
@@ -64,6 +76,20 @@ export class Camera {
   private setStats(stats: PrintStats | null = null, unavailable = false) {
     this.stats = stats ?? (unavailable ? { state: 'unavailable' } : null);
     this.statsAt = this.stats && this.stats.state !== 'unavailable' ? Date.now() : 0;
+    if (this.stats && this.stats.state !== 'unavailable')
+      this.lastSuccessfulStatusAt = this.statsAt;
+  }
+
+  private resetStatus() {
+    this.setStats();
+    this.lastSuccessfulStatusAt = null;
+    this.statusError = '';
+    this.printer = 'Connecting';
+    this.light = null;
+    this.lightAt = null;
+    this.lightDisabled = true;
+    this.lightError = this.notice = this.pendingNotice = '';
+    this.noticeAt = null;
   }
 
   private releaseFrame() {
@@ -114,8 +140,9 @@ export class Camera {
   tick = () => {
     this.now = Date.now();
     if (this.noticeAt !== null && this.now - this.noticeAt > 5000) this.notice = this.pendingNotice;
-    if (this.statsAt && Date.now() - this.statsAt > 10000) this.setStats(null, true);
-    if (this.lightAt !== null && this.now - this.lightAt > 10000) {
+    if (this.stats && this.stats.state !== 'unavailable' && this.now - this.statsAt >= 10000)
+      this.setStats(null, true);
+    if (this.lightAt !== null && this.now - this.lightAt >= 10000) {
       this.light = null;
       this.lightDisabled = true;
       this.lightAt = null;
@@ -139,6 +166,7 @@ export class Camera {
 
   private hide = () => {
     this.stop();
+    this.resetStatus();
     this.active = false;
     this.lightDisabled = true;
     this.bridge.postMessage({
@@ -153,8 +181,7 @@ export class Camera {
     if (!this.active || document.hidden) return;
     if (data.type === 'selection_changed') {
       this.generation = -1;
-      this.setStats();
-      this.statusError = '';
+      this.resetStatus();
       this.stop();
       this.notice = this.lightError = '';
       this.noticeAt = null;
@@ -164,6 +191,9 @@ export class Camera {
       return;
     }
     if (data.type === 'target' && data.generation !== undefined && data.target !== undefined) {
+      if (this.generation >= 0 && data.generation < this.generation) return;
+      const changed = this.generation !== data.generation || this.target !== data.target;
+      if (changed) this.resetStatus();
       this.supported = true;
       if (this.targetUnavailable) {
         this.warning = '';
@@ -178,24 +208,15 @@ export class Camera {
         this.issue = this.playing ? 'Camera not responding' : '';
         this.fps = 0;
       }
-      if (this.target !== data.target) {
-        this.setStats();
-        this.statusError = '';
-        this.printer = 'Connecting';
-        this.notice = this.lightError = '';
-        this.noticeAt = null;
-        this.light = null;
-        this.lightDisabled = true;
-        this.lightAt = null;
-      }
       this.generation = data.generation;
       this.target = data.target;
       return;
     }
     if (data.generation !== undefined && data.generation !== this.generation) return;
     if (data.error) {
-      this.setStats();
+      this.setStats(null, true);
       if (typeof data.supported === 'boolean') {
+        this.resetStatus();
         this.lightError = this.notice = '';
         this.noticeAt = null;
         this.targetUnavailable = true;

@@ -205,7 +205,7 @@ def check_toolheads(client):
       const tabs = root.querySelectorAll('.index-tab');
       if (tabs.length !== 4) errors.push('Four toolhead tabs are required');
       const fixture = structuredClone(screenshotFixtures[screenshotState]);
-      const generation = screenshotStates.indexOf(screenshotState) + 1;
+      const generation = screenshotGeneration;
       const update = async stats => { screenshotFixtures[screenshotState] = stats; screenshotHandler({generation, stats}); await wait(); };
       const checkTemperatures = () => {
         const bed = root.querySelector('.bed-temperature').getBoundingClientRect();
@@ -482,8 +482,15 @@ def review(directory, output, states, widths, gifs=False):
                     headerStatus:rect(document.querySelector('#printer')),
                     address:rect(document.querySelector('#target')),
                     heading:rect(document.querySelector('h1')),
-                    labelsMatch:!document.querySelector('#stats').getClientRects().length ||
+                    labelsMatch:!document.querySelector('#stats-state').getClientRects().length ||
                       document.querySelector('#printer').textContent === document.querySelector('#stats-state').textContent,
+                    deliveryOverlapsReadings:(() => {
+                      const delivery=document.querySelector('#status-delivery');
+                      if (!delivery?.getClientRects().length) return false;
+                      const bottom=delivery.getBoundingClientRect().bottom;
+                      return [...document.querySelectorAll('.stats-gauge,.stats-journey,#hardware-stat')]
+                        .some(e => e.getClientRects().length && e.getBoundingClientRect().top < bottom);
+                    })(),
                     connecting:!document.querySelector('#empty').hidden,
                     lightError:document.querySelector('.light-area').dataset.error === 'true',
                     warning:!document.querySelector('#warning').hidden,
@@ -498,7 +505,7 @@ def review(directory, output, states, widths, gifs=False):
                     overflow:[...document.querySelectorAll('#stats,#plan-stat,#remaining-stat,#finish-value,#camera,.light-area,#warning-label,.printer-meta')]
                       .filter(e => e.getClientRects().length && e.scrollWidth > e.clientWidth+(e.id === 'stats' ? 9 : 1)).map(e => e.id)};
                 })()""")
-                if state in {"unavailable", "printer-unavailable"} and client.evaluate("Boolean(document.querySelector('#hardware-stat')?.getClientRects().length)"):
+                if state in {"unavailable", "printer-unavailable", "status-waiting", "status-retrying", "status-no-success", "status-expired"} and client.evaluate("Boolean(document.querySelector('#hardware-stat')?.getClientRects().length)"):
                     errors.append(f"{state} at {width}px: Hardware information is visible without status")
                 if state in {"standby", "complete"} and client.evaluate("Boolean(document.querySelector('.index-stack')?.getClientRects().length || document.querySelector('.filament-traces')?.getClientRects().length)"):
                     errors.append(f"{state} at {width}px: Toolhead tabs are visible without a running print")
@@ -518,6 +525,8 @@ def review(directory, output, states, widths, gifs=False):
                 rows.append(row)
                 results.append(row)
                 try:
+                    if row["deliveryOverlapsReadings"]:
+                        raise ValueError("Status delivery overlaps printer readings")
                     if row["fpsWrapped"]:
                         raise ValueError("Camera FPS label wraps")
                     if not row["islandsAligned"]:
