@@ -22,13 +22,19 @@ PREVIEW_LABELS = {
     "top-cover-missing": "Top cover disconnected",  # Optional cover is not detected.
     "preparing": "Heating",  # Preparation with heaters below target.
     "preparing-warm": "Preparing (warm)",  # Preparation after warm-up.
-    "paused": "Paused",  # Interrupted print without a finish estimate.
+    "paused": "Paused (start unknown)",  # A first paused reading cannot establish its start.
+    "paused-observed": "Pause observed (12s)",  # Continuous fresh readings establish the observed pause.
     "finishing": "Finishing",  # Full slicer progress while still active.
     "complete": "Complete",  # Finished print with final measurements.
     "cancelled": "Cancelled",  # Stopped job with partial progress.
     "error": "Error",  # Failed print with retained measurements.
     "standby": "Standby",  # Idle printer with current temperatures.
     "unavailable": "Status unavailable",  # Missing printer status, independent of the camera.
+    "status-waiting": "Waiting for status",  # Video before the first printer reading.
+    "status-retrying": "Status retry after success",  # Elapsed time in the current failed-status interruption.
+    "status-no-success": "Status retry before success",  # First failed status starts an interruption timer.
+    "status-expired": "Status expired",  # Video continues after measurements expire.
+    "status-recovered": "Status recovered",  # Successful delivery after an interruption.
     "phase-unknown": "Unknown phase",  # Active print without reliable layers.
     "plan-only": "Estimate unavailable",  # Original plan without a current estimate.
     "preparing-no-plan": "Preparation without plan",  # Missing slicer metadata during preparation.
@@ -98,6 +104,7 @@ def screenshot_page(camera=None):
                                material_profile="Polymaker PolyLite PETG @Snapmaker U1 (0.4 nozzle)",
                                bed={"temperature": 60, "target": 60},
                                hotend={"temperature": 170, "target": 170})
+    fixtures["paused-observed"] = dict(fixtures["paused"])
     # Captured completed-job values from the U1; camera image remains illustrative.
     fixtures["complete"] = dict(fixtures["printing"], state="complete", progress=1, material_profile=None,
                                  current_layer=86, elapsed=5118, printing_duration=4950,
@@ -119,6 +126,9 @@ def screenshot_page(camera=None):
     fixtures["standby"] = {"state": "standby", "bed": {"temperature": 24, "target": 0},
                            "hotend": {"temperature": 25, "target": 0}}
     fixtures["unavailable"] = {"state": "unavailable"}
+    for state in ("status-waiting", "status-retrying", "status-no-success", "status-expired"):
+        fixtures[state] = {"state": "unavailable"}
+    fixtures["status-recovered"] = dict(fixtures["printing"])
     fixtures["phase-unknown"] = dict(fixtures["printing"], phase="unknown", progress=.09, current_layer=None,
                                      remaining=None)
     fixtures["plan-only"] = dict(fixtures["printing"], progress=.56, current_layer=48, remaining=None)
@@ -159,11 +169,11 @@ const screenshotLabels = __LABELS__;
 const screenshotStates = Object.keys(screenshotFixtures);
 const screenshotImage = __IMAGE__;
 let screenshotState = __SCREENSHOT_STATE__, screenshotHandler, screenshotLight = true;
-let screenshotAppliedState;
+let screenshotAppliedState, screenshotGeneration = 0;
 function publishScreenshot() {
   const changed = screenshotAppliedState !== screenshotState;
-  if (changed) { screenshotOffset = 0; screenshotAppliedState = screenshotState; }
-  const generation = screenshotStates.indexOf(screenshotState) + 1;
+  if (changed) { screenshotOffset = 0; screenshotAppliedState = screenshotState; screenshotGeneration++; }
+  const generation = screenshotGeneration;
   const interrupted = screenshotState.startsWith('stream-');
   // Decode the fixed camera image only after a state change or playback restart.
   const needsImage = changed || !document.getElementById('image')?.hasAttribute('src');
@@ -181,12 +191,31 @@ function publishScreenshot() {
     return;
   }
   const offline = screenshotState === 'printer-unavailable';
-  screenshotHandler({type:'target', generation, target:'Workshop · Snapmaker U1'});
-  screenshotHandler({generation, printer:screenshotLabels[screenshotFixtures[screenshotState].state],
-    light:offline ? null : screenshotLight, light_error:screenshotState === 'light-error' ? 'Could not change light — try again' : '',
-    stats:screenshotFixtures[screenshotState],
-    ...(screenshotState === 'unavailable' ? {status_error:'timeout'} : {}),
+  screenshotHandler({type:'target', generation, target:screenshotState === 'status-retrying'
+    ? 'Workshop printer with a long preset name · printer.example.invalid' : 'Workshop · Snapmaker U1'});
+  const statusPreview = screenshotState.startsWith('status-');
+  if (changed && ['status-retrying', 'status-expired', 'status-recovered', 'paused-observed'].includes(screenshotState)) {
+    screenshotHandler({generation, stats:screenshotFixtures.printing, light:true});
+  }
+  if (changed && ['unavailable', 'status-retrying', 'status-no-success', 'status-recovered'].includes(screenshotState)) {
+    screenshotOffset = ['status-retrying', 'status-recovered'].includes(screenshotState) ? 3000 : 0;
+    screenshotHandler({generation, stats:null, status_error:'timeout', light:null});
+    screenshotOffset += 12000;
+  }
+  if (changed && screenshotState === 'status-expired') screenshotOffset = 22000;
+  if (changed && screenshotState === 'paused-observed') {
+    for (const at of [3000, 9000]) {
+      screenshotOffset = at;
+      screenshotHandler({generation, stats:screenshotFixtures['paused-observed']});
+    }
+    screenshotOffset = 15000;
+  }
+  screenshotHandler({generation, ...(screenshotState === 'status-waiting' ? {} : {printer:screenshotLabels[screenshotFixtures[screenshotState].state]}),
+    ...(!statusPreview || screenshotState === 'status-recovered' ? {light:offline ? null : screenshotLight} : {}), light_error:screenshotState === 'light-error' ? 'Could not change light — try again' : '',
+    ...(!statusPreview || screenshotState === 'status-recovered' ? {stats:screenshotFixtures[screenshotState]} : {}),
+    ...(['unavailable', 'status-retrying', 'status-no-success'].includes(screenshotState) ? {stats:null, status_error:'timeout', light:null} : {}),
     image:!needsImage || offline || screenshotState === 'connecting' || (interrupted && !changed) ? undefined : screenshotImage, fps:4.4, frozen:false});
+  if (changed && screenshotState === 'status-expired') queueMicrotask(() => window.dispatchEvent(new Event('pageshow')));
   if (offline) {
     screenshotHandler({generation, failed:true, camera:'Cannot reach printer — check its address and connection'});
     screenshotOffset = 8000;

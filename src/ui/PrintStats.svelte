@@ -125,7 +125,7 @@
   );
   const message = $derived(
     missing
-      ? statusError || 'Waiting for status'
+      ? statusError
       : standby
         ? 'No print running'
         : preparing

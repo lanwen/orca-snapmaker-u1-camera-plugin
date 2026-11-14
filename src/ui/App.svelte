@@ -7,6 +7,35 @@
 
   let image: HTMLImageElement;
   let camera = $state<Camera>();
+  const timerStart = $derived(
+    camera?.statusDelivery === 'retrying'
+      ? camera.statusInterruptedAt
+      : (camera?.pauseObservedAt ?? null),
+  );
+  const stateAge = $derived(
+    timerStart === null ? null : Math.max(0, Math.floor(((camera?.now ?? 0) - timerStart) / 1000)),
+  );
+  const timerMeaning = $derived(
+    camera?.statusDelivery === 'retrying'
+      ? 'Time since printer status became unavailable'
+      : 'Time since the printer pause was observed',
+  );
+  const deliveryAnnouncement = $derived(
+    camera?.statusDelivery === 'retrying'
+      ? 'Printer status unavailable. Waiting for a new reading.'
+      : camera?.pauseObservedAt != null
+        ? 'Printer pause observed. Timer shows time since it was observed.'
+        : camera?.statusDelivery === 'fresh'
+          ? 'Printer status current.'
+          : 'Waiting for printer status.',
+  );
+  function age(seconds: number) {
+    return seconds < 60
+      ? seconds + 's'
+      : seconds < 3600
+        ? Math.floor(seconds / 60) + 'm'
+        : Math.floor(seconds / 3600) + 'h';
+  }
   const warning = $derived.by(() => {
     const message = camera?.warning ?? '';
     const boundary = message.indexOf('. ');
@@ -25,7 +54,24 @@
   <img bind:this={image} id="image" alt="Snapmaker U1 camera" hidden={!camera?.imageVisible} />
   <header>
     <div>
-      <h1>Snapmaker U1</h1>
+      <div class="printer-title">
+        <h1>Snapmaker U1</h1>
+        <span
+          id="status-delivery"
+          data-state={camera?.statusDelivery}
+          class:sr-only={camera?.statusDelivery !== 'waiting'}
+          hidden={!camera?.statusDelivery}
+        >
+          <span id="status-delivery-label" class="sr-only" role="status" aria-atomic="true"
+            >{deliveryAnnouncement}</span
+          >
+          <span
+            id="status-delivery-value"
+            aria-hidden="true"
+            hidden={camera?.statusDelivery !== 'waiting'}>Waiting</span
+          >
+        </span>
+      </div>
       <div class="printer-meta">
         <span id="target" title={camera?.target}>{camera?.target ?? 'Selected printer'}</span>
         <PrintState
@@ -33,6 +79,13 @@
           stats={camera?.stats ?? null}
           fallback={camera?.printer ?? 'Connecting'}
         />
+        <span
+          id="status-age"
+          aria-live="off"
+          title={timerMeaning}
+          aria-label={stateAge === null ? undefined : timerMeaning + ': ' + age(stateAge)}
+          hidden={stateAge === null}>{stateAge === null ? '' : '…' + age(stateAge)}</span
+        >
       </div>
     </div>
     <div class="light-area" data-error={Boolean(camera?.lightError) || undefined}>
@@ -159,8 +212,21 @@
   h1 {
     font-size: 19px;
     font-weight: 600;
-    margin: 0 0 5px;
+    margin: 0;
     letter-spacing: -0.3px;
+  }
+  .printer-title {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    margin-bottom: 5px;
+  }
+  #status-delivery {
+    flex: 0 0 auto;
+    color: #a7b5c2;
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
   }
   header > div:first-child {
     min-width: 0;
@@ -177,7 +243,20 @@
     --print-state-font-size: 12px;
     display: flex;
     align-items: center;
-    gap: 6px 12px;
+    gap: 6px;
+  }
+  #target {
+    margin-right: 6px;
+  }
+  .printer-meta :global(#printer),
+  #status-age {
+    flex: 0 0 auto;
+  }
+  #status-age {
+    color: #a7b5c2;
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
   }
   #play,
   #warning {

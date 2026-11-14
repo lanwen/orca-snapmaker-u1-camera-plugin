@@ -1,3 +1,8 @@
+export type StatusDelivery =
+  | 'waiting' // No successful reading or failed update in this session yet.
+  | 'fresh' // Current readings arrived within the status expiry window.
+  | 'retrying'; // A failed or expired reading is waiting for automatic recovery.
+
 export interface Heater {
   temperature?: number;
   target?: number;

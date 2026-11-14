@@ -174,6 +174,386 @@ test('an unavailable target restarts the handshake so corrected configuration ca
   assert.equal(visible(field('hardware-stat')), true);
 });
 
+test('status measurements expire at the ten-second boundary even for an epoch-zero receipt', () => {
+  vi.setSystemTime(0);
+  selectPrinter();
+  publish({ generation: 1, stats: metrics, light: true });
+  advance(9999);
+  assert.equal(visible(field('hardware-stat')), true);
+  advance(1);
+  assert.equal(visible(field('hardware-stat')), false);
+  assert.equal(visible(progress()), false);
+  assert.equal(light().disabled, true);
+});
+
+test('header status uses compact labels and only elapsed time after a successful reading is interrupted', () => {
+  assert.equal(document.querySelector('header')!.contains(field('status-delivery')), true);
+  assert.equal(field('status-delivery-value').textContent, 'Waiting');
+  selectPrinter();
+  publish({ generation: 1, stats: null, status_error: 'timeout' });
+  assert.equal(visible(field('status-delivery-value')), false);
+  assert.equal(field('printer').textContent, field('stats-state').textContent);
+  assert.equal(visible(field('status-age')), true);
+  publish({ generation: 1, stats: metrics });
+  assert.equal(field('status-delivery').dataset.state, 'fresh');
+  assert.equal(visible(field('status-delivery-value')), false);
+  assert.equal(visible(field('status-age')), false);
+  advance(3000);
+  publish({ generation: 1, stats: null, status_error: 'timeout' });
+  assert.equal(visible(field('status-delivery-value')), false);
+  assert.equal(field('status-age').textContent, '…0s');
+  assert.equal(field('printer').nextElementSibling, field('status-age'));
+  assert.equal(field('status-age').parentElement?.matches('.printer-meta'), true);
+  assert.equal(field('status-age').closest('[aria-live]:not([aria-live="off"])'), null);
+  publish({ generation: 1, stats: metrics });
+  assert.equal(visible(field('status-delivery-value')), false);
+  assert.equal(visible(field('status-age')), false);
+});
+
+test('first failure starts an interruption clock without inventing a successful reading', () => {
+  vi.setSystemTime(0);
+  selectPrinter();
+  assert.equal(visible(field('status-age')), false);
+  publish({ generation: 1, stats: null, status_error: 'timeout' });
+  assert.equal(visible(field('status-age')), true);
+  assert.equal(field('status-age').textContent, '…0s');
+  advance(3000);
+  publish({ generation: 1, stats: null, status_error: 'timeout' });
+  assert.equal(field('status-age').textContent, '…3s');
+});
+
+test('continuous fresh printing to paused starts only an observed pause clock', () => {
+  selectPrinter();
+  publish({ generation: 1, stats: metrics });
+  advance(3000);
+  publish({ generation: 1, stats: { ...metrics, state: 'paused' } });
+  assert.equal(field('status-age').textContent, '…0s');
+  assert.equal(visible(field('status-age')), true);
+  assert.match(field('status-age').getAttribute('title')!, /observed/i);
+  advance(2000);
+  publish({ generation: 1, stats: { ...metrics, state: 'paused' } });
+  assert.equal(field('status-age').textContent, '…2s');
+});
+
+test('an observed pause at epoch zero survives fresh samples and camera frames', () => {
+  vi.setSystemTime(0);
+  start();
+  publish({ generation: 1, stats: metrics });
+  publish({ generation: 1, stats: { ...metrics, state: 'paused' } });
+  advance(7000);
+  publish({ generation: 1, stats: { ...metrics, state: 'paused' } });
+  publish({ generation: 1, image: 'live camera', fps: 4 });
+  settleFrame();
+  advance(7000);
+  publish({ generation: 1, stats: { ...metrics, state: 'paused' } });
+  assert.equal(field('status-age').textContent, '…14s');
+  assert.match(field('status-age').title, /observed/i);
+});
+
+test('late failed status anchors interruption to the known expiry deadline', () => {
+  vi.setSystemTime(0);
+  selectPrinter();
+  publish({ generation: 1, stats: metrics });
+  vi.setSystemTime(15000);
+  publish({ generation: 1, stats: null, status_error: 'timeout' });
+  assert.equal(field('status-age').textContent, '…5s');
+  publish({ generation: 1, stats: metrics });
+  assert.equal(visible(field('status-age')), false);
+  advance(2000);
+  publish({ generation: 1, stats: null, status_error: 'timeout' });
+  assert.equal(field('status-age').textContent, '…0s');
+  advance(3000);
+  publish({ generation: 1, stats: null, status_error: 'access_denied' });
+  selectPrinter();
+  assert.equal(field('status-age').textContent, '…3s');
+});
+
+for (const previous of [
+  { ...metrics, phase: 'preparing' as const },
+  { ...metrics, state: 'preparing' },
+]) {
+  test('fresh preparation can establish an observed pause transition', () => {
+    selectPrinter();
+    publish({ generation: 1, stats: previous });
+    advance(1000);
+    publish({ generation: 1, stats: { ...metrics, state: 'paused' } });
+    assert.equal(field('status-age').textContent, '…0s');
+    assert.equal(visible(field('status-age')), true);
+  });
+}
+
+test('an already paused reading cannot reveal its current pause duration from cumulative clocks', () => {
+  selectPrinter();
+  publish({
+    generation: 1,
+    stats: { ...metrics, state: 'paused', elapsed: 50000, printing_duration: 2 },
+  });
+  assert.equal(visible(field('status-age')), false);
+  advance(2000);
+  publish({
+    generation: 1,
+    stats: { ...metrics, state: 'paused', elapsed: 90000, printing_duration: 5 },
+  });
+  assert.equal(visible(field('status-age')), false);
+  publish({ generation: 1, stats: metrics });
+  advance(1000);
+  publish({ generation: 1, stats: { ...metrics, state: 'paused' } });
+  assert.equal(visible(field('status-age')), true);
+  publish({ generation: 1, stats: metrics });
+  assert.equal(visible(field('status-age')), false);
+});
+
+for (const end of ['standby', 'complete', 'cancelled', 'error', 'unknown']) {
+  test(`a ${end} reading breaks the observed pause run`, () => {
+    selectPrinter();
+    publish({ generation: 1, stats: metrics });
+    publish({ generation: 1, stats: { ...metrics, state: 'paused' } });
+    assert.equal(visible(field('status-age')), true);
+    publish({ generation: 1, stats: { ...metrics, state: end } });
+    assert.equal(visible(field('status-age')), false);
+    publish({ generation: 1, stats: { ...metrics, state: 'paused' } });
+    assert.equal(visible(field('status-age')), false);
+  });
+}
+
+test('status loss replaces observed pause age and paused recovery leaves pause start unknown', () => {
+  selectPrinter();
+  publish({ generation: 1, stats: metrics });
+  publish({ generation: 1, stats: { ...metrics, state: 'paused' } });
+  advance(3000);
+  publish({ generation: 1, stats: null, status_error: 'timeout' });
+  assert.equal(field('status-age').textContent, '…0s');
+  assert.match(field('status-age').getAttribute('title')!, /unavailable/i);
+  advance(1000);
+  publish({ generation: 1, stats: { ...metrics, state: 'paused' } });
+  assert.equal(visible(field('status-age')), false);
+});
+
+test('a fresh paused sample after an unobserved expiry gap cannot establish or continue a pause clock', () => {
+  selectPrinter();
+  publish({ generation: 1, stats: metrics });
+  vi.setSystemTime(Date.now() + 10000);
+  publish({ generation: 1, stats: { ...metrics, state: 'paused' } });
+  assert.equal(visible(field('status-age')), false);
+  publish({ generation: 1, stats: metrics });
+  publish({ generation: 1, stats: { ...metrics, state: 'paused' } });
+  assert.equal(visible(field('status-age')), true);
+  vi.setSystemTime(Date.now() + 10000);
+  publish({ generation: 1, stats: { ...metrics, state: 'paused' } });
+  assert.equal(visible(field('status-age')), false);
+});
+
+for (const reset of ['generation', 'target', 'selection', 'hide', 'unsupported']) {
+  test(`${reset} clears an observed pause clock`, () => {
+    selectPrinter();
+    publish({ generation: 1, stats: metrics });
+    publish({ generation: 1, stats: { ...metrics, state: 'paused' } });
+    assert.equal(visible(field('status-age')), true);
+    let generation = 1;
+    if (reset === 'generation') selectPrinter((generation = 2));
+    if (reset === 'target') selectPrinter(1, 'Another target');
+    if (reset === 'selection') {
+      publish({ type: 'selection_changed' });
+      selectPrinter((generation = 2));
+    }
+    if (reset === 'hide') {
+      setVisible(false);
+      setVisible(true);
+      selectPrinter((generation = 2));
+    }
+    if (reset === 'unsupported') {
+      publish({ error: 'Unsupported target', supported: false });
+      selectPrinter((generation = 2));
+    }
+    publish({ generation, stats: { ...metrics, state: 'paused' } });
+    assert.equal(visible(field('status-age')), false);
+  });
+}
+
+test('status delivery waits for an actual reading rather than a target, heartbeat or camera frame', () => {
+  assert.equal(visible(field('status-delivery')), true);
+  assert.equal(field('status-delivery').dataset.state, 'waiting');
+  assert.equal(visible(field('status-age')), false);
+  selectPrinter();
+  click(button('play'));
+  advance(3000);
+  publish({ generation: 1, image: 'live camera', fps: 4 });
+  settleFrame();
+  assert.equal(field('camera').dataset.state, 'live');
+  assert.equal(field('status-delivery').dataset.state, 'waiting');
+  assert.equal(visible(field('status-age')), false);
+  assert.equal(visible(field('hardware-stat')), false);
+  assert.equal(visible(progress()), false);
+});
+
+test('a failed first status shows interruption time without inventing prior success', () => {
+  selectPrinter();
+  publish({ generation: 1, stats: null, status_error: 'invalid_response' });
+  assert.equal(field('status-delivery').dataset.state, 'retrying');
+  assert.equal(visible(field('status-age')), true);
+  assert.match(field('stats-message').textContent!, /response/i);
+  assert.equal(field('status-age').textContent, '…0s');
+  advance(15000);
+  assert.equal(field('status-age').textContent, '…15s');
+  assert.equal(visible(field('status-age')), true);
+  assert.equal(visible(field('hardware-stat')), false);
+  assert.equal(light().disabled, true);
+});
+
+test('status interruption shows only its interruption age while camera frames remain live', () => {
+  start();
+  publish({ generation: 1, stats: { ...metrics, psu_fan: { speed: 0.6 } }, light: true });
+  assert.equal(field('status-delivery').dataset.state, 'fresh');
+  advance(3000);
+  publish({ generation: 1, stats: null, status_error: 'timeout' });
+  assert.equal(field('status-delivery').dataset.state, 'retrying');
+  assert.equal(visible(field('status-age')), true);
+  assert.match(field('status-age').textContent!, /\b0s\b/);
+  assert.equal(visible(field('hardware-stat')), false);
+  assert.equal(visible(progress()), false);
+  assert.equal(visible(field('elapsed-value')), false);
+  assert.equal(document.querySelector('.fan-islands'), null);
+  assert.equal(light().disabled, true);
+  advance(2000);
+  publish({ generation: 1, image: 'continuing camera', fps: 5 });
+  settleFrame();
+  assert.equal(field('camera').dataset.state, 'live');
+  assert.equal(field('status-delivery').dataset.state, 'retrying');
+  assert.match(field('status-age').textContent!, /\b2s\b/);
+  assert.equal(visible(field('hardware-stat')), false);
+  assert.equal(light().disabled, true);
+  publish({ generation: 1, stats: { ...metrics, state: 'paused' }, light: false });
+  assert.equal(field('status-delivery').dataset.state, 'fresh');
+  assert.equal(visible(field('status-age')), false);
+  assert.equal(visible(field('hardware-stat')), true);
+  assert.equal(light().disabled, false);
+  assert.equal(field('stats-state').dataset.state, 'paused');
+});
+
+test('camera failures and Stop do not erase or renew fresh printer status', () => {
+  start();
+  publish({ generation: 1, stats: metrics, light: true });
+  advance(6000);
+  publish({ generation: 1, failed: true, camera: 'Camera connection interrupted' });
+  assert.equal(field('status-delivery').dataset.state, 'fresh');
+  assert.equal(visible(field('hardware-stat')), true);
+  click(button('stop'));
+  assert.equal(field('status-delivery').dataset.state, 'fresh');
+  advance(4000);
+  assert.equal(field('status-delivery').dataset.state, 'retrying');
+  assert.match(field('status-age').textContent!, /\b0s\b/);
+  assert.equal(visible(field('hardware-stat')), false);
+});
+
+test('camera frames cannot postpone status or independent light expiry', () => {
+  start();
+  publish({ generation: 1, stats: metrics, light: true });
+  advance(9000);
+  publish({ generation: 1, image: 'fresh camera', fps: 3 });
+  settleFrame();
+  advance(1000);
+  assert.equal(field('status-delivery').dataset.state, 'retrying');
+  assert.match(field('status-age').textContent!, /\b0s\b/);
+  assert.equal(light().disabled, true);
+  publish({ generation: 1, light: false });
+  assert.equal(light().disabled, false);
+  assert.equal(field('status-delivery').dataset.state, 'retrying');
+  advance(10000);
+  publish({ generation: 1, image: 'another camera frame', fps: 3 });
+  settleFrame();
+  assert.equal(light().disabled, true);
+  assert.equal(visible(field('hardware-stat')), false);
+  assert.match(field('status-age').textContent!, /\b10s\b/);
+});
+
+for (const [seconds, expected] of [
+  [12, '12s'],
+  [61, '1m'],
+  [3600, '1h'],
+] as const) {
+  test(`interruption age uses elapsed time and units at ${seconds} seconds`, () => {
+    selectPrinter();
+    publish({ generation: 1, stats: metrics });
+    publish({ generation: 1, stats: null, status_error: 'timeout' });
+    vi.setSystemTime(Date.now() + seconds * 1000);
+    flushSync(() => window.dispatchEvent(new Event('pageshow')));
+    assert.equal(field('status-age').textContent, '…' + expected);
+    assert.doesNotMatch(field('status-age').textContent!, /NaN|undefined/);
+  });
+}
+
+for (const reset of ['generation', 'target', 'selection', 'hide', 'unsupported'] as const) {
+  test(`${reset} resets printer status history rather than attributing it to the next session`, () => {
+    selectPrinter();
+    publish({ generation: 1, stats: metrics, light: true });
+    const previousJob = field('printer').textContent;
+    advance(3000);
+    publish({ generation: 1, stats: null, status_error: 'timeout' });
+    assert.equal(visible(field('status-age')), true);
+    if (reset === 'generation') selectPrinter(2);
+    if (reset === 'target') selectPrinter(1, 'Another target');
+    if (reset === 'selection') publish({ type: 'selection_changed' });
+    if (reset === 'hide') {
+      setVisible(false);
+      setVisible(true);
+    }
+    if (reset === 'unsupported') {
+      publish({ error: 'Selected target is unavailable.', supported: false });
+      assert.equal(visible(field('status-delivery')), false);
+      selectPrinter(2, 'Available target');
+    }
+    assert.equal(field('status-delivery').dataset.state, 'waiting');
+    assert.equal(visible(field('status-age')), false);
+    assert.equal(visible(field('hardware-stat')), false);
+    assert.equal(visible(progress()), false);
+    assert.equal(light().disabled, true);
+    assert.notEqual(field('printer').textContent, previousJob);
+  });
+}
+
+test('repeated current announcements and stale generations cannot fake fresh status', () => {
+  selectPrinter(2, 'Current target');
+  publish({ generation: 2, stats: metrics });
+  advance(3000);
+  publish({ generation: 2, stats: null, status_error: 'timeout' });
+  selectPrinter(2, 'Current target');
+  assert.equal(field('status-delivery').dataset.state, 'retrying');
+  assert.match(field('status-age').textContent!, /\b0s\b/);
+  selectPrinter(1, 'Old target');
+  publish({ generation: 1, stats: metrics, light: true });
+  assert.equal(field('target').textContent, 'Current target');
+  assert.equal(field('status-delivery').dataset.state, 'retrying');
+  assert.equal(light().disabled, true);
+  publish({ generation: 2, stats: metrics });
+  assert.equal(field('status-delivery').dataset.state, 'fresh');
+});
+
+for (const timer of ['interruption', 'observed pause']) {
+  test(`${timer} age does not mutate the accessible state announcement`, async () => {
+    selectPrinter();
+    publish({ generation: 1, stats: metrics });
+    publish(
+      timer === 'interruption'
+        ? { generation: 1, stats: null, status_error: 'timeout' }
+        : { generation: 1, stats: { ...metrics, state: 'paused' } },
+    );
+    const label = field('status-delivery-label');
+    const age = field('status-age');
+    assert.equal(label.getAttribute('role'), 'status');
+    assert.equal(label.getAttribute('aria-atomic'), 'true');
+    assert.equal(age.getAttribute('aria-live'), 'off');
+    assert.equal(age.closest('[role="status"]'), null);
+    const mutations: MutationRecord[] = [];
+    const observer = new MutationObserver((records) => mutations.push(...records));
+    observer.observe(label, { childList: true, characterData: true, subtree: true });
+    advance(3000);
+    await tick();
+    observer.disconnect();
+    assert.equal(mutations.length, 0);
+    assert.match(age.textContent!, /\b3s\b/);
+  });
+}
+
 test('print statistics display incoming measurements while the camera is stopped', () => {
   selectPrinter();
   publish({ generation: 1, stats: metrics });
@@ -922,7 +1302,9 @@ test('changing generation rejects old frames and status without losing playback 
     image: 'late frame',
     error: staleFailure,
   });
-  assert.equal(visible(field('stats')), false);
+  assert.equal(field('status-delivery').dataset.state, 'waiting');
+  assert.equal(visible(field('hardware-stat')), false);
+  assert.equal(visible(progress()), false);
   assert.equal(image().hasAttribute('src'), false);
   assert.equal(light().disabled, true);
   assert.ok(!field('camera').textContent!.includes(staleFailure));
@@ -938,14 +1320,20 @@ test('changing generation rejects old frames and status without losing playback 
   assert.deepEqual(lastMessage(), { type: 'frame', generation: 2 });
 });
 
-test('a playback generation announcement for the same printer preserves its statistics and light', () => {
+test('a new generation for the same printer waits for its own statistics and light', () => {
   selectPrinter();
   publish({ generation: 1, stats: metrics, light: true });
   click(button('play'));
   selectPrinter(2);
+  assert.equal(field('status-delivery').dataset.state, 'waiting');
+  assert.equal(visible(progress()), false);
+  assert.equal(visible(field('hardware-stat')), false);
+  assert.equal(light().disabled, true);
+  publish({ generation: 2, stats: metrics, light: false });
+  assert.equal(field('status-delivery').dataset.state, 'fresh');
   assert.equal(visible(progress()), true);
   assert.equal(light().disabled, false);
-  assert.equal(light().getAttribute('aria-checked'), 'true');
+  assert.equal(light().getAttribute('aria-checked'), 'false');
 });
 
 test('visibility stops monitoring once, ignores late loads, and returning requires Play again', () => {
