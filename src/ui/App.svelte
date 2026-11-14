@@ -7,6 +7,32 @@
 
   let image: HTMLImageElement;
   let camera = $state<Camera>();
+  const lastUpdateAge = $derived(
+    camera?.lastSuccessfulStatusAt == null
+      ? null
+      : Math.max(0, Math.floor(((camera?.now ?? 0) - camera.lastSuccessfulStatusAt) / 1000)),
+  );
+  const deliveryValue = $derived(
+    camera?.statusDelivery === 'fresh'
+      ? 'Current'
+      : camera?.statusDelivery === 'retrying'
+        ? 'Unavailable'
+        : 'Waiting',
+  );
+  const deliveryAnnouncement = $derived(
+    camera?.statusDelivery === 'retrying'
+      ? 'Printer status unavailable. Waiting for a new reading.'
+      : camera?.statusDelivery === 'fresh'
+        ? 'Printer status current.'
+        : 'Waiting for printer status.',
+  );
+  function age(seconds: number) {
+    return seconds < 60
+      ? seconds + 's'
+      : seconds < 3600
+        ? Math.floor(seconds / 60) + 'm'
+        : Math.floor(seconds / 3600) + 'h';
+  }
   const warning = $derived.by(() => {
     const message = camera?.warning ?? '';
     const boundary = message.indexOf('. ');
@@ -25,7 +51,33 @@
   <img bind:this={image} id="image" alt="Snapmaker U1 camera" hidden={!camera?.imageVisible} />
   <header>
     <div>
-      <h1>Snapmaker U1</h1>
+      <div class="printer-title">
+        <h1>Snapmaker U1</h1>
+        <span
+          id="status-delivery"
+          data-state={camera?.statusDelivery}
+          hidden={!camera?.statusDelivery}
+        >
+          <span id="status-delivery-label" class="sr-only" role="status" aria-atomic="true"
+            >{deliveryAnnouncement}</span
+          >
+          <span
+            id="status-delivery-value"
+            aria-hidden="true"
+            hidden={camera?.statusDelivery === 'retrying' && lastUpdateAge !== null}
+            >{deliveryValue}</span
+          >
+          <span
+            id="status-age"
+            aria-live="off"
+            aria-label={lastUpdateAge === null
+              ? undefined
+              : 'Last successful printer status ' + age(lastUpdateAge) + ' ago'}
+            hidden={camera?.statusDelivery !== 'retrying' || lastUpdateAge === null}
+            >{lastUpdateAge === null ? '' : '…' + age(lastUpdateAge)}</span
+          >
+        </span>
+      </div>
       <div class="printer-meta">
         <span id="target" title={camera?.target}>{camera?.target ?? 'Selected printer'}</span>
         <PrintState
@@ -94,9 +146,6 @@
       stats={camera?.stats ?? null}
       receivedAt={camera?.statsAt ?? 0}
       statusError={camera?.statusError ?? ''}
-      delivery={camera?.statusDelivery ?? null}
-      lastSuccess={camera?.lastSuccessfulStatusAt ?? null}
-      now={camera?.now ?? 0}
     />
     <div id="notice" role="status" hidden={!camera?.notice}>{camera?.notice}</div>
     <div class="stream-controls" hidden={!camera?.playing}>
@@ -162,8 +211,24 @@
   h1 {
     font-size: 19px;
     font-weight: 600;
-    margin: 0 0 5px;
+    margin: 0;
     letter-spacing: -0.3px;
+  }
+  .printer-title {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    margin-bottom: 5px;
+  }
+  #status-delivery {
+    flex: 0 0 auto;
+    color: #a7b5c2;
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  #status-delivery[data-state='fresh'] {
+    color: #b4c9c3;
   }
   header > div:first-child {
     min-width: 0;

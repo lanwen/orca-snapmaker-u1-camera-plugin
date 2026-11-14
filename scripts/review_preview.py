@@ -484,12 +484,24 @@ def review(directory, output, states, widths, gifs=False):
                     heading:rect(document.querySelector('h1')),
                     labelsMatch:!document.querySelector('#stats-state').getClientRects().length ||
                       document.querySelector('#printer').textContent === document.querySelector('#stats-state').textContent,
-                    deliveryOverlapsReadings:(() => {
-                      const delivery=document.querySelector('#status-delivery');
-                      if (!delivery?.getClientRects().length) return false;
-                      const bottom=delivery.getBoundingClientRect().bottom;
-                      return [...document.querySelectorAll('.stats-gauge,.stats-journey,#hardware-stat')]
-                        .some(e => e.getClientRects().length && e.getBoundingClientRect().top < bottom);
+                    headerOverlap:(() => {
+                      const target=document.querySelector('#target');
+                      const original=target.textContent;
+                      const fits=() => {
+                        const title=document.querySelector('h1').getBoundingClientRect();
+                        const delivery=document.querySelector('#status-delivery');
+                        const freshness=delivery.getBoundingClientRect();
+                        const address=target.getBoundingClientRect();
+                        const phase=document.querySelector('#printer').getBoundingClientRect();
+                        const light=document.querySelector('.light-area').getBoundingClientRect();
+                        return Math.max(title.right, freshness.right, address.right, phase.right) < light.left &&
+                          address.right <= phase.left && (!delivery.getClientRects().length || title.right <= freshness.left);
+                      };
+                      try {
+                        if (!fits()) return true;
+                        target.textContent='Workshop printer with a deliberately long address and preset name '.repeat(10);
+                        return !fits() || target.scrollWidth <= target.clientWidth;
+                      } finally { target.textContent=original; }
                     })(),
                     connecting:!document.querySelector('#empty').hidden,
                     lightError:document.querySelector('.light-area').dataset.error === 'true',
@@ -525,8 +537,8 @@ def review(directory, output, states, widths, gifs=False):
                 rows.append(row)
                 results.append(row)
                 try:
-                    if row["deliveryOverlapsReadings"]:
-                        raise ValueError("Status delivery overlaps printer readings")
+                    if row["headerOverlap"]:
+                        raise ValueError("Printer title, freshness, address, job state, or light overlap")
                     if row["fpsWrapped"]:
                         raise ValueError("Camera FPS label wraps")
                     if not row["islandsAligned"]:
@@ -605,6 +617,10 @@ def review(directory, output, states, widths, gifs=False):
                     client.evaluate(f"{tab}.blur()")
                     client.evaluate("new Promise(resolve => setTimeout(resolve, 280))")
                 client.screenshot(output / row["screenshot"])
+                row["header"] = f"{state}-{width}-header.png"
+                clip = client.evaluate("(() => { const r=document.querySelector('header').getBoundingClientRect(); return {x:r.x,y:r.y,width:r.width,height:r.height,scale:1}; })()")
+                data = client.call("Page.captureScreenshot", {"format":"png", "clip":clip})["data"]
+                (output / row["header"]).write_bytes(base64.b64decode(data))
                 client.evaluate("document.querySelector('#stop').scrollIntoView({block:'nearest'})")
                 stop = client.evaluate("(() => { const r=document.querySelector('#stop').getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2}; })()")
                 client.call("Input.dispatchMouseEvent", {"type": "mouseMoved", **stop})
@@ -620,7 +636,7 @@ def review(directory, output, states, widths, gifs=False):
     (output / "report.json").write_text(json.dumps(report, indent=2) + "\n")
     images = "".join(f'<figure><figcaption>{html.escape(row["state"])} · {row["width"]}px '
                      + (f'<a href="{row["gif"]}">Animation</a>' if "gif" in row else '') + '</figcaption>'
-                     f'<a href="{row["viewport"]}"><img src="{row["screenshot"]}" alt="{html.escape(row["state"])}"></a></figure>' for row in results)
+                     f'<a href="{row["viewport"]}"><img src="{row["header"]}" alt="{html.escape(row["state"])} header"><br><img src="{row["screenshot"]}" alt="{html.escape(row["state"])}"></a></figure>' for row in results)
     (output / "index.html").write_text('<!doctype html><meta charset="utf-8"><title>Print state review</title>'
         '<style>body{background:#10151b;color:#edf3f9;font:16px system-ui}figure{margin:24px}img{max-width:100%}</style>'
         '<h1>Print state review</h1><p>Offline sample data. Geometry and motion results: <a href="report.json">report.json</a>.</p>' + images)

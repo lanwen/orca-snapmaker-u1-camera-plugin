@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { Fan, Heater, PrintStats, StatusDelivery } from './types';
+  import type { Fan, Heater, PrintStats } from './types';
   import FanIcon from './FanIcon.svelte';
   import FanSpeed from './FanSpeed.svelte';
   import Toolheads from './Toolheads.svelte';
@@ -8,34 +8,7 @@
     stats,
     receivedAt,
     statusError = '',
-    delivery = null,
-    lastSuccess = null,
-    now = 0,
-  }: {
-    stats: PrintStats | null;
-    receivedAt: number;
-    statusError?: string;
-    delivery?: StatusDelivery | null;
-    lastSuccess?: number | null;
-    now?: number;
-  } = $props();
-  const deliveryLabel = $derived(
-    delivery === 'fresh'
-      ? 'Printer status current'
-      : delivery === 'retrying'
-        ? 'Retrying printer status'
-        : 'Waiting for printer status',
-  );
-  const lastUpdateAge = $derived(
-    lastSuccess === null ? null : Math.max(0, Math.floor((now - lastSuccess) / 1000)),
-  );
-  function age(seconds: number) {
-    return seconds < 60
-      ? seconds + 's'
-      : seconds < 3600
-        ? Math.floor(seconds / 60) + 'm'
-        : Math.floor(seconds / 3600) + 'h';
-  }
+  }: { stats: PrintStats | null; receivedAt: number; statusError?: string } = $props();
   const number = (value: unknown): value is number =>
     typeof value === 'number' && Number.isFinite(value) && value >= 0;
   const reportedFan = (fan?: Fan) =>
@@ -217,21 +190,10 @@
   id="stats"
   aria-labelledby="stats-title"
   tabindex="0"
-  hidden={!stats && !delivery}
+  hidden={!stats}
   data-state={printState}
 >
   <h2 id="stats-title">Print statistics</h2>
-  <div id="status-delivery" data-state={delivery} hidden={!delivery}>
-    <span class="delivery-dot" aria-hidden="true"></span>
-    <span id="status-delivery-label" role="status" aria-atomic="true">{deliveryLabel}</span>
-    <span
-      id="status-age"
-      aria-live="off"
-      hidden={delivery !== 'retrying' || lastUpdateAge === null}
-    >
-      {lastUpdateAge === null ? '' : 'Last update ' + age(lastUpdateAge) + ' ago'}
-    </span>
-  </div>
   {#if activePrint && [stats?.psu_fan, stats?.hotend_fan, stats?.exhaust_fan, stats?.circulation_fan].some(reportedFan)}
     <div class="fan-islands" aria-label="Additional cooling fans">
       {#if reportedFan(stats?.psu_fan)}<dl class="fan-island">
@@ -251,7 +213,7 @@
         </div>{/if}
     </div>
   {/if}
-  <div class="stats-gauge" hidden={!stats}>
+  <div class="stats-gauge">
     <PrintState id="stats-state" {stats} />
     <div class="stats-primary">
       <span id="stats-message" hidden={!message}>{message}</span>
@@ -362,7 +324,7 @@
     grid-column: 1;
     display: grid;
     grid-template-columns: 146px minmax(0, 1fr) 360px;
-    gap: 8px 18px;
+    gap: 18px;
     width: 895px;
     max-width: 100%;
     padding: 16px;
@@ -391,33 +353,6 @@
   #stats:focus-visible {
     outline: 2px solid #7abaff;
     outline-offset: 3px;
-  }
-  #status-delivery {
-    grid-column: 1 / -1;
-    grid-row: 1;
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 4px 8px;
-    color: #c0cbd5;
-    font-size: 11px;
-    line-height: 16px;
-  }
-  .delivery-dot {
-    flex: 0 0 5px;
-    width: 5px;
-    height: 5px;
-    border-radius: 50%;
-    background: #96a4b3;
-  }
-  #status-delivery[data-state='fresh'] .delivery-dot {
-    background: #72dec2;
-  }
-  #status-delivery[data-state='retrying'] .delivery-dot {
-    background: #f1c675;
-  }
-  #status-age {
-    color: #a7b5c2;
   }
   .stats-gauge {
     display: grid;
@@ -465,11 +400,6 @@
     gap: 8px;
     border-left: 1px solid #ffffff28;
     padding-left: 18px;
-  }
-  .stats-gauge,
-  .stats-journey,
-  #stats > :global(#hardware-stat) {
-    grid-row: 2;
   }
   .journey-header {
     grid-area: 1 / 1;
@@ -743,16 +673,10 @@
     #stats {
       width: 480px;
       grid-template-columns: 120px minmax(0, 1fr);
-      gap: 8px 12px;
+      gap: 12px;
     }
     #stats[data-state='standby'] {
       grid-template-columns: minmax(0, 1fr) max-content;
-    }
-    #stats > :global(#hardware-stat) {
-      grid-row: 3;
-    }
-    #stats[data-state='standby'] > :global(#hardware-stat) {
-      grid-row: 2;
     }
     #progress-value {
       font-size: 46px;

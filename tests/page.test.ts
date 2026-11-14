@@ -186,6 +186,22 @@ test('status measurements expire at the ten-second boundary even for an epoch-ze
   assert.equal(light().disabled, true);
 });
 
+test('header status uses compact labels and only elapsed time after a successful reading is interrupted', () => {
+  assert.equal(document.querySelector('header')!.contains(field('status-delivery')), true);
+  assert.equal(field('status-delivery-value').textContent, 'Waiting');
+  selectPrinter();
+  publish({ generation: 1, stats: null, status_error: 'timeout' });
+  assert.equal(field('status-delivery-value').textContent, 'Unavailable');
+  assert.equal(visible(field('status-age')), false);
+  publish({ generation: 1, stats: metrics });
+  assert.equal(field('status-delivery-value').textContent, 'Current');
+  advance(3000);
+  publish({ generation: 1, stats: null, status_error: 'timeout' });
+  assert.equal(visible(field('status-delivery-value')), false);
+  assert.equal(field('status-age').textContent, '…3s');
+  assert.equal(field('status-age').closest('[aria-live]:not([aria-live="off"])'), null);
+});
+
 test('status delivery waits for an actual reading rather than a target, heartbeat or camera frame', () => {
   assert.equal(visible(field('status-delivery')), true);
   assert.equal(field('status-delivery').dataset.state, 'waiting');
@@ -291,7 +307,7 @@ for (const [seconds, expected] of [
     publish({ generation: 1, stats: null, status_error: 'timeout' });
     vi.setSystemTime(Date.now() + seconds * 1000);
     flushSync(() => window.dispatchEvent(new Event('pageshow')));
-    assert.ok(field('status-age').textContent!.includes(expected));
+    assert.equal(field('status-age').textContent, '…' + expected);
     assert.doesNotMatch(field('status-age').textContent!, /NaN|undefined/);
   });
 }
