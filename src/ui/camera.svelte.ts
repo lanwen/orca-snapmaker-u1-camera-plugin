@@ -101,7 +101,7 @@ export class Camera {
   setLight = (enabled: boolean) => {
     if (this.active && !document.hidden && !this.lightDisabled && this.light !== null) {
       this.lightError = '';
-      this.bridge.postMessage({ type: 'light', enabled });
+      this.bridge.postMessage({ type: 'light', enabled, generation: this.generation });
     }
   };
 
@@ -129,14 +129,24 @@ export class Camera {
       this.issueAt ??= this.lastFrame;
       if (!this.issue) this.issue = 'Camera not updating';
     }
-    this.bridge.postMessage({ type: 'activity', active: true, playing: this.playing });
+    this.bridge.postMessage({
+      type: 'activity',
+      active: true,
+      playing: this.playing,
+      ...(this.generation >= 0 ? { generation: this.generation } : {}),
+    });
   };
 
   private hide = () => {
     this.stop();
     this.active = false;
     this.lightDisabled = true;
-    this.bridge.postMessage({ type: 'activity', active: false });
+    this.bridge.postMessage({
+      type: 'activity',
+      active: false,
+      ...(this.generation >= 0 ? { generation: this.generation } : {}),
+    });
+    this.generation = -1;
   };
 
   private receive = (data: HostMessage) => {
@@ -189,6 +199,7 @@ export class Camera {
         this.lightError = this.notice = '';
         this.noticeAt = null;
         this.targetUnavailable = true;
+        this.generation = -1;
         this.stop();
         this.supported = false;
         this.target = 'Printer address unavailable';

@@ -309,7 +309,9 @@ class Monitor:
 
     def update(self, target, enabled=None, playing=None):
         with self.condition:
-            target_changed = target != self.target
+            if self.closed:
+                return self.generation
+            target_changed = target != self.target or bool(target) and time.monotonic() >= self.expires
             playback_changed = type(playing) is bool and playing != self.playing
             if target_changed or playback_changed:
                 if self.client is not None:
@@ -327,14 +329,25 @@ class Monitor:
             if type(enabled) is bool and target:
                 self.light = enabled
             # Announce the generation before the worker can publish a frame for it.
-            if target:
+            if target and (target_changed or playback_changed):
                 self.publish({"type": "target", "target": target[0], "generation": self.generation})
             self.condition.notify()
             return self.generation
 
+    def renew(self, target, generation, enabled=None, playing=None):
+        with self.condition:
+            if (not self.current(generation) or target != self.target
+                    or type(playing) is bool and playing != self.playing):
+                return False
+            self.expires = time.monotonic() + 3.5
+            if type(enabled) is bool:
+                self.light = enabled
+            self.condition.notify()
+            return True
+
     def frame_loaded(self, generation):
         with self.condition:
-            if generation == self.generation and self.playing and not self.closed:
+            if self.current(generation) and self.playing:
                 self.frame_ready = True
                 self.expires = time.monotonic() + 3.5
                 self.condition.notify()
@@ -468,6 +481,8 @@ class U1Page(orca.pages.PagesPluginCapabilityBase):
         self.monitor = None
         self.preset_connection_prompt_open = False
         self.preset_connection_save_failed = False
+        self.connection = None
+        self.connection_revision = 0
 
     def get_name(self):
         return "Snapmaker U1"
@@ -482,9 +497,52 @@ class U1Page(orca.pages.PagesPluginCapabilityBase):
         return {"host": "", "allow_preset_connection": None}
 
     def get_ui(self):
-        if self.monitor:
-            self.monitor.update(None)
+        self.invalidate_connection()
         return PAGE
+
+    def invalidate_connection(self):
+        if self.monitor:
+            with self.monitor.condition:
+                self.connection = None
+                self.connection_revision += 1
+                self.monitor.update(None)
+        else:
+            self.connection = None
+            self.connection_revision += 1
+
+    def activity_target(self, check_config=True):
+        now = time.monotonic()
+        cached = self.connection
+        if check_config or cached is None or now >= cached[2]:
+            config = json.loads(self.get_config())
+            if cached is not None and config != cached[0]:
+                self.invalidate_connection()
+                cached = None
+            if cached is None or now >= cached[2]:
+                revision = self.connection_revision
+                try:
+                    target = self.selected_target(config)
+                    effective = json.loads(self.get_config())
+                    approved = dict(config, allow_preset_connection=True)
+                    if (revision != self.connection_revision
+                            or effective != config and effective != approved):
+                        raise ValueError("Printer connection settings changed. Try again.")
+                except Exception as error:
+                    if revision == self.connection_revision:
+                        error_type = (UnsupportedPrinter if isinstance(error, UnsupportedPrinter)
+                                      else ValueError if isinstance(error, ValueError) else RuntimeError)
+                        # Keep public error data, not tracebacks that retain live host handles.
+                        self.connection = config, (error_type, str(error)), time.monotonic() + 2, revision
+                    raise
+                # No config-change event exists; UI activity and frame callbacks bound stale settings.
+                self.connection = effective, target, time.monotonic() + 2, revision
+        cached = self.connection
+        if cached is None or cached[3] != self.connection_revision:
+            raise ValueError("Printer connection settings changed. Try again.")
+        result = cached[1]
+        if isinstance(result[0], type):
+            raise result[0](result[1])
+        return result, cached[3], self.monitor.generation if self.monitor else None
 
     def allow_preset_connection(self, config):
         allowed = config.get("allow_preset_connection")
@@ -517,8 +575,9 @@ class U1Page(orca.pages.PagesPluginCapabilityBase):
         finally:
             self.preset_connection_prompt_open = False
 
-    def selected_target(self):
-        config = json.loads(self.get_config())
+    def selected_target(self, config=None):
+        if config is None:
+            config = json.loads(self.get_config())
         # A manual host must never receive another selected printer's credentials.
         if config.get("host"):
             return printer_url(config["host"]), ""
@@ -530,12 +589,22 @@ class U1Page(orca.pages.PagesPluginCapabilityBase):
         if not self.allow_preset_connection(config):
             raise ValueError('Preset connection access is disabled. Set "host" in plugin Config, '
                              'or reset "allow_preset_connection" to null to ask again.')
-        # The modal consent dialog can dispatch selection events; refresh host handles.
+        # The dialog can change settings and selection; refresh config before connection fields.
+        effective = json.loads(self.get_config())
+        if effective.get("host"):
+            return printer_url(effective["host"]), ""
+        if effective.get("allow_preset_connection") is not True:
+            raise ValueError("Preset connection access is disabled.")
         bundle = orca.host.preset_bundle()
         preset = bundle.current_printer_preset()
         if selection != (setting(preset.file), setting(preset.name)) or not is_u1_preset(preset):
             raise ValueError("Printer selection changed. Try again with the selected preset.")
         address = setting(preset.config_value("print_host")) or setting(bundle.full_config_value("print_host"))
+        effective = json.loads(self.get_config())
+        if effective.get("host"):
+            return printer_url(effective["host"]), ""
+        if effective.get("allow_preset_connection") is not True:
+            raise ValueError("Preset connection access is disabled.")
         key = setting(preset.config_value("printhost_apikey")) or setting(bundle.full_config_value("printhost_apikey"))
         if not address:
             address, key = saved_connection(preset)
@@ -543,32 +612,48 @@ class U1Page(orca.pages.PagesPluginCapabilityBase):
 
     def on_lifecycle_event(self, event, ctx):
         if (event == orca.LifecycleEvent.DeviceSelected
+                or event == getattr(orca.LifecycleEvent, "PresetSaved", None)
                 or event == orca.LifecycleEvent.PresetSelected and ctx.msg == "printer"):
-            if self.monitor:
-                self.monitor.update(None)
+            self.invalidate_connection()
             # Resolve fresh host handles later, in the page's UI-thread message callback.
             self.post_message({"type": "selection_changed"})
 
     def on_message(self, data):
         if not isinstance(data, dict):
             return
-        if data.get("type") == "frame":
-            if self.monitor:
-                self.monitor.frame_loaded(data.get("generation"))
+        kind = data.get("type")
+        generation = data.get("generation")
+        if generation is not None and (type(generation) is not int or self.monitor is None
+                                       or generation != self.monitor.generation):
             return
-        if data.get("type") == "activity" and data.get("active") is not True:
-            if self.monitor:
-                self.monitor.update(None)
+        if kind == "frame" and (self.monitor is None or not self.monitor.current(generation)):
             return
-        if data.get("type") not in ("activity", "light"):
+        if kind == "activity" and data.get("active") is not True:
+            self.invalidate_connection()
+            return
+        if kind not in ("activity", "light", "frame"):
             return
         try:
-            target = self.selected_target()  # Copy host values on the page's UI callback.
+            target, revision, expected_generation = self.activity_target(check_config=kind != "frame")
             if self.monitor is None:
                 self.monitor = Monitor(self.post_message)
-            enabled = data.get("enabled") if data.get("type") == "light" else None
-            playing = data.get("playing") if data.get("type") == "activity" else None
-            self.monitor.update(target, enabled, playing)
+            with self.monitor.condition:
+                if (revision != self.connection_revision
+                        or expected_generation is not None and expected_generation != self.monitor.generation):
+                    return
+                if kind == "frame":
+                    if target != self.monitor.target:
+                        self.monitor.update(target)
+                    self.monitor.frame_loaded(generation)
+                    return
+                enabled = data.get("enabled") if kind == "light" else None
+                playing = data.get("playing") if kind == "activity" else None
+                renewed = generation is not None and self.monitor.renew(target, generation, enabled, playing)
+                if not renewed and revision == self.connection_revision and (
+                        expected_generation is None or expected_generation == self.monitor.generation):
+                    if generation is None and self.monitor.target is not None:
+                        self.monitor.update(None)  # A fresh page needs its own target handshake.
+                    self.monitor.update(target, enabled, playing)
         except Exception as error:
             if self.monitor:
                 self.monitor.update(None)
@@ -576,6 +661,8 @@ class U1Page(orca.pages.PagesPluginCapabilityBase):
             self.post_message({"error": message, "supported": not isinstance(error, UnsupportedPrinter)})
 
     def on_unload(self):
+        self.connection = None
+        self.connection_revision += 1
         if self.monitor:
             self.monitor.close()
             self.monitor = None
