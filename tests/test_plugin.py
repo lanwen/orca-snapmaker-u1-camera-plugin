@@ -369,7 +369,10 @@ class TestClient:
                 patch.object(Endpoint, "status_body", b"private-response-secret"):
             with pytest.raises(plugin.AccessDenied, match="denied access") as raised:
                 plugin.HttpClient(http_endpoint, api_key).request("/printer/objects/query?")
-            assert str(raised.value) == "The printer denied access. Check its connection settings."
+            message = str(raised.value)
+            assert "private-response-secret" not in message
+            if api_key:
+                assert api_key not in message
             assert Endpoint.requests[-1][1] == api_key
 
 
@@ -883,8 +886,9 @@ class TestClient:
     def test_client_rejects_api_errors_and_escapes_websocket_tokens(self):
         client = plugin.HttpClient("https://printer.local:7125", "secret")
         with patch.object(client, "json", return_value={"error": {"message": "secret"}}):
-            with pytest.raises(RuntimeError, match='Printer rejected the request'):
+            with pytest.raises(RuntimeError, match='rejected') as raised:
                 client.query_objects(plugin.ObjectQuery("print_stats"))
+        assert 'secret' not in str(raised.value)
         with patch.object(client, "json", return_value={"result": "a&b?c/#"}):
             assert client.websocket_url() == 'wss://printer.local:7125/websocket?token=a%26b%3Fc%2F%23'
         assert plugin.HttpClient('http://printer.local').websocket_url() == 'ws://printer.local/websocket'

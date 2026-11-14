@@ -42,7 +42,7 @@ class TestReleaseNotes:
         with pytest.raises(ValueError, match="marker"):
             public_section(body)
 
-    def test_legacy_description_has_no_public_notes(self):
-        assert public_section("Legacy generated description") is None
+    def test_description_without_markers_has_no_public_notes(self):
+        assert public_section("Generated description without public-note markers") is None
         with pytest.raises(ValueError, match="Missing tagged"):
-            public_notes("Legacy generated description")
+            public_notes("Generated description without public-note markers")

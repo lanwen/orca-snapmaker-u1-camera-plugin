@@ -403,9 +403,11 @@ class TestPublication:
         assert not any((call[:2] in [('release', 'upload'), ('release', 'edit'), ('release', 'create')] for call in publication.github.calls))
 
     def test_release_captures_public_notes_first_and_reruns_ignore_pr_edits(self, publication):
+        notes = "Camera controls are easier to use."
+        publication.github.pr["body"] = release.format_notes(notes, "internal history")
         release.publish(publication.root / "dist")
         body = publication.github.release["body"]
-        assert release.public_notes(body) == 'Camera controls are easier to use.'
+        assert release.public_notes(body) == notes
         assert body.index('## Public notes') < body.index('## Generated notes')
         assert '- Camera controls.' in body
         assert 'Source commit:' in body

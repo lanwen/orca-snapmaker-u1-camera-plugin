@@ -37,15 +37,17 @@ class TestPreviewReview:
 
     def test_devtools_ignores_events_and_reports_javascript_errors(self):
         connection = Mock()
+        failure = {"text": "Injected JavaScript failure"}
         connection.recv.side_effect = [json.dumps(message) for message in [
             {"method": "Page.loadEventFired"},
             {"id": 1, "result": {"result": {"value": 42}}},
-            {"id": 2, "result": {"exceptionDetails": {"text": "Uncaught error"}}},
+            {"id": 2, "result": {"exceptionDetails": failure}},
         ]]
         client = DevTools(connection)
         assert client.evaluate('40+2') == 42
-        with pytest.raises(RuntimeError, match='Uncaught error'):
+        with pytest.raises(RuntimeError) as raised:
             client.evaluate("broken()")
+        assert raised.value.args == (failure,)
 
 
 class TestBrowserCleanup:

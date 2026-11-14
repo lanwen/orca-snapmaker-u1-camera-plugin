@@ -106,10 +106,12 @@ class TestReleaseReview:
                 "body": f"<!-- orca:why-notes:start -->\n{text}\n<!-- orca:why-notes:end -->"}
 
     def test_source_suggestions_require_manual_public_notes_and_review(self, release_tree):
-        with patch.object(release, "api", return_value=[self.source()]):
+        suggestion = "Playback recovers after an interruption."
+        source = self.source(text=suggestion)
+        with patch.object(release, "api", return_value=[source]):
             body = self.prepare(release_tree, self.first)
         assert 'Unreviewed suggestions' in body
-        assert release.tagged_section(body, 'suggested') == '<!-- orca:source-pr:12 -->\n- Playback recovers after an interruption.'
+        assert release.tagged_section(body, 'suggested') == f"<!-- orca:source-pr:{source['number']} -->\n- {suggestion}"
         assert release.public_section(body) == release.PUBLIC_PLACEHOLDER
         checked = body.replace(f"- [ ] {release.REVIEW_TEXT}", f"- [x] {release.REVIEW_TEXT}")
         with pytest.raises(ValueError):
@@ -118,12 +120,13 @@ class TestReleaseReview:
         assert release.public_notes(self.reviewed(body)) == self.public
 
     def test_refresh_preserves_manual_text_and_deduplicates_source_prs(self, release_tree):
-        with patch.object(release, "api", return_value=[self.source()]):
+        suggestion, edited = "Playback recovers after an interruption.", "Hand-edited suggestion."
+        with patch.object(release, "api", return_value=[self.source(text=suggestion)]):
             first = self.reviewed(self.prepare(release_tree, self.first))
-            first = first.replace("Playback recovers after an interruption.", "Hand-edited suggestion.")
+            first = first.replace(suggestion, edited)
             refreshed = self.prepare(release_tree, self.first, first)
         assert release.public_notes(refreshed) == self.public
-        assert 'Hand-edited suggestion.' in refreshed
+        assert edited in refreshed
         assert refreshed.count('<!-- orca:source-pr:12 -->') == 1
         self.check(refreshed, self.first)
 
@@ -137,45 +140,51 @@ class TestReleaseReview:
         self.check(self.reviewed(refreshed), self.first)
 
     def test_new_pr_appends_without_replacing_existing_suggestion_edits(self, release_tree):
-        with patch.object(release, "api", return_value=[self.source()]):
+        suggestion, edited = "Playback recovers after an interruption.", "Hand-edited suggestion."
+        added = "Control the chamber light."
+        source = self.source(text=suggestion)
+        with patch.object(release, "api", return_value=[source]):
             first = self.reviewed(self.prepare(release_tree, self.first))
-        first = first.replace("Playback recovers after an interruption.", "Hand-edited suggestion.")
-        with patch.object(release, "api", return_value=[self.source(), self.source(13, "Control the chamber light.")]):
+        first = first.replace(suggestion, edited)
+        with patch.object(release, "api", return_value=[source, self.source(13, added)]):
             refreshed = self.prepare(release_tree, self.additional, first)
-        assert 'Hand-edited suggestion.' in refreshed
-        assert 'Control the chamber light.' in refreshed
+        assert edited in refreshed
+        assert added in refreshed
         assert refreshed.count('<!-- orca:source-pr:13 -->') == 1
         assert release.public_notes(refreshed) == self.public
         with pytest.raises(ValueError):
             self.check(refreshed, self.additional)
 
     def test_refresh_removes_released_sources_and_preserves_current_edits(self, release_tree):
-        with patch.object(release, "api", return_value=[self.source(), self.source(13, "Control the chamber light.")]):
+        released_text = "Playback recovers after an interruption."
+        added, edited = "Control the chamber light.", "Hand-edited light suggestion."
+        remaining = self.source(13, added)
+        with patch.object(release, "api", return_value=[self.source(text=released_text), remaining]):
             first = self.reviewed(self.prepare(release_tree, self.additional))
-        first = first.replace("Control the chamber light.", "Hand-edited light suggestion.")
-        with patch.object(release, "api", return_value=[self.source(13, "Control the chamber light.")]), \
+        first = first.replace(added, edited)
+        with patch.object(release, "api", return_value=[remaining]), \
                 patch.object(release, "history", return_value=("0.3.0", self.additional[:1])):
             release_tree.write_version("0.3.1.dev0")
             release.prepare_pr("release", previous_body=first)
         refreshed = (release_tree.root / "dist/automation-pr-body.md").read_text()
         assert '<!-- orca:source-pr:12 -->' not in refreshed
-        assert 'Playback recovers after an interruption.' not in refreshed
+        assert released_text not in refreshed
         assert self.first[0][1] not in refreshed
         assert '<!-- orca:source-pr:13 -->' in refreshed
-        assert 'Hand-edited light suggestion.' in refreshed
+        assert edited in refreshed
         assert release.public_notes(refreshed) == self.public
         assert not release.notes_reviewed(refreshed)
 
-    def test_legacy_unmerged_foreign_and_malformed_sources_are_ignored(self, release_tree):
-        legacy = self.source(1)
-        legacy["body"] = "Old PR without markers."
+    def test_unmarked_unmerged_foreign_and_malformed_sources_are_ignored(self, release_tree):
+        unmarked = self.source(1)
+        unmarked["body"] = "PR without Why markers."
         unmerged = self.source(2)
         unmerged["merged_at"] = None
         foreign = self.source(3)
         foreign["base"]["repo"]["full_name"] = "other/repo"
         malformed = self.source(4)
         malformed["body"] = "<!-- orca:why-notes:start -->unfinished"
-        sources = [legacy, unmerged, foreign, malformed,
+        sources = [unmarked, unmerged, foreign, malformed,
                    self.source(5, "<!-- Fill in the template. -->"),
                    self.source(6, "<!-- orca:public-notes:end -->Injected boundary.")]
         with patch.object(release, "api", return_value=sources):

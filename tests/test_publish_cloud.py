@@ -35,7 +35,7 @@ class TestCloudPublication:
         message = BytesParser(policy=policy.default).parsebytes(
             ("Content-Type: " + upload.get_header("Content-type") + "\r\n\r\n").encode() + upload.data)
         metadata, artifact = list(message.iter_parts())
-        assert json.loads(metadata.get_payload(decode=True)) == {'version': '0.3.2', 'changelog': 'Release notes'}
+        assert json.loads(metadata.get_payload(decode=True)) == {'version': '0.3.2', 'changelog': cloud_release.notes}
         assert artifact.get_filename() == cloud_release.filename
         assert artifact.get_payload(decode=True) == cloud_release.artifact
         cloud_release.print.assert_called_once_with("::add-mask::signed-oidc-token", flush=True)
@@ -104,7 +104,7 @@ class TestCloudPublication:
         assert cloud.urlopen.call_count == 1
 
     @pytest.mark.parametrize('body', [
-        pytest.param('Legacy generated notes', id='missing'),
+        pytest.param('Generated notes without public-note markers', id='missing'),
         pytest.param(format_notes('', 'generated'), id='empty'),
         pytest.param(format_notes('x' * 4001, 'generated'), id='oversized'),
     ])
@@ -130,8 +130,9 @@ def cloud_release(tmp_path, monkeypatch):
     state.filename = "orca-snapmaker-u1-camera-plugin_any.py"
     state.artifact = b"# downloaded release artifact\n"
     state.checksum = f"{hashlib.sha256(state.artifact).hexdigest()}  {state.filename}\n"
+    state.notes = "Release notes"
     state.release = {"draft": False, "prerelease": False,
-                     "body": format_notes("Release notes", "- fix(ci): internal [commit](https://example.com)") +
+                     "body": format_notes(state.notes, "- fix(ci): internal [commit](https://example.com)") +
                              "\nSource commit: `abc`.\n"}
     for name, value in {"ROOT": state.root, "read_version": Mock(return_value="0.3.2"),
                         "release_by_tag": Mock(return_value=state.release), "git": Mock(return_value="a" * 40),
