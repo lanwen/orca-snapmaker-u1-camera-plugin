@@ -206,6 +206,12 @@ def check_toolheads(client):
       if (tabs.length !== 4) errors.push('Four toolhead tabs are required');
       const fixture = structuredClone(screenshotFixtures[screenshotState]);
       const generation = screenshotGeneration;
+      const postMessage = window.orca.postMessage;
+      // Keep fixture heartbeats from replacing controlled toolhead samples.
+      window.orca.postMessage = message => {
+        if (message.type !== 'activity') postMessage.call(window.orca, message);
+      };
+      try {
       const update = async stats => { screenshotFixtures[screenshotState] = stats; screenshotHandler({generation, stats}); await wait(); };
       const checkTemperatures = () => {
         const bed = root.querySelector('.bed-temperature').getBoundingClientRect();
@@ -287,7 +293,10 @@ def check_toolheads(client):
       }
       await update({state:'unavailable'});
       if (root.getClientRects().length) errors.push('Offline hardware information is visible');
-      screenshotFixtures[screenshotState] = fixture; publishScreenshot(); await wait();
+      } finally {
+        window.orca.postMessage = postMessage;
+        screenshotFixtures[screenshotState] = fixture; publishScreenshot(); await wait();
+      }
       return errors;
     })()""")
     if result:
