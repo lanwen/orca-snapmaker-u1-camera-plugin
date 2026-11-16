@@ -2,7 +2,7 @@
 
 import base64
 import csv
-from collections import deque
+from collections import deque, namedtuple
 import hashlib
 import json
 import math
@@ -289,6 +289,10 @@ def status_failure(error):
     return "unreachable"  # Network and unexpected failures use safe generic guidance.
 
 
+SessionToken = namedtuple("SessionToken", "monitor generation incoming kind active expires")
+Connection = namedtuple("Connection", "config target error deadline revision")
+
+
 class Monitor:
     """One worker; short page leases prevent abandoned views from keeping cameras awake."""
 
@@ -307,32 +311,76 @@ class Monitor:
         self.thread = threading.Thread(target=self.run, name="U1 camera", daemon=True)
         self.thread.start()
 
+    def _update(self, target, enabled=None, playing=None, invalidate=False):
+        if self.closed:
+            return self.generation
+        target_changed = (invalidate or target != self.target
+                          or bool(target) and time.monotonic() >= self.expires)
+        playback_changed = type(playing) is bool and playing != self.playing
+        if target_changed or playback_changed:
+            if self.client is not None:
+                self.close_client(self.client)
+            self.generation += 1
+            self.frame_ready = True
+        if target_changed:
+            self.light = None
+        self.target = target
+        if type(playing) is bool:
+            self.playing = playing
+        if target is None:
+            self.playing = False
+        self.expires = time.monotonic() + 3.5 if target else 0
+        if type(enabled) is bool and target:
+            self.light = enabled
+        # Announce the generation before the worker can publish a frame for it.
+        if target and (target_changed or playback_changed):
+            self.publish({"type": "target", "target": target[0], "generation": self.generation})
+        self.condition.notify()
+        return self.generation
+
     def update(self, target, enabled=None, playing=None):
         with self.condition:
-            if self.closed:
-                return self.generation
-            target_changed = target != self.target or bool(target) and time.monotonic() >= self.expires
-            playback_changed = type(playing) is bool and playing != self.playing
-            if target_changed or playback_changed:
-                if self.client is not None:
-                    self.close_client(self.client)
-                self.generation += 1
-                self.frame_ready = True
-            if target_changed:
-                self.light = None
-            self.target = target
-            if type(playing) is bool:
-                self.playing = playing
-            if target is None:
-                self.playing = False
-            self.expires = time.monotonic() + 3.5 if target else 0
-            if type(enabled) is bool and target:
-                self.light = enabled
-            # Announce the generation before the worker can publish a frame for it.
-            if target and (target_changed or playback_changed):
-                self.publish({"type": "target", "target": target[0], "generation": self.generation})
-            self.condition.notify()
-            return self.generation
+            return self._update(target, enabled, playing)
+
+    def session(self, kind, generation):
+        with self.condition:
+            if self.closed or (generation is not None and
+                               (type(generation) is not int or generation != self.generation)):
+                return None
+            active = self.current(self.generation)
+            if kind == "frame" and (generation is None or not active or not self.playing):
+                return None
+            if kind == "light" and generation is not None and not active:
+                return None
+            return SessionToken(self, self.generation, generation, kind, active, self.expires)
+
+    def _matches(self, token):
+        return (token.monitor is self and not self.closed and token.generation == self.generation
+                and token.active == self.current(self.generation)
+                and (not token.active or time.monotonic() < token.expires))
+
+    def invalidate(self, token=None):
+        with self.condition:
+            if self.closed or token is not None and not self._matches(token):
+                return None
+            self._update(None, invalidate=True)
+            return SessionToken(self, self.generation, None,
+                                token.kind if token else "activity", False, 0)
+
+    def apply(self, token, target, enabled=None, playing=None):
+        with self.condition:
+            if not self._matches(token):
+                return False
+            if token.kind == "frame":
+                if target != self.target:
+                    self._update(target)
+                self.frame_loaded(token.incoming)
+            elif not (token.incoming is not None
+                      and self.renew(target, token.incoming, enabled, playing)):
+                if token.incoming is None and self.target is not None:
+                    self._update(None)  # A fresh page needs its own target handshake.
+                self._update(target, enabled, playing)
+            return True
 
     def renew(self, target, generation, enabled=None, playing=None):
         with self.condition:
@@ -505,48 +553,53 @@ class U1Page(orca.pages.PagesPluginCapabilityBase):
         return PAGE
 
     def invalidate_connection(self):
+        self.connection = None
+        self.connection_revision += 1
         if self.monitor:
-            with self.monitor.condition:
-                self.connection = None
-                self.connection_revision += 1
-                self.monitor.update(None)
-        else:
-            self.connection = None
-            self.connection_revision += 1
+            self.monitor.invalidate()
 
-    def activity_target(self, check_config=True):
+    def activity_target(self, monitor, token, check_config=True):
         now = time.monotonic()
         cached = self.connection
-        if check_config or cached is None or now >= cached[2]:
+        revision = self.connection_revision
+        if check_config or cached is None or now >= cached.deadline:
             config = json.loads(self.get_config())
-            if cached is not None and config != cached[0]:
-                self.invalidate_connection()
+            if revision != self.connection_revision or self.monitor is not monitor:
+                return None
+            if cached is not None and config != cached.config:
+                self.connection = None
+                self.connection_revision += 1
+                if monitor:
+                    token = monitor.invalidate(token)
+                    if token is None:
+                        return None
                 cached = None
-            if cached is None or now >= cached[2]:
+            if cached is None or now >= cached.deadline:
                 revision = self.connection_revision
                 try:
                     target = self.selected_target(config)
                     effective = json.loads(self.get_config())
                     approved = dict(config, allow_preset_connection=True)
-                    if (revision != self.connection_revision
-                            or effective != config and effective != approved):
+                    if effective != config and effective != approved:
                         raise ValueError("Printer connection settings changed. Try again.")
                 except Exception as error:
-                    if revision == self.connection_revision:
-                        error_type = (UnsupportedPrinter if isinstance(error, UnsupportedPrinter)
-                                      else ValueError if isinstance(error, ValueError) else RuntimeError)
-                        # Keep public error data, not tracebacks that retain live host handles.
-                        self.connection = config, (error_type, str(error)), time.monotonic() + 2, revision
-                    raise
-                # No config-change event exists; UI activity and frame callbacks bound stale settings.
-                self.connection = effective, target, time.monotonic() + 2, revision
+                    if revision != self.connection_revision or self.monitor is not monitor:
+                        return None
+                    error_type = (UnsupportedPrinter if isinstance(error, UnsupportedPrinter)
+                                  else ValueError if isinstance(error, ValueError) else RuntimeError)
+                    # Keep public error data, not tracebacks that retain live host handles.
+                    cached = Connection(config, None, (error_type, str(error)),
+                                        time.monotonic() + 2, revision)
+                else:
+                    if revision != self.connection_revision or self.monitor is not monitor:
+                        return None
+                    cached = Connection(effective, target, None, time.monotonic() + 2, revision)
+                # No config-change event exists; UI callbacks bound stale settings.
+                self.connection = cached
         cached = self.connection
-        if cached is None or cached[3] != self.connection_revision:
-            raise ValueError("Printer connection settings changed. Try again.")
-        result = cached[1]
-        if isinstance(result[0], type):
-            raise result[0](result[1])
-        return result, cached[3], self.monitor.generation if self.monitor else None
+        if cached is None or cached.revision != self.connection_revision or self.monitor is not monitor:
+            return None
+        return cached, token
 
     def allow_preset_connection(self, config):
         allowed = config.get("allow_preset_connection")
@@ -626,41 +679,51 @@ class U1Page(orca.pages.PagesPluginCapabilityBase):
         if not isinstance(data, dict):
             return
         kind = data.get("type")
+        if kind not in ("activity", "light", "frame"):
+            return
         generation = data.get("generation")
-        if generation is not None and (type(generation) is not int or self.monitor is None
-                                       or generation != self.monitor.generation):
-            return
-        if kind == "frame" and (self.monitor is None or not self.monitor.current(generation)):
-            return
+        monitor = self.monitor
+        if monitor is None:
+            if generation is not None or kind == "frame":
+                return
+            token = None
+        else:
+            token = monitor.session(kind, generation)
+            if token is None:
+                return
         if kind == "activity" and data.get("active") is not True:
             self.invalidate_connection()
             return
-        if kind not in ("activity", "light", "frame"):
-            return
+        revision = self.connection_revision
         try:
-            target, revision, expected_generation = self.activity_target(check_config=kind != "frame")
-            if self.monitor is None:
-                self.monitor = Monitor(self.post_message)
-            with self.monitor.condition:
-                if (revision != self.connection_revision
-                        or expected_generation is not None and expected_generation != self.monitor.generation):
+            resolved = self.activity_target(monitor, token, check_config=kind != "frame")
+            if resolved is None:
+                return
+            connection, token = resolved
+            revision = connection.revision
+            if revision != self.connection_revision or self.monitor is not monitor:
+                return
+            if connection.error:
+                error_type, message = connection.error
+                if monitor and monitor.invalidate(token) is None:
                     return
-                if kind == "frame":
-                    if target != self.monitor.target:
-                        self.monitor.update(target)
-                    self.monitor.frame_loaded(generation)
-                    return
-                enabled = data.get("enabled") if kind == "light" else None
-                playing = data.get("playing") if kind == "activity" else None
-                renewed = generation is not None and self.monitor.renew(target, generation, enabled, playing)
-                if not renewed and revision == self.connection_revision and (
-                        expected_generation is None or expected_generation == self.monitor.generation):
-                    if generation is None and self.monitor.target is not None:
-                        self.monitor.update(None)  # A fresh page needs its own target handshake.
-                    self.monitor.update(target, enabled, playing)
+                if not issubclass(error_type, ValueError):
+                    message = "Cannot read the selected printer. Set host in plugin Config."
+                self.post_message({"error": message, "supported": not issubclass(error_type, UnsupportedPrinter)})
+                return
+            if monitor is None:
+                self.monitor = monitor = Monitor(self.post_message)
+                token = monitor.session(kind, generation)
+            if revision != self.connection_revision or self.monitor is not monitor:
+                return
+            enabled = data.get("enabled") if kind == "light" else None
+            playing = data.get("playing") if kind == "activity" else None
+            monitor.apply(token, connection.target, enabled, playing)
         except Exception as error:
-            if self.monitor:
-                self.monitor.update(None)
+            if revision != self.connection_revision or self.monitor is not monitor:
+                return
+            if monitor and monitor.invalidate(token) is None:
+                return
             message = str(error) if isinstance(error, ValueError) else "Cannot read the selected printer. Set host in plugin Config."
             self.post_message({"error": message, "supported": not isinstance(error, UnsupportedPrinter)})
 

@@ -1992,14 +1992,15 @@ class TestHeartbeat:
         assert len(state.targets) == 1
 
     @pytest.mark.parametrize("kind", ["activity", "light"])
-    def test_selection_at_renewal_boundary_cannot_restore_or_command_the_old_target(self, heartbeat_page, kind):
+    def test_selection_at_atomic_application_boundary_cannot_restore_or_command_the_old_target(self, heartbeat_page, kind):
         state = heartbeat_page
         state.activity()
         generation = state.monitor.generation
-        def renew(*args):
+        apply = state.monitor.apply
+        def apply_after_selection(*args):
             state.page.on_lifecycle_event(orca.LifecycleEvent.DeviceSelected, types.SimpleNamespace())
-            return False
-        state.monitor.renew = renew
+            return apply(*args)
+        state.monitor.apply = apply_after_selection
         state.page.on_message({"type": kind, "generation": generation, "active": True,
                                "playing": False, "enabled": True})
         assert state.monitor.target is None
@@ -2052,6 +2053,190 @@ class TestHeartbeat:
         state.activity()
         assert state.monitor.target is None
         assert not state.targets
+
+
+    @pytest.mark.parametrize("kind", ["activity", "frame", "light"])
+    def test_lease_expiring_during_discovery_cannot_be_applied(self, heartbeat_page, kind):
+        state = heartbeat_page
+        state.activity(playing=True)
+        generation, expires = state.monitor.generation, state.monitor.expires
+        state.now += 2
+        def resolve(config):
+            target = plugin.U1Page.selected_target(state.page, config)
+            state.now = expires
+            return target
+        state.resolve.side_effect = resolve
+        state.page.on_message({"type": kind, "generation": generation, "active": True,
+                               "playing": False, "enabled": True})
+        assert state.monitor.expires == expires
+        assert state.monitor.generation == generation
+        assert state.monitor.light is None
+        assert not state.monitor.current(generation)
+        assert len(state.targets) == 1
+
+    def test_expired_light_is_rejected_before_host_discovery(self, heartbeat_page):
+        state = heartbeat_page
+        state.activity()
+        state.now = state.monitor.expires
+        config = Mock(wraps=state.page.get_config)
+        state.page.get_config = config
+        state.page.on_message({"type": "light", "generation": state.monitor.generation, "enabled": True})
+        config.assert_not_called()
+        assert state.resolve.call_count == 1
+        assert state.monitor.light is None
+
+    @pytest.mark.parametrize("initial", [False, True])
+    @pytest.mark.parametrize("failure", [False, True])
+    def test_discovery_or_its_error_cannot_modify_a_replacement_worker(self, heartbeat_page, initial, failure):
+        state = heartbeat_page
+        if initial:
+            state.page.monitor = None
+        else:
+            state.activity()
+            state.now += 2
+        messages = []
+        replacement = plugin.Monitor(messages.append)
+        replacement.update(("http://replacement.local", ""), playing=False)
+        expires = replacement.expires
+        def resolve(config):
+            state.page.on_unload()
+            state.page.monitor = replacement
+            if failure:
+                raise ValueError("Obsolete lookup failure")
+            return ("http://obsolete.local", "obsolete-key")
+        state.resolve.side_effect = resolve
+        state.page.post_message.reset_mock()
+        try:
+            state.page.on_message({"type": "activity", "active": True, "playing": True})
+            assert state.page.monitor is replacement
+            assert replacement.target == ("http://replacement.local", "")
+            assert replacement.expires == expires
+            assert replacement.current(replacement.generation)
+            assert len(messages) == 1
+            state.page.post_message.assert_not_called()
+        finally:
+            replacement.close()
+
+    def test_unload_during_discovery_does_not_create_a_new_worker(self, heartbeat_page):
+        state = heartbeat_page
+        state.activity()
+        state.now += 2
+        def resolve(config):
+            state.page.on_unload()
+            return ("http://obsolete.local", "obsolete-key")
+        state.resolve.side_effect = resolve
+        state.activity()
+        assert state.page.monitor is None
+        assert state.monitor.closed
+        assert len(state.targets) == 1
+
+    def test_initial_absence_creates_only_its_own_validated_worker(self, heartbeat_page):
+        state = heartbeat_page
+        state.page.monitor = None
+        state.page.on_message({"type": "activity", "active": True, "playing": False})
+        monitor = state.page.monitor
+        try:
+            assert monitor is not state.monitor
+            assert monitor.target == ("http://printer.local", "initial-key")
+            assert monitor.current(monitor.generation)
+            assert state.resolve.call_count == 1
+            assert state.page.post_message.call_args.args[0]["type"] == "target"
+        finally:
+            monitor.close()
+
+    def test_pending_empty_worker_token_is_invalidated_without_a_target(self, heartbeat_page):
+        monitor = heartbeat_page.monitor
+        token = monitor.session("activity", None)
+        monitor.invalidate()
+        assert not monitor.apply(token, ("http://obsolete.local", ""), playing=True)
+        assert monitor.target is None
+        assert not heartbeat_page.targets
+
+    def test_token_cannot_outlive_its_captured_lease_even_after_another_renewal(self, heartbeat_page):
+        state = heartbeat_page
+        state.activity()
+        token = state.monitor.session("light", state.monitor.generation)
+        state.now += 2
+        assert state.monitor.renew(state.monitor.target, state.monitor.generation)
+        renewed = state.monitor.expires
+        state.now += 2
+        assert state.monitor.current(state.monitor.generation)
+        assert not state.monitor.apply(token, state.monitor.target, enabled=True)
+        assert state.monitor.light is None
+        assert state.monitor.expires == renewed
+
+    def test_equal_generation_does_not_make_a_token_belong_to_another_worker(self, heartbeat_page):
+        state = heartbeat_page
+        state.activity()
+        token = state.monitor.session("light", state.monitor.generation)
+        replacement = plugin.Monitor(lambda data: None)
+        try:
+            replacement.update(state.monitor.target)
+            assert replacement.generation == state.monitor.generation
+            assert not replacement.apply(token, replacement.target, enabled=True)
+            assert replacement.light is None
+        finally:
+            replacement.close()
+
+    def test_host_discovery_does_not_hold_the_worker_lock(self, heartbeat_page):
+        state = heartbeat_page
+        entered = threading.Event()
+        def resolve(config):
+            def acquire():
+                with state.monitor.condition:
+                    entered.set()
+            thread = threading.Thread(target=acquire)
+            thread.start()
+            try:
+                assert entered.wait(1), "Host discovery must not hold the worker lock"
+            finally:
+                thread.join(1)
+            assert not thread.is_alive()
+            return plugin.U1Page.selected_target(state.page, config)
+        state.resolve.side_effect = resolve
+        state.activity()
+        assert state.monitor.target == ("http://printer.local", "initial-key")
+
+    def test_reentrant_config_read_cannot_reuse_the_previous_connection(self, heartbeat_page):
+        state = heartbeat_page
+        state.activity()
+        config = state.page.get_config
+        def read():
+            state.page.on_lifecycle_event(orca.LifecycleEvent.DeviceSelected, types.SimpleNamespace())
+            return config()
+        state.page.get_config = read
+        state.activity()
+        assert state.monitor.target is None
+        assert state.resolve.call_count == 1
+        assert len(state.targets) == 1
+
+
+class TestAtomicSessionThreads:
+    def test_invalidation_before_atomic_apply_rejects_the_command_and_cancels_old_client(self, worker):
+        monitor = worker.monitor
+        generation = monitor.update(("printer", ""), playing=True)
+        eventually(lambda: worker.clients and worker.clients[0].snapshot.called)
+        token = monitor.session("light", generation)
+        captured, proceed = threading.Event(), threading.Event()
+        applied = []
+        def command():
+            captured.set()
+            assert proceed.wait(1)
+            applied.append(monitor.apply(token, ("printer", ""), enabled=True))
+        thread = threading.Thread(target=command)
+        thread.start()
+        try:
+            assert captured.wait(1)
+            monitor.invalidate()
+        finally:
+            proceed.set()
+            thread.join(1)
+        assert not thread.is_alive()
+        assert applied == [False]
+        assert monitor.target is None
+        assert monitor.light is None
+        worker.clients[0].set_light.assert_not_called()
+        worker.clients[0].close.assert_called_once()
 
 
 class TestTarget:
@@ -2127,7 +2312,7 @@ class TestTarget:
         with patch.object(plugin, "saved_connection") as read_file:
             page.on_message({"type": "activity", "active": True, "playing": True})
             read_file.assert_not_called()
-        page.monitor.update.assert_called_with(None)
+        page.monitor.invalidate.assert_called_with(page.monitor.session.return_value)
         assert 'print_host' not in [call.args[0] for call in preset.config_value.call_args_list]
         assert 'printhost_apikey' not in [call.args[0] for call in preset.config_value.call_args_list]
 
@@ -2233,7 +2418,7 @@ class TestTarget:
             assert page.selected_target() == ('http://u1.local', '')
         page.monitor = Mock(condition=threading.Condition(), target=None, generation=0)
         page.on_message({"type": "activity", "active": True, "playing": True})
-        page.monitor.update.assert_called_once_with(("http://u1.local", ""), None, True)
+        page.monitor.apply.assert_called_once_with(page.monitor.session.return_value, ("http://u1.local", ""), None, True)
         page.get_config = lambda: '{"host":"file:///tmp/invalid"}'
         with pytest.raises(ValueError):
             page.selected_target()
@@ -2244,7 +2429,7 @@ class TestTarget:
         for message in [{"type": "activity", "active": True, "playing": True},
                         {"type": "light", "enabled": True}]:
             page.on_message(message)
-            page.monitor.update.assert_called_with(None)
+            page.monitor.invalidate.assert_called_with(page.monitor.session.return_value)
             assert not page.post_message.call_args.args[0]['supported']
             assert page.post_message.call_args.args[0]['error'], 'An unavailable target includes an explanation'
 
@@ -2252,7 +2437,7 @@ class TestTarget:
         page = make_page({"printer_model": "Snapmaker U1"})
         page.monitor = Mock(condition=threading.Condition(), target=None, generation=0)
         page.on_message({"type": "activity", "active": True, "playing": True})
-        page.monitor.update.assert_called_once_with(None)
+        page.monitor.invalidate.assert_called_once_with(page.monitor.session.return_value)
         assert page.post_message.call_args.args[0]['supported']
         assert page.post_message.call_args.args[0]['error'], 'An unavailable target includes an explanation'
 
@@ -2272,11 +2457,11 @@ class TestTarget:
         page.monitor = Mock(condition=threading.Condition(), target=None, generation=0)
         page.post_message = Mock()
         page.on_lifecycle_event(orca.LifecycleEvent.PresetSelected, types.SimpleNamespace(msg="printer"))
-        page.monitor.update.assert_called_once_with(None)
+        page.monitor.invalidate.assert_called_once_with()
         page.post_message.assert_called_once_with({"type": "selection_changed"})
         page.monitor.reset_mock()
         page.on_lifecycle_event(orca.LifecycleEvent.PresetSelected, types.SimpleNamespace(msg="filament"))
-        page.monitor.update.assert_not_called()
+        page.monitor.invalidate.assert_not_called()
 
 
 
