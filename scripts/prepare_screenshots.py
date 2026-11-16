@@ -157,6 +157,7 @@ def screenshot_page(camera=None):
     bootstrap = r'''
 <script>
 // Screenshot-only transport. No messages or commands reach the real printer.
+(() => {
 const NativeDate = window.Date;
 let screenshotOffset = 0;
 window.Date = class extends NativeDate {
@@ -170,6 +171,8 @@ const screenshotStates = Object.keys(screenshotFixtures);
 const screenshotImage = __IMAGE__;
 let screenshotState = __SCREENSHOT_STATE__, screenshotHandler, screenshotLight = true;
 let screenshotAppliedState, screenshotGeneration = 0;
+let screenshotSample, screenshotSuspended = false;
+const copySample = stats => JSON.parse(JSON.stringify(stats));
 function publishScreenshot() {
   const changed = screenshotAppliedState !== screenshotState;
   if (changed) { screenshotOffset = 0; screenshotAppliedState = screenshotState; screenshotGeneration++; }
@@ -212,7 +215,7 @@ function publishScreenshot() {
   }
   screenshotHandler({generation, ...(screenshotState === 'status-waiting' ? {} : {printer:screenshotLabels[screenshotFixtures[screenshotState].state]}),
     ...(!statusPreview || screenshotState === 'status-recovered' ? {light:offline ? null : screenshotLight} : {}), light_error:screenshotState === 'light-error' ? 'Could not change light — try again' : '',
-    ...(!statusPreview || screenshotState === 'status-recovered' ? {stats:screenshotFixtures[screenshotState]} : {}),
+    ...(!statusPreview || screenshotState === 'status-recovered' ? {stats:screenshotSample ?? screenshotFixtures[screenshotState]} : {}),
     ...(['unavailable', 'status-retrying', 'status-no-success'].includes(screenshotState) ? {stats:null, status_error:'timeout', light:null} : {}),
     image:!needsImage || offline || screenshotState === 'connecting' || (interrupted && !changed) ? undefined : screenshotImage, fps:4.4, frozen:false});
   if (changed && screenshotState === 'status-expired') queueMicrotask(() => window.dispatchEvent(new Event('pageshow')));
@@ -243,13 +246,43 @@ function publishScreenshot() {
     }
   });
 }
+window.previewDriver = {
+  get sample() { return copySample(screenshotSample ?? screenshotFixtures[screenshotState]); },
+  selectState(state) {
+    if (!Object.hasOwn(screenshotFixtures, state)) throw new Error("Unknown preview state: " + state);
+    screenshotSample = undefined;
+    screenshotState = state;
+    publishScreenshot();
+  },
+  async withSamples(run) {
+    const state = screenshotState, sample = screenshotSample, offset = screenshotOffset;
+    const suspended = screenshotSuspended;
+    screenshotSuspended = true;
+    try {
+      return await run(async stats => {
+        screenshotSample = copySample(stats);
+        screenshotHandler({generation:screenshotGeneration, stats:screenshotSample});
+        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      });
+    } finally {
+      screenshotState = state;
+      screenshotSample = sample;
+      screenshotOffset = offset;
+      try { publishScreenshot(); } finally {
+        screenshotOffset = offset;
+        screenshotSuspended = suspended;
+      }
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    }
+  }
+};
 window.orca = {
   onMessage(callback) { screenshotHandler = callback; },
   postMessage(message) {
-    if (message.type === 'activity' && message.active) {
+    if (message.type === 'activity' && message.active && !screenshotSuspended) {
       publishScreenshot();
     }
-    if (message.type === 'light') { screenshotLight = message.enabled; publishScreenshot(); }
+    if (message.type === 'light') { screenshotLight = message.enabled; if (!screenshotSuspended) publishScreenshot(); }
   }
 };
 window.addEventListener('DOMContentLoaded', () => {
@@ -269,8 +302,7 @@ window.addEventListener('DOMContentLoaded', () => {
   trigger?.addEventListener('click', () => showMenu(menu.hidden));
   document.querySelectorAll('[data-preview-state]').forEach(button => {
     button.addEventListener('click', () => {
-      screenshotState = button.dataset.previewState;
-      publishScreenshot();
+      window.previewDriver.selectState(button.dataset.previewState);
       showMenu(false);
       trigger.focus();
     });
@@ -278,8 +310,7 @@ window.addEventListener('DOMContentLoaded', () => {
   document.querySelectorAll('[data-preview-step]').forEach(button => {
     button.addEventListener('click', () => {
       const index = screenshotStates.indexOf(screenshotState);
-      screenshotState = screenshotStates[(index + Number(button.dataset.previewStep) + screenshotStates.length) % screenshotStates.length];
-      publishScreenshot();
+      window.previewDriver.selectState(screenshotStates[(index + Number(button.dataset.previewStep) + screenshotStates.length) % screenshotStates.length]);
     });
   });
   document.addEventListener('keydown', event => {
@@ -291,13 +322,13 @@ window.addEventListener('DOMContentLoaded', () => {
   document.addEventListener('keydown', event => {
     if (event.ctrlKey || event.metaKey || event.altKey || event.target.closest('input,textarea,select,[contenteditable]')) return;
     if (/^[1-4]$/.test(event.key)) {
-      screenshotState = ['printing', 'preparing', 'paused', 'complete'][Number(event.key) - 1];
-      publishScreenshot();
+      window.previewDriver.selectState(['printing', 'preparing', 'paused', 'complete'][Number(event.key) - 1]);
     }
     if (event.key.toLowerCase() === 'h') document.body.classList.toggle('screenshot-surface');
     if (event.key === '?') document.getElementById('screenshot-help').hidden = !document.getElementById('screenshot-help').hidden;
   });
 });
+})();
 </script>
 <style>
 body.screenshot-surface #stats { border-color:#ffffff26; background:#111820e8; box-shadow:0 8px 32px #0003; backdrop-filter:blur(18px); }

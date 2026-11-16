@@ -204,15 +204,8 @@ def check_toolheads(client):
       const root = document.querySelector('#hardware-stat');
       const tabs = root.querySelectorAll('.index-tab');
       if (tabs.length !== 4) errors.push('Four toolhead tabs are required');
-      const fixture = structuredClone(screenshotFixtures[screenshotState]);
-      const generation = screenshotGeneration;
-      const postMessage = window.orca.postMessage;
-      // Keep fixture heartbeats from replacing controlled toolhead samples.
-      window.orca.postMessage = message => {
-        if (message.type !== 'activity') postMessage.call(window.orca, message);
-      };
-      try {
-      const update = async stats => { screenshotFixtures[screenshotState] = stats; screenshotHandler({generation, stats}); await wait(); };
+      const fixture = window.previewDriver.sample;
+      await window.previewDriver.withSamples(async update => {
       const checkTemperatures = () => {
         const bed = root.querySelector('.bed-temperature').getBoundingClientRect();
         const nozzleValue = root.querySelector('.current-temperature .temperature-current').getBoundingClientRect();
@@ -293,10 +286,7 @@ def check_toolheads(client):
       }
       await update({state:'unavailable'});
       if (root.getClientRects().length) errors.push('Offline hardware information is visible');
-      } finally {
-        window.orca.postMessage = postMessage;
-        screenshotFixtures[screenshotState] = fixture; publishScreenshot(); await wait();
-      }
+      });
       return errors;
     })()""")
     if result:
@@ -459,7 +449,7 @@ def review(directory, output, states, widths, gifs=False):
             rows = []
             for state in states:
                 client.evaluate("""(async () => {
-                  document.querySelector('[data-preview-state=' + CSS.escape(%s) + ']').click();
+                  window.previewDriver.selectState(%s);
                   await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
                 })()""" % json.dumps(state))
                 if state not in {"connecting", "printer-unavailable", "permission-denied", "config-missing"}:
@@ -482,7 +472,7 @@ def review(directory, output, states, widths, gifs=False):
                     status:rect(document.querySelector('#stats-state')),
                     estimate:rect([...document.querySelectorAll('#remaining-value,#plan-value')]
                       .find(e => e.getClientRects().length)),
-                    active:['printing','paused'].includes(screenshotFixtures[screenshotState].state),
+                    active:['printing','paused'].includes(window.previewDriver.sample.state),
                     fpsWrapped:document.querySelector('#camera').dataset.state === 'live' &&
                       document.querySelector('#camera > span').getBoundingClientRect().height >
                         parseFloat(getComputedStyle(document.querySelector('#camera')).lineHeight) + 1,
@@ -539,7 +529,7 @@ def review(directory, output, states, widths, gifs=False):
                 if state in {"standby", "complete"} and client.evaluate("getComputedStyle(document.querySelector('.bed-temperature'), '::after').content !== 'none'"):
                     errors.append(f"{state} at {width}px: Bed surface is visible without toolhead tabs")
                 flow = client.evaluate("Boolean(document.querySelector('.trace-shimmer'))")
-                expected_flow = client.evaluate("screenshotFixtures[screenshotState].state === 'printing' && screenshotFixtures[screenshotState].phase === 'printing' && Boolean(document.querySelector('.chosen')?.getClientRects().length)")
+                expected_flow = client.evaluate("window.previewDriver.sample.state === 'printing' && window.previewDriver.sample.phase === 'printing' && Boolean(document.querySelector('.chosen')?.getClientRects().length)")
                 if flow != expected_flow:
                     errors.append(f"{state} at {width}px: Filament animation does not match confirmed printing")
                 dashed = client.evaluate("""(() => {

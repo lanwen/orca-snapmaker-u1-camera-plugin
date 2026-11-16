@@ -50,6 +50,90 @@ class TestPreviewReview:
         assert raised.value.args == (failure,)
 
 
+class TestPreviewDriver:
+    @pytest.fixture
+    def client(self, tmp_path):
+        from prepare_screenshots import prepare, find_browser
+        try:
+            find_browser()
+        except RuntimeError:
+            pytest.skip('Chrome/Chromium is not installed')
+        entry = prepare(tmp_path)
+        with browser() as client:
+            client.call("Emulation.setDeviceMetricsOverride", {"width": 1100, "height": 900,
+                                                               "deviceScaleFactor": 1, "mobile": False})
+            client.call("Page.navigate", {"url": entry.as_uri()})
+            client.wait_for("Boolean(window.previewDriver && document.querySelector('#stats'))")
+            client.evaluate("window.previewDriver.selectState('printing')")
+            client.wait_for("Boolean(document.querySelector('.chosen .index-tab'))")
+            yield client
+
+    @pytest.mark.parametrize('fail', [False, True], ids=['success', 'assertion-failure'])
+    def test_controlled_sample_survives_activity_and_restores_after_scope(self, client, fail):
+        previous = client.evaluate("window.previewDriver.sample")
+        expression = """window.previewDriver.withSamples(async update => {
+          const sample = window.previewDriver.sample;
+          sample.tools.forEach((tool, index) => { tool.state = index === 0 ? 'connected' : 'parked'; });
+          await update(sample);
+          window.dispatchEvent(new Event('pageshow'));
+          document.querySelector('[role="switch"]').click();
+          await new Promise(resolve => setTimeout(resolve, 1100));
+          if (document.querySelector('.chosen .index-tab').dataset.tool !== '0')
+            throw new Error('Activity replaced the controlled sample');
+          await update({state:'unavailable'});
+          if (document.querySelector('#hardware-stat').getClientRects().length)
+            throw new Error('Hardware is visible without a sample');
+          %s
+        })""" % ("throw new Error('Injected assertion failure');" if fail else "return 'completed';")
+        if fail:
+            with pytest.raises(RuntimeError, match='Injected assertion failure'):
+                client.evaluate(expression)
+        else:
+            assert client.evaluate(expression) == 'completed'
+        assert client.evaluate("window.previewDriver.sample") == previous
+        assert client.evaluate("document.querySelector('.chosen .index-tab').dataset.tool") == str(previous['tool'])
+        # Observe delivery after checking the real UI, so heartbeat restoration cannot hide behind a stale DOM.
+        client.evaluate("window.deliveries = []; window.orca.onMessage(message => window.deliveries.push(message))")
+        client.evaluate("window.dispatchEvent(new Event('pageshow'))")
+        assert client.evaluate("window.deliveries.find(message => message.stats)?.stats") == previous
+
+    def test_nested_scope_restores_previous_sample_and_suspended_heartbeat(self, client):
+        assert client.evaluate("""(async () => {
+          const fixture = window.previewDriver.sample;
+          const deliveries = [];
+          window.orca.onMessage(message => deliveries.push(message));
+          await window.previewDriver.withSamples(async update => {
+            const outer = {...fixture, progress:.123};
+            await update(outer);
+            try {
+              await window.previewDriver.withSamples(async update => {
+                window.previewDriver.selectState('paused');
+                await update({state:'unavailable'});
+                throw new Error('inner assertion');
+              });
+            } catch (error) {
+              if (error.message !== 'inner assertion') throw error;
+            }
+            if (JSON.stringify(window.previewDriver.sample) !== JSON.stringify(outer)) throw new Error('Previous sample lost');
+            if (deliveries.filter(message => message.stats).at(-1).stats.progress !== outer.progress) throw new Error('Previous sample was not delivered');
+            deliveries.length = 0;
+            window.dispatchEvent(new Event('pageshow'));
+            if (deliveries.length) throw new Error('Outer heartbeat resumed too early');
+          });
+          deliveries.length = 0;
+          window.dispatchEvent(new Event('pageshow'));
+          return JSON.stringify(deliveries.find(message => message.stats)?.stats) === JSON.stringify(fixture);
+        })()""")
+
+    def test_real_dom_review_rejects_shifted_layout_and_restores_sample(self, client):
+        previous = client.evaluate("window.previewDriver.sample")
+        client.evaluate("document.querySelector('.current-temperature').style.transform = 'translateX(20px)'")
+        with pytest.raises(ValueError, match='Trace does not meet bed surface|Nozzle temperature clearance'):
+            review_preview.check_toolheads(client)
+        assert client.evaluate("window.previewDriver.sample") == previous
+        assert client.evaluate("document.querySelector('.chosen .index-tab').dataset.tool") == str(previous['tool'])
+
+
 class TestBrowserCleanup:
     def test_profile_removal_retries_recreated_directory_and_busy_files(self, tmp_path):
         directory = str(tmp_path)
