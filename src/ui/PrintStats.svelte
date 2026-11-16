@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { Fan, Heater, PrintStats } from './types';
+  import { selectTool } from './tool-selection';
   import FanIcon from './FanIcon.svelte';
   import FanSpeed from './FanSpeed.svelte';
   import Toolheads from './Toolheads.svelte';
@@ -56,11 +57,7 @@
       );
     };
   }
-  const activeTool = $derived(
-    stats?.tools?.filter((tool) => tool.state === 'connected').length === 1
-      ? stats.tools.findIndex((tool) => tool.state === 'connected')
-      : (stats?.tools?.findIndex((tool) => tool.state === 'changing') ?? -1),
-  );
+  const activeTool = $derived(selectTool(stats?.tools).active);
   const hotend = $derived(
     stats?.state === 'unavailable'
       ? undefined

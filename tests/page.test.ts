@@ -3,7 +3,7 @@ import { Blob as NodeBlob } from 'node:buffer';
 import { afterEach, beforeEach, test, vi } from 'vitest';
 import { flushSync, mount, tick, unmount } from 'svelte';
 import App from '../src/ui/App.svelte';
-import type { HostMessage, OrcaBridge } from '../src/ui/types';
+import type { HostMessage, OrcaBridge, Toolhead } from '../src/ui/types';
 
 let app: ReturnType<typeof mount>;
 let receive: (data: HostMessage) => void;
@@ -1576,6 +1576,52 @@ test('toolhead details preserve reported material and expose slicing and layer h
   assert.equal(sent.length, before, 'Inspecting a tab never sends a tool-change command');
   tab.focus();
   assert.equal(document.activeElement, tab);
+});
+
+test('tool tabs and the current heater agree when attachment evidence changes', () => {
+  selectPrinter();
+  const cases: [Toolhead['state'][], number, number][] = [
+    [['changing', 'connected', 'parked', 'unknown'], 1, 1],
+    [['connected', 'changing', 'connected', 'unknown'], 1, -1],
+    [['parked', 'changing', 'unknown', 'changing'], 1, -1],
+    [['connected', 'parked', 'connected', 'unknown'], -1, -1],
+    [['unknown', 'parked', 'unavailable', 'unknown'], -1, -1],
+  ];
+  for (const [states, active, connected] of cases) {
+    const tools = states.map((state, id) => ({
+      state,
+      heater: { temperature: 100 + id, target: 100 + id },
+    }));
+    publish({ generation: 1, stats: { ...metrics, tools } });
+    assert.equal(
+      document.querySelector('.index-tab[data-active="true"]')?.getAttribute('data-tool') ?? null,
+      active < 0 ? null : String(active),
+    );
+    assert.equal(visible(field('hotend-value')), active >= 0);
+    assert.deepEqual(numbers(field('hotend-value')), active < 0 ? [] : [100 + active]);
+    assert.equal(
+      document
+        .querySelector('.head-state.connected')
+        ?.closest('[data-tool]')
+        ?.getAttribute('data-tool') ?? null,
+      connected < 0 ? null : String(connected),
+    );
+  }
+});
+
+test('missing or null tools allow the hotend fallback while an empty array stays unknown', () => {
+  selectPrinter();
+  const stats = { ...metrics, hotend: { temperature: 210, target: 210 } };
+  for (const tools of [undefined, null]) {
+    const message = JSON.parse(JSON.stringify({ generation: 1, stats: { ...stats, tools } }));
+    flushSync(() => receive(message));
+    assert.equal(visible(field('hotend-value')), true);
+    assert.deepEqual(numbers(field('hotend-value')), [stats.hotend.temperature]);
+    assert.equal(document.querySelector('.index-tab[data-active="true"]'), null);
+  }
+  publish({ generation: 1, stats: { ...stats, tools: [] } });
+  assert.equal(visible(field('hotend-value')), false);
+  assert.equal(document.querySelector('.index-tab[data-active="true"]'), null);
 });
 
 test('four toolheads follow physical status and never display another head temperature', () => {
