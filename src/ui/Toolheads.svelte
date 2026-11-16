@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount, tick, type Snippet } from 'svelte';
   import type { PrintStats, Toolhead } from './types';
+  import { selectTool } from './tool-selection';
   let { stats, hotend, bed }: { stats: PrintStats | null; hotend: Snippet; bed: Snippet } =
     $props();
   let root: HTMLElement;
@@ -15,14 +16,9 @@
   );
   const showTabs = $derived(stats?.state !== 'standby' && stats?.state !== 'complete');
   const flowing = $derived(stats?.state === 'printing' && stats.phase === 'printing');
-  const connected = $derived(
-    tools.filter((tool) => tool.state === 'connected').length === 1
-      ? tools.findIndex((tool) => tool.state === 'connected')
-      : -1,
-  );
-  const active = $derived(
-    connected >= 0 ? connected : tools.findIndex((tool) => tool.state === 'changing'),
-  );
+  const selection = $derived(selectTool(tools));
+  const connected = $derived(selection.connected);
+  const active = $derived(selection.active);
   const color = (tool: Toolhead) =>
     typeof tool.color === 'string' && /^#[0-9a-f]{6}$/i.test(tool.color) ? tool.color : null;
   const material = (tool: Toolhead) =>
