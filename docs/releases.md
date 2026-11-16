@@ -12,7 +12,7 @@ Use Conventional Commit PR titles and squash merges so the merged commit carries
    The workflow verifies the files in a draft release before publishing it.
 3. The published GitHub release triggers the separate Publish to Orca Cloud workflow.
    Its `publish-cloud` job uploads the verified release artifact with a release-event OIDC identity.
-4. After validation of a final version on `main`, snapshot preparation runs independently of both publishing jobs.
+4. After successful validation and GitHub publication of a final version on `main`, snapshot preparation runs without waiting for Orca Cloud publication.
    It opens a signed PR on `automation/next-snapshot` for the next patch development version.
    For example, release `0.3.0` is followed by `0.3.1.dev0`.
    The workflow waits for the snapshot commit's Check workflow to pass, then squash-merges that exact commit.
@@ -136,7 +136,7 @@ The publisher requires a release event and checks that `GITHUB_REF_NAME` matches
 The earlier main-branch push identity was rejected with HTTP 401, so Cloud uploads no longer run in the push workflow.
 
 Cloud failures leave the GitHub release intact.
-Snapshot preparation does not wait for publication and can advance the development version even when a publishing job fails.
+Snapshot preparation follows successful validation and GitHub publication, but can advance the development version even if the independent Cloud job fails.
 For transient upload failures, rerun the failed `publish-cloud` job from the release-event workflow run.
 The successful GitHub publishing job does not need to run again.
 The Cloud version must be greater than the listing's current version.
