@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.8.3
+
+- fix: reveal loaded colors on Complete and Standby cards (#108) ([2bfbfa7](https://github.com/lanwen/orca-snapmaker-u1-camera-plugin/commit/2bfbfa7a501ebe809dc3649f1df1bab1a45b52c4))
+
 ## 0.8.2
 
 - chore: advance development version to 0.8.2.dev0 (#106) ([4e25f1c](https://github.com/lanwen/orca-snapmaker-u1-camera-plugin/commit/4e25f1cc0412761443636aea35db29d2ca0e0103))
