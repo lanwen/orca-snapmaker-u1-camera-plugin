@@ -139,6 +139,7 @@
 
 <div
   id="hardware-stat"
+  class:idle={!showTabs}
   class:standby={stats?.state === 'standby'}
   style:--active-tool={Math.max(active, 0)}
   hidden={!stats || stats.state === 'unavailable'}
@@ -264,7 +265,7 @@
   </div>
   {#if !showTabs}
     <div
-      class="idle-filaments tool-tooltip"
+      class="idle-filaments"
       data-dismissed={idleDismissed}
       role="group"
       aria-label="Toolhead filament"
@@ -278,21 +279,29 @@
             : present === false
               ? 'No filament detected'
               : present === true
-                ? 'Loaded · ' + material(tool) + ' · ' + (reportedColor ?? 'Color not reported')
+                ? 'Loaded · ' +
+                  material(tool) +
+                  (tool.material_vendor ? ' · ' + tool.material_vendor : '') +
+                  ' · ' +
+                  (reportedColor ?? 'Color not reported')
                 : 'Filament presence not reported'}
-        <span
-          class="idle-filament"
-          role="img"
-          aria-label={'Toolhead ' + (id + 1) + ' · ' + description}
-          title={'Toolhead ' + (id + 1) + ' · ' + description}
-        >
-          <b>{id + 1}</b>
-          {#if present === false}
-            <span aria-hidden="true">×</span>
-          {:else}
-            {@render swatch(reportedColor)}
-          {/if}
-        </span>
+        <div class="idle-row">
+          <button
+            class="idle-filament"
+            aria-label={'Toolhead ' + (id + 1) + ' · ' + description}
+            aria-describedby={'filament-details-' + id}
+          >
+            <b>{id + 1}</b>
+            {#if present === false}
+              <span aria-hidden="true">×</span>
+            {:else}
+              {@render swatch(reportedColor)}
+            {/if}
+          </button>
+          <span class="tool-tooltip" id={'filament-details-' + id} role="tooltip">
+            Toolhead {id + 1} · {description}
+          </span>
+        </div>
       {/each}
     </div>
   {/if}
@@ -661,23 +670,55 @@
       transition-delay: 0s;
     }
   }
+  #hardware-stat.idle {
+    position: static;
+    grid-template-columns: max-content max-content;
+    column-gap: 12px;
+  }
   .idle-filaments {
+    display: grid;
+    grid-template-rows: repeat(4, 22px);
+    visibility: hidden;
+  }
+  .idle-row {
     display: flex;
-    gap: 12px;
+    align-items: center;
   }
   .idle-filament {
-    display: inline-flex;
+    display: flex;
     align-items: center;
+    justify-content: space-between;
     gap: 6px;
+    height: 22px;
+    width: 28px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: #a7b5c2;
+    font: inherit;
+    font-size: 11px;
+    cursor: default;
   }
-  .idle-filaments::after {
+  .idle-filament b {
+    font-weight: 500;
+  }
+  .idle-filament:focus-visible {
+    outline: 2px solid #7abaff;
+    outline-offset: 2px;
+  }
+  .idle-row .tool-tooltip::after {
     height: 10px;
     clip-path: none;
   }
-  .idle-filaments[data-dismissed='true'] {
+  .idle-row .tool-tooltip {
+    max-width: min(300px, 100%);
     transition: none;
   }
-  :global(#stats:is(:hover, :focus-within)) .idle-filaments:not([data-dismissed='true']) {
+  :global(#stats:is(:hover, :focus-within)) .idle-filaments:not([data-dismissed='true']),
+  :global(#stats:is(:hover, :focus-within))
+    .idle-filaments:not([data-dismissed='true'])
+    .idle-row:is(:hover, :focus-within)
+    .tool-tooltip {
     visibility: visible;
     transition-delay: 0s;
   }
@@ -742,10 +783,6 @@
   }
   #hardware-stat.standby {
     grid-column: 2;
-    grid-template-columns: max-content;
-    grid-template-rows: auto;
-    height: auto;
-    min-height: 44px;
     border-top: 0;
     border-left: 1px solid #ffffff28;
     padding: 0 0 0 6px;

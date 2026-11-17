@@ -148,7 +148,7 @@ class TestPreviewDriver:
               const card = document.querySelector('#stats');
               const snapshot = () => ({
                 visible:getComputedStyle(palette).visibility === 'visible',
-                labels:[...palette.querySelectorAll('[role="img"]')].map(e => e.getAttribute('aria-label')),
+                labels:[...palette.querySelectorAll('.idle-filament')].map(e => e.getAttribute('aria-label')),
                 colors:[...palette.querySelectorAll('.swatch')].map(e => e.style.backgroundColor),
                 card:JSON.stringify(card.getBoundingClientRect().toJSON()),
                 heating:palette.querySelector('.heating,.temperature-arrow,.trace-shimmer') !== null
@@ -195,6 +195,68 @@ class TestPreviewDriver:
             client.call("Input.dispatchMouseEvent", {"type": "mouseMoved", "x": 0, "y": 0})
             client.evaluate("new Promise(resolve => setTimeout(resolve, 280))")
             assert not client.evaluate("getComputedStyle(document.querySelector('.idle-filaments')).visibility === 'visible'")
+
+    @pytest.mark.parametrize('width', [1100, 390], ids=['desktop', 'narrow'])
+    def test_idle_column_places_inspectable_rows_beside_bed(self, client, width):
+        client.call("Emulation.setDeviceMetricsOverride", {"width": width, "height": 900,
+                                                           "deviceScaleFactor": 1, "mobile": False})
+        for state in ('complete', 'standby'):
+            client.evaluate("window.previewDriver.selectState(" + json.dumps(state) + ")")
+            client.evaluate("document.activeElement?.blur()")
+            client.call("Input.dispatchMouseEvent", {"type": "mouseMoved", "x": 0, "y": 0})
+            result = client.evaluate("""window.previewDriver.withSamples(async update => {
+              const sample = window.previewDriver.sample;
+              sample.tools = [
+                {state:'parked', filament_present:true, color:'#12AB34', material:'PETG', material_subtype:'HF', material_vendor:'Reported vendor', material_profile:'Old slice'},
+                {state:'parked', filament_present:false, color:'#FE1234', material:'Old material', material_vendor:'Old vendor'},
+                {state:'unknown', color:'#1234FE', material:'Unconfirmed material'},
+                {state:'parked', filament_present:true}
+              ];
+              await update(sample);
+              document.querySelector('#stats').focus();
+              await new Promise(resolve => requestAnimationFrame(resolve));
+              const palette = document.querySelector('.idle-filaments');
+              const rows = [...palette.querySelectorAll('.idle-filament')];
+              const bounds = rows.map(e => e.getBoundingClientRect().toJSON());
+              const bed = document.querySelector('.bed-temperature').getBoundingClientRect();
+              const hardware = document.querySelector('#hardware-stat').getBoundingClientRect();
+              const details = [];
+              for (const row of rows) {
+                row.focus();
+                await new Promise(resolve => requestAnimationFrame(resolve));
+                const tooltip = document.getElementById(row.getAttribute('aria-describedby'));
+                details.push({focused:document.activeElement === row,
+                  text:tooltip?.textContent, bounds:tooltip?.getBoundingClientRect().toJSON(), visible:tooltip && getComputedStyle(tooltip).visibility === 'visible'});
+              }
+              return {bounds, bed:bed.toJSON(), hardware:hardware.toJSON(), details,
+                copy:rows.map(e => e.textContent.trim()), viewport:innerWidth};
+            })""")
+            rows = result['bounds']
+            assert len(rows) == 4
+            assert all(abs(row['left'] - rows[0]['left']) < 1 for row in rows), 'Colors must form one vertical column'
+            assert all(rows[i + 1]['top'] >= rows[i]['bottom'] for i in range(3))
+            assert 4 <= rows[0]['left'] - result['bed']['right'] <= 24, 'Keep the column close to the bed'
+            assert rows[0]['top'] >= result['hardware']['top']
+            assert rows[-1]['bottom'] <= result['hardware']['bottom'] + 1
+            assert all(0 <= row['left'] < row['right'] <= result['viewport'] for row in rows)
+            assert [''.join(text.split()) for text in result['copy']] == ['1', '2×', '3', '4']
+            details = result['details']
+            assert all(detail['focused'] and detail['visible'] for detail in details), details
+            assert all(0 <= detail['bounds']['left'] < detail['bounds']['right'] <= result['viewport'] for detail in details), details
+            assert all(value in details[0]['text'] for value in ('PETG', 'HF', 'Reported vendor', '#12AB34'))
+            assert 'Old slice' not in details[0]['text']
+            assert 'No filament' in details[1]['text'] and 'Old' not in details[1]['text'] and '#FE1234' not in details[1]['text']
+            assert 'not reported' in details[2]['text'] and 'Unconfirmed' not in details[2]['text']
+            assert 'Not reported' in details[3]['text'] and 'Color not reported' in details[3]['text']
+            client.evaluate("document.activeElement?.blur()")
+            client.call("Input.dispatchMouseEvent", {"type": "mouseMoved", "x": 0, "y": 0})
+            client.evaluate("document.querySelector('#stats').scrollIntoView({block:'nearest'})")
+            client.evaluate("document.querySelector('#stats').focus()")
+            point = client.evaluate("(() => {const r=document.querySelector('.idle-filament').getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()")
+            client.call("Input.dispatchMouseEvent", {"type": "mouseMoved", **point})
+            client.wait_for("getComputedStyle(document.querySelector('.idle-row .tool-tooltip')).visibility === 'visible'")
+            client.call("Input.dispatchKeyEvent", {"type": "keyDown", "key": "Escape", "code": "Escape"})
+            assert client.evaluate("[...document.querySelectorAll('.idle-filaments .tool-tooltip')].every(e => getComputedStyle(e).visibility === 'hidden')")
 
     @pytest.mark.parametrize('state', ['complete', 'standby'])
     def test_idle_palette_escape_survives_refresh_until_new_hover_or_focus(self, client, state):
