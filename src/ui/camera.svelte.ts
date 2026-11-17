@@ -23,7 +23,6 @@ export class Camera {
   supported = $state(false);
   targetUnavailable = $state(false);
   target = $state('Selected printer');
-  printer = $state('Connecting');
   warning = $state('Set the printer address in plugin Config.');
   imageVisible = $state(false);
   fps = $state(0);
@@ -108,7 +107,6 @@ export class Camera {
   private resetStatus() {
     this.setStats();
     this.statusError = '';
-    this.printer = 'Connecting';
     this.light = null;
     this.lightAt = null;
     this.lightDisabled = true;
@@ -248,7 +246,6 @@ export class Camera {
         this.stop();
         this.supported = false;
         this.target = 'Printer address unavailable';
-        this.printer = 'Unavailable';
         this.warning = data.error;
       }
       this.lightDisabled = true;
@@ -262,7 +259,6 @@ export class Camera {
       return;
     }
     if ('light_error' in data) this.lightError = data.light_error ?? '';
-    if (data.printer) this.printer = data.printer;
     if ('light' in data) {
       this.light = data.light ?? null;
       this.lightDisabled = this.light === null;

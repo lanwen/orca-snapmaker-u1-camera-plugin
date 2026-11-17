@@ -213,7 +213,7 @@ function publishScreenshot() {
     }
     screenshotOffset = 15000;
   }
-  screenshotHandler({generation, ...(screenshotState === 'status-waiting' ? {} : {printer:screenshotLabels[screenshotFixtures[screenshotState].state]}),
+  screenshotHandler({generation,
     ...(!statusPreview || screenshotState === 'status-recovered' ? {light:offline ? null : screenshotLight} : {}), light_error:screenshotState === 'light-error' ? 'Could not change light — try again' : '',
     ...(!statusPreview || screenshotState === 'status-recovered' ? {stats:screenshotSample ?? screenshotFixtures[screenshotState]} : {}),
     ...(['unavailable', 'status-retrying', 'status-no-success'].includes(screenshotState) ? {stats:null, status_error:'timeout', light:null} : {}),

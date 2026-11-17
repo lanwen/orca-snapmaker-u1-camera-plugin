@@ -69,7 +69,6 @@ export interface HostMessage {
   target?: string;
   error?: string;
   supported?: boolean;
-  printer?: string;
   stats?: PrintStats | null;
   status_error?: string; // Failure category; unknown values use generic guidance.
   light?: boolean | null;
