@@ -7,6 +7,7 @@
   let root: HTMLElement;
   let dismissed = $state<number | null>(null);
   let open = $state<number | null>(null);
+  let idleDismissed = $state(false);
   const tools = $derived(
     Array.from({ length: 4 }, (_, id): Toolhead =>
       stats?.state === 'unavailable'
@@ -98,25 +99,47 @@
     open = null;
   });
   onMount(() => {
+    const card = root.closest('#stats')!;
+    const restoreIdle = () => {
+      idleDismissed = false;
+    };
+    card.addEventListener('pointerenter', restoreIdle);
+    card.addEventListener('focusin', restoreIdle);
     const observer = new ResizeObserver(measure);
     observer.observe(root);
-    observer.observe(root.closest('#stats')!);
+    observer.observe(card);
     observer.observe(root.querySelector('.current-temperature')!);
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      card.removeEventListener('pointerenter', restoreIdle);
+      card.removeEventListener('focusin', restoreIdle);
+    };
   });
 </script>
+
+{#snippet swatch(value: string | null, id?: number)}
+  <span
+    class="swatch"
+    class:unknown={!value}
+    data-swatch={id}
+    style:background-color={value}
+    aria-label={value ? 'Filament color ' + value : 'Color not reported'}
+  ></span>
+{/snippet}
 
 <svelte:window
   onkeydown={(event) => {
     if (event.key === 'Escape') {
       open = null;
       dismissed = active;
+      if (!showTabs) idleDismissed = true;
     }
   }}
 />
 
 <div
   id="hardware-stat"
+  class:idle={!showTabs}
   class:standby={stats?.state === 'standby'}
   style:--active-tool={Math.max(active, 0)}
   hidden={!stats || stats.state === 'unavailable'}
@@ -206,13 +229,7 @@
           >
         {/if}
         <div class="filament">
-          <span
-            class="swatch"
-            class:unknown={!color(tool)}
-            data-swatch={id}
-            style:background-color={color(tool)}
-            aria-label={color(tool) ? 'Filament color ' + color(tool) : 'Color not reported'}
-          ></span>
+          {@render swatch(color(tool), id)}
           <span class="material-copy">
             <strong>{material(tool)}</strong>
             <small
@@ -246,6 +263,48 @@
       </div>
     {/each}
   </div>
+  {#if !showTabs}
+    <div
+      class="idle-filaments"
+      data-dismissed={idleDismissed}
+      role="group"
+      aria-label="Toolhead filament"
+    >
+      {#each tools as tool, id}
+        {@const present = tool.state === 'unavailable' ? null : tool.filament_present}
+        {@const reportedColor = present === true ? color(tool) : null}
+        {@const description =
+          tool.state === 'unavailable'
+            ? 'Toolhead unavailable'
+            : present === false
+              ? 'No filament detected'
+              : present === true
+                ? 'Loaded · ' +
+                  material(tool) +
+                  (tool.material_vendor ? ' · ' + tool.material_vendor : '') +
+                  ' · ' +
+                  (reportedColor ?? 'Color not reported')
+                : 'Filament presence not reported'}
+        <div class="idle-row">
+          <button
+            class="idle-filament"
+            aria-label={'Toolhead ' + (id + 1) + ' · ' + description}
+            aria-describedby={'filament-details-' + id}
+          >
+            <b>{id + 1}</b>
+            {#if present === false}
+              <span aria-hidden="true">×</span>
+            {:else}
+              {@render swatch(reportedColor)}
+            {/if}
+          </button>
+          <span class="tool-tooltip" id={'filament-details-' + id} role="tooltip">
+            Toolhead {id + 1} · {description}
+          </span>
+        </div>
+      {/each}
+    </div>
+  {/if}
   {#if showTabs}<svg class="filament-traces" class:flowing aria-hidden="true">
       {#each paths as path}
         <path class="trace-base" data-active={path.id === active} d={path.d} stroke={path.color} />
@@ -611,6 +670,60 @@
       transition-delay: 0s;
     }
   }
+  #hardware-stat.idle {
+    position: static;
+    grid-template-columns: max-content max-content;
+    column-gap: 36px;
+    width: max-content;
+    justify-self: end;
+  }
+  .idle-filaments {
+    display: grid;
+    grid-template-rows: repeat(4, 22px);
+    visibility: hidden;
+  }
+  .idle-row {
+    display: flex;
+    align-items: center;
+  }
+  .idle-filament {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    height: 22px;
+    width: 28px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: #a7b5c2;
+    font: inherit;
+    font-size: 11px;
+    cursor: default;
+  }
+  .idle-filament b {
+    font-weight: 500;
+  }
+  .idle-filament:focus-visible {
+    outline: 2px solid #7abaff;
+    outline-offset: 2px;
+  }
+  .idle-row .tool-tooltip::after {
+    height: 10px;
+    clip-path: none;
+  }
+  .idle-row .tool-tooltip {
+    max-width: min(300px, 100%);
+    transition: none;
+  }
+  :global(#stats:is(:hover, :focus-within)) .idle-filaments:not([data-dismissed='true']),
+  :global(#stats:is(:hover, :focus-within))
+    .idle-filaments:not([data-dismissed='true'])
+    .idle-row:is(:hover, :focus-within)
+    .tool-tooltip {
+    visibility: visible;
+    transition-delay: 0s;
+  }
   .filament-traces {
     position: absolute;
     inset: 0;
@@ -672,10 +785,6 @@
   }
   #hardware-stat.standby {
     grid-column: 2;
-    grid-template-columns: max-content;
-    grid-template-rows: auto;
-    height: auto;
-    min-height: 44px;
     border-top: 0;
     border-left: 1px solid #ffffff28;
     padding: 0 0 0 6px;

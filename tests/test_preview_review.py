@@ -125,6 +125,174 @@ class TestPreviewDriver:
           return JSON.stringify(deliveries.find(message => message.stats)?.stats) === JSON.stringify(fixture);
         })()""")
 
+    @pytest.mark.parametrize('width', [1100, 390], ids=['desktop', 'narrow'])
+    def test_idle_filament_colors_reveal_on_hover_and_focus_using_current_presence(self, client, width):
+        client.call("Emulation.setDeviceMetricsOverride", {"width": width, "height": 900,
+                                                           "deviceScaleFactor": 1, "mobile": False})
+        for state in ('complete', 'standby'):
+            client.evaluate("window.previewDriver.selectState(" + json.dumps(state) + ")")
+            client.evaluate("document.activeElement?.blur()")
+            client.call("Input.dispatchMouseEvent", {"type": "mouseMoved", "x": 0, "y": 0})
+            client.evaluate("new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))")
+            result = client.evaluate("""window.previewDriver.withSamples(async update => {
+              const sample = window.previewDriver.sample;
+              sample.tools = [
+                {state:'parked', filament_present:true, color:'#12AB34', material:'PETG'},
+                {state:'parked', filament_present:false, color:'#FE1234', material:'old material'},
+                {state:'unknown', color:'#1234FE', material:'unconfirmed material'},
+                {state:'parked', filament_present:true, color:null}
+              ];
+              await update(sample);
+              const palette = document.querySelector('.idle-filaments');
+              if (!palette) throw new Error('Idle filament reveal is missing');
+              const card = document.querySelector('#stats');
+              const snapshot = () => ({
+                visible:getComputedStyle(palette).visibility === 'visible',
+                labels:[...palette.querySelectorAll('.idle-filament')].map(e => e.getAttribute('aria-label')),
+                colors:[...palette.querySelectorAll('.swatch')].map(e => e.style.backgroundColor),
+                card:JSON.stringify(card.getBoundingClientRect().toJSON()),
+                heating:palette.querySelector('.heating,.temperature-arrow,.trace-shimmer') !== null
+              });
+              const before = snapshot();
+              card.focus();
+              await new Promise(resolve => requestAnimationFrame(resolve));
+              const focused = snapshot();
+              card.blur();
+              await new Promise(resolve => setTimeout(resolve, 280));
+              const after = snapshot();
+              await update({...sample, tools:[]});
+              const missing = [...document.querySelectorAll('.idle-filaments .swatch')].every(e => !e.style.backgroundColor);
+              await update(sample);
+              const now = Date.now;
+              try {
+                Date.now = () => now() + 11000;
+                window.dispatchEvent(new Event('pageshow'));
+                await new Promise(resolve => requestAnimationFrame(resolve));
+              } finally { Date.now = now; }
+              const stale = document.querySelector('.idle-filaments') === null;
+              return {before, focused, after, missing, stale};
+            })""")
+            assert not result['before']['visible']
+            assert result['focused']['visible']
+            assert not result['after']['visible']
+            assert result['before']['card'] == result['focused']['card'] == result['after']['card']
+            assert not result['focused']['heating']
+            assert result['missing'] and result['stale']
+            labels = result['focused']['labels']
+            assert len(labels) == 4
+            assert '#12AB34' in labels[0] and 'PETG' in labels[0]
+            assert 'No filament' in labels[1] and '#FE1234' not in labels[1]
+            assert 'not reported' in labels[2] and '#1234FE' not in labels[2]
+            assert 'Color not reported' in labels[3]
+            assert 'rgb(18, 171, 52)' in result['focused']['colors']
+            assert 'rgb(254, 18, 52)' not in result['focused']['colors']
+            assert 'rgb(18, 52, 254)' not in result['focused']['colors']
+            client.evaluate("document.querySelector('#stats').scrollIntoView({block:'nearest'})")
+            point = client.evaluate("(() => {const r=document.querySelector('#stats').getBoundingClientRect();return {x:r.x+8,y:r.y+8}})()")
+            client.call("Input.dispatchMouseEvent", {"type": "mouseMoved", **point})
+            assert client.evaluate("getComputedStyle(document.querySelector('.idle-filaments')).visibility === 'visible'")
+            assert client.evaluate("(() => {const r=document.querySelector('.idle-filaments').getBoundingClientRect();return r.left>=0 && r.right<=innerWidth && r.top>=0})()")
+            client.call("Input.dispatchMouseEvent", {"type": "mouseMoved", "x": 0, "y": 0})
+            client.evaluate("new Promise(resolve => setTimeout(resolve, 280))")
+            assert not client.evaluate("getComputedStyle(document.querySelector('.idle-filaments')).visibility === 'visible'")
+
+    @pytest.mark.parametrize('width', [1100, 390], ids=['desktop', 'narrow'])
+    def test_idle_column_places_inspectable_rows_beside_bed(self, client, width):
+        client.call("Emulation.setDeviceMetricsOverride", {"width": width, "height": 900,
+                                                           "deviceScaleFactor": 1, "mobile": False})
+        for state in ('complete', 'standby'):
+            client.evaluate("window.previewDriver.selectState(" + json.dumps(state) + ")")
+            client.evaluate("document.activeElement?.blur()")
+            client.call("Input.dispatchMouseEvent", {"type": "mouseMoved", "x": 0, "y": 0})
+            result = client.evaluate("""window.previewDriver.withSamples(async update => {
+              const sample = window.previewDriver.sample;
+              sample.tools = [
+                {state:'parked', filament_present:true, color:'#12AB34', material:'PETG', material_subtype:'HF', material_vendor:'Reported vendor', material_profile:'Old slice'},
+                {state:'parked', filament_present:false, color:'#FE1234', material:'Old material', material_vendor:'Old vendor'},
+                {state:'unknown', color:'#1234FE', material:'Unconfirmed material'},
+                {state:'parked', filament_present:true}
+              ];
+              await update(sample);
+              document.querySelector('#stats').focus();
+              await new Promise(resolve => requestAnimationFrame(resolve));
+              const palette = document.querySelector('.idle-filaments');
+              const rows = [...palette.querySelectorAll('.idle-filament')];
+              const bounds = rows.map(e => e.getBoundingClientRect().toJSON());
+              const bed = document.querySelector('.bed-temperature').getBoundingClientRect();
+              const hardware = document.querySelector('#hardware-stat').getBoundingClientRect();
+              const details = [];
+              for (const row of rows) {
+                row.focus();
+                await new Promise(resolve => requestAnimationFrame(resolve));
+                const tooltip = document.getElementById(row.getAttribute('aria-describedby'));
+                details.push({focused:document.activeElement === row,
+                  text:tooltip?.textContent, bounds:tooltip?.getBoundingClientRect().toJSON(), visible:tooltip && getComputedStyle(tooltip).visibility === 'visible'});
+              }
+              return {bounds, bed:bed.toJSON(), hardware:hardware.toJSON(), card:document.querySelector('#stats').getBoundingClientRect().toJSON(), details,
+                copy:rows.map(e => e.textContent.trim()), viewport:innerWidth};
+            })""")
+            rows = result['bounds']
+            assert len(rows) == 4
+            assert all(abs(row['left'] - rows[0]['left']) < 1 for row in rows), 'Colors must form one vertical column'
+            assert all(rows[i + 1]['top'] >= rows[i]['bottom'] for i in range(3))
+            assert 36 <= rows[0]['left'] - result['bed']['right'] <= 42, 'Give the bed and column the requested separation'
+            assert 0 <= result['hardware']['right'] - rows[0]['right'] <= 1, 'Fit hardware to its content'
+            assert 12 <= result['card']['right'] - rows[0]['right'] <= 24, 'Keep normal outer padding after the colors'
+            assert rows[0]['top'] >= result['hardware']['top']
+            assert rows[-1]['bottom'] <= result['hardware']['bottom'] + 1
+            assert all(0 <= row['left'] < row['right'] <= result['viewport'] for row in rows)
+            assert [''.join(text.split()) for text in result['copy']] == ['1', '2×', '3', '4']
+            details = result['details']
+            assert all(detail['focused'] and detail['visible'] for detail in details), details
+            assert all(0 <= detail['bounds']['left'] < detail['bounds']['right'] <= result['viewport'] for detail in details), details
+            assert all(value in details[0]['text'] for value in ('PETG', 'HF', 'Reported vendor', '#12AB34'))
+            assert 'Old slice' not in details[0]['text']
+            assert 'No filament' in details[1]['text'] and 'Old' not in details[1]['text'] and '#FE1234' not in details[1]['text']
+            assert 'not reported' in details[2]['text'] and 'Unconfirmed' not in details[2]['text']
+            assert 'Not reported' in details[3]['text'] and 'Color not reported' in details[3]['text']
+            client.evaluate("document.activeElement?.blur()")
+            client.call("Input.dispatchMouseEvent", {"type": "mouseMoved", "x": 0, "y": 0})
+            client.evaluate("document.querySelector('#stats').scrollIntoView({block:'nearest'})")
+            client.evaluate("document.querySelector('#stats').focus()")
+            point = client.evaluate("(() => {const r=document.querySelector('.idle-filament').getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()")
+            client.call("Input.dispatchMouseEvent", {"type": "mouseMoved", **point})
+            client.wait_for("getComputedStyle(document.querySelector('.idle-row .tool-tooltip')).visibility === 'visible'")
+            client.call("Input.dispatchKeyEvent", {"type": "keyDown", "key": "Escape", "code": "Escape"})
+            assert client.evaluate("[...document.querySelectorAll('.idle-filaments .tool-tooltip')].every(e => getComputedStyle(e).visibility === 'hidden')")
+
+    @pytest.mark.parametrize('state', ['complete', 'standby'])
+    def test_idle_palette_escape_survives_refresh_until_new_hover_or_focus(self, client, state):
+        client.evaluate("window.previewDriver.selectState(" + json.dumps(state) + ")")
+        visible = "getComputedStyle(document.querySelector('.idle-filaments')).visibility === 'visible'"
+        refresh = "window.previewDriver.withSamples(async update => { await update(window.previewDriver.sample); })"
+
+        def escape():
+            client.call("Input.dispatchKeyEvent", {"type": "keyDown", "key": "Escape", "code": "Escape"})
+            client.call("Input.dispatchKeyEvent", {"type": "keyUp", "key": "Escape", "code": "Escape"})
+
+        client.evaluate("document.querySelector('#stats').focus()")
+        client.wait_for(visible)
+        escape()
+        assert not client.evaluate(visible), 'Escape must dismiss the focused idle palette'
+        client.evaluate(refresh)
+        assert not client.evaluate(visible), 'Live refresh must preserve keyboard dismissal'
+        client.evaluate("document.querySelector('#stats').blur(); document.querySelector('#stats').focus()")
+        client.wait_for(visible)
+        client.evaluate("document.querySelector('#stats').blur()")
+        client.wait_for("!(" + visible + ")")
+        client.evaluate("document.querySelector('#stats').scrollIntoView({block:'nearest'})")
+        point = client.evaluate("(() => {const r=document.querySelector('#stats').getBoundingClientRect();return {x:r.x+8,y:r.y+8}})()")
+        client.call("Input.dispatchMouseEvent", {"type": "mouseMoved", **point})
+        client.wait_for(visible)
+        escape()
+        assert not client.evaluate(visible), 'Escape must dismiss the hovered idle palette'
+        client.evaluate(refresh)
+        client.call("Input.dispatchMouseEvent", {"type": "mouseMoved", "x": point['x'] + 1, "y": point['y']})
+        assert not client.evaluate(visible), 'Refresh and movement inside the card must not reopen it'
+        client.call("Input.dispatchMouseEvent", {"type": "mouseMoved", "x": 0, "y": 0})
+        client.call("Input.dispatchMouseEvent", {"type": "mouseMoved", **point})
+        client.wait_for(visible)
+
     def test_real_dom_review_rejects_shifted_layout_and_restores_sample(self, client):
         previous = client.evaluate("window.previewDriver.sample")
         client.evaluate("document.querySelector('.current-temperature').style.transform = 'translateX(20px)'")
