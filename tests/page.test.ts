@@ -913,7 +913,6 @@ for (const [category, meaning] of [
     publish({ generation: 1, stats: metrics, light: true });
     publish({
       generation: 1,
-      printer: 'Status unavailable',
       stats: null,
       light: null,
       status_error: category,
@@ -1510,7 +1509,7 @@ test('configuration warnings separate the title from advice and mark config prop
 
 test('the header repeats the print-state label and dot beside the address', () => {
   selectPrinter();
-  publish({ generation: 1, printer: 'printing' });
+  publish({ generation: 1, stats: { state: 'printing' } });
   assert.equal(field('printer').textContent, 'Printing');
   assert.equal(field('printer').parentElement, field('target').parentElement);
   for (const [state, phase, label] of [
@@ -1528,6 +1527,14 @@ test('the header repeats the print-state label and dot beside the address', () =
     assert.equal(field('printer').textContent, label);
     assert.equal(field('printer').textContent, field('stats-state').textContent);
     assert.equal(field('printer').dataset.state, field('stats-state').dataset.state);
+  }
+  for (const state of ['Unknown', 'unrecognized']) {
+    publish({ generation: 1, stats: { state } });
+    assert.equal(field('printer').textContent, state.charAt(0).toUpperCase() + state.slice(1));
+  }
+  for (const state of [undefined, null, 42, false, '']) {
+    publish({ generation: 1, stats: { state } as unknown as HostMessage['stats'] });
+    assert.equal(field('printer').textContent, 'Connecting');
   }
 });
 

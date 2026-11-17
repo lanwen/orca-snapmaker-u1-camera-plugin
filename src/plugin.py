@@ -251,8 +251,7 @@ class Printer:
         if time.monotonic() >= self.metadata_retry_at:
             self.metadata = None
         led = status.get("led cavity_led", {}).get("color_data")
-        return {"printer": status.get("print_stats", {}).get("state", "Unknown"),
-                "light": bool(led[0][3]) if led else None, "stats": print_metrics(status, self.metadata)}
+        return {"light": bool(led[0][3]) if led else None, "stats": print_metrics(status, self.metadata)}
 
     def refresh_metadata(self):
         """Fetch after publishing live status; use the cache on the next live query."""
@@ -475,7 +474,7 @@ class Monitor:
                         try:
                             self.emit(generation, client.status())
                         except Exception as error:
-                            self.emit(generation, {"printer": "Status unavailable", "light": None, "stats": None,
+                            self.emit(generation, {"light": None, "stats": None,
                                                    "status_error": status_failure(error)})
                         else:
                             if self.current(generation):

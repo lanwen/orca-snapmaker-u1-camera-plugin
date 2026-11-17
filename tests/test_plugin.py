@@ -414,7 +414,7 @@ class TestClient:
                 printer.start_monitor()
             assert printer.http.ws is None
             failed.close.assert_called_once_with(timeout=0)
-            assert printer.status()['printer'] == 'standby'
+            assert printer.status()['stats']['state'] == 'standby'
             printer.start_monitor()
         assert connect.call_count == 2
         assert printer.http.ws is recovered
@@ -503,7 +503,7 @@ class TestClient:
         assert status['print_stats']['state'] == 'standby'
         assert Endpoint.requests[-1] == ('/printer/objects/query?print_stats=state,filename&led%20cavity_led%26other', 'secret')
         result = plugin.Printer(http_endpoint).status()
-        assert result['printer'] == 'standby'
+        assert result['stats']['state'] == 'standby'
         assert result['light']
         assert result['stats']['progress'] is None
 
@@ -959,7 +959,7 @@ class TestWorkerMetadata:
 
         def status():
             next_status.set()
-            return {"printer": "standby", "stats": {"planned_total": None}}
+            return {"stats": {"state": "standby", "planned_total": None}}
 
         second.status.side_effect = status
         clients = iter((printer, second))
@@ -1102,7 +1102,7 @@ class TestWorkerSchedule:
         state = scheduled_worker
         def status():
             state.now += duration
-            return {"printer": "standby"}
+            return {"stats": {"state": "standby"}}
         state.client.status.side_effect = status
         def command(enabled):
             state.now += command_duration
@@ -1155,7 +1155,7 @@ class TestWorkerSchedule:
         state.monitor.run()
         assert attempts == [(("first", ""), 100), (("second", ""), 100.25)]
         assert state.waits == [3, 3]
-        assert not any(message.get("generation") == 1 and "printer" in message
+        assert not any(message.get("generation") == 1 and "stats" in message
                        for message in state.messages)
 
     def test_camera_retry_keeps_independent_status_deadlines(self, scheduled_worker):
@@ -1234,8 +1234,8 @@ class TestWorkerSchedule:
         state.client.status.assert_called_once()
         state.client.start_monitor.assert_not_called()
         state.client.snapshot.assert_not_called()
-        kinds = ["status" if "printer" in message else "failure"
-                 for message in state.messages if "printer" in message or "failed" in message]
+        kinds = ["status" if message.get("stats") is not None else "failure"
+                 for message in state.messages if "stats" in message or "failed" in message]
         assert kinds == ["status", "failure"]
 
     def test_light_arriving_during_status_is_reconsidered_before_sleep(self, scheduled_worker):
@@ -1263,7 +1263,7 @@ class TestWorkerSchedule:
         def status():
             assert not client.close.called
             status_times.append(now[0])
-            return {"printer": "standby"}
+            return {"stats": {"state": "standby"}}
 
         def camera():
             camera_times.append(now[0])
@@ -1292,7 +1292,7 @@ class TestWorkerSchedule:
             monitor.update(("printer", ""), playing=True)
             monitor.run()
         assert status_times == [100, 103, 106, 109]
-        assert sum((m.get('printer') == 'standby' for m in messages)) == 4
+        assert sum(((m.get('stats') or {}).get('state') == 'standby' for m in messages)) == 4
         assert camera_times == [100, 103, 106, 109]
         assert any((m.get('image') == 'frame' for m in messages))
         assert sum((m.get('failed', False) for m in messages)) == 3
@@ -1392,10 +1392,10 @@ class TestWorkerPolling:
         def status():
             starts.append(state.now)
             self.advance(state, .25)
-            return {"printer": "standby"}
+            return {"stats": {"state": "standby"}}
         def publish(data):
             state.messages.append(data)
-            if "printer" in data:
+            if "stats" in data:
                 events.append("live-status")
         def metadata():
             events.append("metadata")
@@ -1518,7 +1518,7 @@ class TestWorkerPolling:
         state = scheduled_worker
         def status():
             state.now += 4
-            return {"printer": "standby"}
+            return {"stats": {"state": "standby"}}
         state.client.status.side_effect = status
         state.monitor.update(("printer", ""), playing=False)
         state.monitor.run()
@@ -1526,7 +1526,7 @@ class TestWorkerPolling:
         state.client.status.assert_called_once()
         state.client.refresh_metadata.assert_not_called()
         state.client.close.assert_called_once()
-        assert not any("printer" in message for message in state.messages)
+        assert not any("stats" in message for message in state.messages)
 
     @pytest.mark.parametrize("duration", [3, 6], ids=["one-tick", "two-ticks"])
     def test_completion_on_a_tick_allows_one_current_poll_without_a_burst(self, scheduled_worker, duration):
@@ -2542,7 +2542,7 @@ def websocket_server():
 def scheduled_worker(monkeypatch):
     state = types.SimpleNamespace(now=100.0, waits=[], messages=[])
     state.client = Mock()
-    state.client.status.return_value = {"printer": "standby"}
+    state.client.status.return_value = {"stats": {"state": "standby"}}
     state.client.snapshot.return_value = {"image": "frame"}
     state.factory = Mock(return_value=state.client)
     monkeypatch.setattr(plugin, "time", types.SimpleNamespace(monotonic=lambda: state.now))
@@ -2563,7 +2563,7 @@ def worker():
     def factory(*target):
         client = Mock()
         client.target = target
-        client.status.return_value = {"printer": "standby", "light": False}
+        client.status.return_value = {"stats": {"state": "standby"}, "light": False}
         client.snapshot.return_value = {"image": "frame"}
         clients.append(client)
         return client

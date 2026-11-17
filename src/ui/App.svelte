@@ -77,7 +77,11 @@
         <PrintState
           id="printer"
           stats={camera?.stats ?? null}
-          fallback={camera?.printer ?? 'Connecting'}
+          fallback={camera?.targetUnavailable
+            ? 'Unavailable'
+            : typeof camera?.stats?.state === 'string' && camera.stats.state
+              ? camera.stats.state
+              : 'Connecting'}
         />
         <span
           id="status-age"
