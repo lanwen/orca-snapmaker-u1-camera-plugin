@@ -7,6 +7,7 @@
   let root: HTMLElement;
   let dismissed = $state<number | null>(null);
   let open = $state<number | null>(null);
+  let idleDismissed = $state(false);
   const tools = $derived(
     Array.from({ length: 4 }, (_, id): Toolhead =>
       stats?.state === 'unavailable'
@@ -98,11 +99,21 @@
     open = null;
   });
   onMount(() => {
+    const card = root.closest('#stats')!;
+    const restoreIdle = () => {
+      idleDismissed = false;
+    };
+    card.addEventListener('pointerenter', restoreIdle);
+    card.addEventListener('focusin', restoreIdle);
     const observer = new ResizeObserver(measure);
     observer.observe(root);
-    observer.observe(root.closest('#stats')!);
+    observer.observe(card);
     observer.observe(root.querySelector('.current-temperature')!);
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      card.removeEventListener('pointerenter', restoreIdle);
+      card.removeEventListener('focusin', restoreIdle);
+    };
   });
 </script>
 
@@ -121,6 +132,7 @@
     if (event.key === 'Escape') {
       open = null;
       dismissed = active;
+      if (!showTabs) idleDismissed = true;
     }
   }}
 />
@@ -251,7 +263,12 @@
     {/each}
   </div>
   {#if !showTabs}
-    <div class="idle-filaments tool-tooltip" role="group" aria-label="Toolhead filament">
+    <div
+      class="idle-filaments tool-tooltip"
+      data-dismissed={idleDismissed}
+      role="group"
+      aria-label="Toolhead filament"
+    >
       {#each tools as tool, id}
         {@const present = tool.state === 'unavailable' ? null : tool.filament_present}
         {@const reportedColor = present === true ? color(tool) : null}
@@ -657,7 +674,10 @@
     height: 10px;
     clip-path: none;
   }
-  :global(#stats:is(:hover, :focus-within)) .idle-filaments {
+  .idle-filaments[data-dismissed='true'] {
+    transition: none;
+  }
+  :global(#stats:is(:hover, :focus-within)) .idle-filaments:not([data-dismissed='true']) {
     visibility: visible;
     transition-delay: 0s;
   }

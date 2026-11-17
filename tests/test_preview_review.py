@@ -196,6 +196,39 @@ class TestPreviewDriver:
             client.evaluate("new Promise(resolve => setTimeout(resolve, 280))")
             assert not client.evaluate("getComputedStyle(document.querySelector('.idle-filaments')).visibility === 'visible'")
 
+    @pytest.mark.parametrize('state', ['complete', 'standby'])
+    def test_idle_palette_escape_survives_refresh_until_new_hover_or_focus(self, client, state):
+        client.evaluate("window.previewDriver.selectState(" + json.dumps(state) + ")")
+        visible = "getComputedStyle(document.querySelector('.idle-filaments')).visibility === 'visible'"
+        refresh = "window.previewDriver.withSamples(async update => { await update(window.previewDriver.sample); })"
+
+        def escape():
+            client.call("Input.dispatchKeyEvent", {"type": "keyDown", "key": "Escape", "code": "Escape"})
+            client.call("Input.dispatchKeyEvent", {"type": "keyUp", "key": "Escape", "code": "Escape"})
+
+        client.evaluate("document.querySelector('#stats').focus()")
+        client.wait_for(visible)
+        escape()
+        assert not client.evaluate(visible), 'Escape must dismiss the focused idle palette'
+        client.evaluate(refresh)
+        assert not client.evaluate(visible), 'Live refresh must preserve keyboard dismissal'
+        client.evaluate("document.querySelector('#stats').blur(); document.querySelector('#stats').focus()")
+        client.wait_for(visible)
+        client.evaluate("document.querySelector('#stats').blur()")
+        client.wait_for("!(" + visible + ")")
+        client.evaluate("document.querySelector('#stats').scrollIntoView({block:'nearest'})")
+        point = client.evaluate("(() => {const r=document.querySelector('#stats').getBoundingClientRect();return {x:r.x+8,y:r.y+8}})()")
+        client.call("Input.dispatchMouseEvent", {"type": "mouseMoved", **point})
+        client.wait_for(visible)
+        escape()
+        assert not client.evaluate(visible), 'Escape must dismiss the hovered idle palette'
+        client.evaluate(refresh)
+        client.call("Input.dispatchMouseEvent", {"type": "mouseMoved", "x": point['x'] + 1, "y": point['y']})
+        assert not client.evaluate(visible), 'Refresh and movement inside the card must not reopen it'
+        client.call("Input.dispatchMouseEvent", {"type": "mouseMoved", "x": 0, "y": 0})
+        client.call("Input.dispatchMouseEvent", {"type": "mouseMoved", **point})
+        client.wait_for(visible)
+
     def test_real_dom_review_rejects_shifted_layout_and_restores_sample(self, client):
         previous = client.evaluate("window.previewDriver.sample")
         client.evaluate("document.querySelector('.current-temperature').style.transform = 'translateX(20px)'")
