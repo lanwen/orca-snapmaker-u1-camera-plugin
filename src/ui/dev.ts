@@ -18,7 +18,6 @@ window.orca = {
       receive({ type: 'target', generation: 1, target: 'Workshop · Snapmaker U1' });
       receive({
         generation: 1,
-        printer: 'Printing',
         light,
         fps: 4.4,
         frozen: false,
