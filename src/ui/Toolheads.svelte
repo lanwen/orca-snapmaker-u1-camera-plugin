@@ -106,6 +106,16 @@
   });
 </script>
 
+{#snippet swatch(value: string | null, id?: number)}
+  <span
+    class="swatch"
+    class:unknown={!value}
+    data-swatch={id}
+    style:background-color={value}
+    aria-label={value ? 'Filament color ' + value : 'Color not reported'}
+  ></span>
+{/snippet}
+
 <svelte:window
   onkeydown={(event) => {
     if (event.key === 'Escape') {
@@ -206,13 +216,7 @@
           >
         {/if}
         <div class="filament">
-          <span
-            class="swatch"
-            class:unknown={!color(tool)}
-            data-swatch={id}
-            style:background-color={color(tool)}
-            aria-label={color(tool) ? 'Filament color ' + color(tool) : 'Color not reported'}
-          ></span>
+          {@render swatch(color(tool), id)}
           <span class="material-copy">
             <strong>{material(tool)}</strong>
             <small
@@ -246,6 +250,35 @@
       </div>
     {/each}
   </div>
+  {#if !showTabs}
+    <div class="idle-filaments tool-tooltip" role="group" aria-label="Toolhead filament">
+      {#each tools as tool, id}
+        {@const present = tool.state === 'unavailable' ? null : tool.filament_present}
+        {@const reportedColor = present === true ? color(tool) : null}
+        {@const description =
+          tool.state === 'unavailable'
+            ? 'Toolhead unavailable'
+            : present === false
+              ? 'No filament detected'
+              : present === true
+                ? 'Loaded · ' + material(tool) + ' · ' + (reportedColor ?? 'Color not reported')
+                : 'Filament presence not reported'}
+        <span
+          class="idle-filament"
+          role="img"
+          aria-label={'Toolhead ' + (id + 1) + ' · ' + description}
+          title={'Toolhead ' + (id + 1) + ' · ' + description}
+        >
+          <b>{id + 1}</b>
+          {#if present === false}
+            <span aria-hidden="true">×</span>
+          {:else}
+            {@render swatch(reportedColor)}
+          {/if}
+        </span>
+      {/each}
+    </div>
+  {/if}
   {#if showTabs}<svg class="filament-traces" class:flowing aria-hidden="true">
       {#each paths as path}
         <path class="trace-base" data-active={path.id === active} d={path.d} stroke={path.color} />
@@ -610,6 +643,23 @@
       visibility: visible;
       transition-delay: 0s;
     }
+  }
+  .idle-filaments {
+    display: flex;
+    gap: 12px;
+  }
+  .idle-filament {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .idle-filaments::after {
+    height: 10px;
+    clip-path: none;
+  }
+  :global(#stats:is(:hover, :focus-within)) .idle-filaments {
+    visibility: visible;
+    transition-delay: 0s;
   }
   .filament-traces {
     position: absolute;

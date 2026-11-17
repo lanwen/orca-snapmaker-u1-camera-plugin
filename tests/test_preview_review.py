@@ -125,6 +125,77 @@ class TestPreviewDriver:
           return JSON.stringify(deliveries.find(message => message.stats)?.stats) === JSON.stringify(fixture);
         })()""")
 
+    @pytest.mark.parametrize('width', [1100, 390], ids=['desktop', 'narrow'])
+    def test_idle_filament_colors_reveal_on_hover_and_focus_using_current_presence(self, client, width):
+        client.call("Emulation.setDeviceMetricsOverride", {"width": width, "height": 900,
+                                                           "deviceScaleFactor": 1, "mobile": False})
+        for state in ('complete', 'standby'):
+            client.evaluate("window.previewDriver.selectState(" + json.dumps(state) + ")")
+            client.evaluate("document.activeElement?.blur()")
+            client.call("Input.dispatchMouseEvent", {"type": "mouseMoved", "x": 0, "y": 0})
+            client.evaluate("new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))")
+            result = client.evaluate("""window.previewDriver.withSamples(async update => {
+              const sample = window.previewDriver.sample;
+              sample.tools = [
+                {state:'parked', filament_present:true, color:'#12AB34', material:'PETG'},
+                {state:'parked', filament_present:false, color:'#FE1234', material:'old material'},
+                {state:'unknown', color:'#1234FE', material:'unconfirmed material'},
+                {state:'parked', filament_present:true, color:null}
+              ];
+              await update(sample);
+              const palette = document.querySelector('.idle-filaments');
+              if (!palette) throw new Error('Idle filament reveal is missing');
+              const card = document.querySelector('#stats');
+              const snapshot = () => ({
+                visible:getComputedStyle(palette).visibility === 'visible',
+                labels:[...palette.querySelectorAll('[role="img"]')].map(e => e.getAttribute('aria-label')),
+                colors:[...palette.querySelectorAll('.swatch')].map(e => e.style.backgroundColor),
+                card:JSON.stringify(card.getBoundingClientRect().toJSON()),
+                heating:palette.querySelector('.heating,.temperature-arrow,.trace-shimmer') !== null
+              });
+              const before = snapshot();
+              card.focus();
+              await new Promise(resolve => requestAnimationFrame(resolve));
+              const focused = snapshot();
+              card.blur();
+              await new Promise(resolve => setTimeout(resolve, 280));
+              const after = snapshot();
+              await update({...sample, tools:[]});
+              const missing = [...document.querySelectorAll('.idle-filaments .swatch')].every(e => !e.style.backgroundColor);
+              await update(sample);
+              const now = Date.now;
+              try {
+                Date.now = () => now() + 11000;
+                window.dispatchEvent(new Event('pageshow'));
+                await new Promise(resolve => requestAnimationFrame(resolve));
+              } finally { Date.now = now; }
+              const stale = document.querySelector('.idle-filaments') === null;
+              return {before, focused, after, missing, stale};
+            })""")
+            assert not result['before']['visible']
+            assert result['focused']['visible']
+            assert not result['after']['visible']
+            assert result['before']['card'] == result['focused']['card'] == result['after']['card']
+            assert not result['focused']['heating']
+            assert result['missing'] and result['stale']
+            labels = result['focused']['labels']
+            assert len(labels) == 4
+            assert '#12AB34' in labels[0] and 'PETG' in labels[0]
+            assert 'No filament' in labels[1] and '#FE1234' not in labels[1]
+            assert 'not reported' in labels[2] and '#1234FE' not in labels[2]
+            assert 'Color not reported' in labels[3]
+            assert 'rgb(18, 171, 52)' in result['focused']['colors']
+            assert 'rgb(254, 18, 52)' not in result['focused']['colors']
+            assert 'rgb(18, 52, 254)' not in result['focused']['colors']
+            client.evaluate("document.querySelector('#stats').scrollIntoView({block:'nearest'})")
+            point = client.evaluate("(() => {const r=document.querySelector('#stats').getBoundingClientRect();return {x:r.x+8,y:r.y+8}})()")
+            client.call("Input.dispatchMouseEvent", {"type": "mouseMoved", **point})
+            assert client.evaluate("getComputedStyle(document.querySelector('.idle-filaments')).visibility === 'visible'")
+            assert client.evaluate("(() => {const r=document.querySelector('.idle-filaments').getBoundingClientRect();return r.left>=0 && r.right<=innerWidth && r.top>=0})()")
+            client.call("Input.dispatchMouseEvent", {"type": "mouseMoved", "x": 0, "y": 0})
+            client.evaluate("new Promise(resolve => setTimeout(resolve, 280))")
+            assert not client.evaluate("getComputedStyle(document.querySelector('.idle-filaments')).visibility === 'visible'")
+
     def test_real_dom_review_rejects_shifted_layout_and_restores_sample(self, client):
         previous = client.evaluate("window.previewDriver.sample")
         client.evaluate("document.querySelector('.current-temperature').style.transform = 'translateX(20px)'")
