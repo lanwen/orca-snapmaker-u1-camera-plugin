@@ -666,6 +666,13 @@
   #stats[data-state='preparing'] #stats-message {
     font-size: 18px;
   }
+  @media (min-width: 851px) {
+    #stats[data-state='complete'] {
+      width: fit-content;
+      /* Preserve the 300px progress track when idle hardware shrinks. */
+      grid-template-columns: 146px 319px max-content;
+    }
+  }
   @media (max-width: 850px) {
     #stats {
       width: 480px;

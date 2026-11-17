@@ -228,14 +228,16 @@ class TestPreviewDriver:
                 details.push({focused:document.activeElement === row,
                   text:tooltip?.textContent, bounds:tooltip?.getBoundingClientRect().toJSON(), visible:tooltip && getComputedStyle(tooltip).visibility === 'visible'});
               }
-              return {bounds, bed:bed.toJSON(), hardware:hardware.toJSON(), details,
+              return {bounds, bed:bed.toJSON(), hardware:hardware.toJSON(), card:document.querySelector('#stats').getBoundingClientRect().toJSON(), details,
                 copy:rows.map(e => e.textContent.trim()), viewport:innerWidth};
             })""")
             rows = result['bounds']
             assert len(rows) == 4
             assert all(abs(row['left'] - rows[0]['left']) < 1 for row in rows), 'Colors must form one vertical column'
             assert all(rows[i + 1]['top'] >= rows[i]['bottom'] for i in range(3))
-            assert 4 <= rows[0]['left'] - result['bed']['right'] <= 24, 'Keep the column close to the bed'
+            assert 36 <= rows[0]['left'] - result['bed']['right'] <= 42, 'Give the bed and column the requested separation'
+            assert 0 <= result['hardware']['right'] - rows[0]['right'] <= 1, 'Fit hardware to its content'
+            assert 12 <= result['card']['right'] - rows[0]['right'] <= 24, 'Keep normal outer padding after the colors'
             assert rows[0]['top'] >= result['hardware']['top']
             assert rows[-1]['bottom'] <= result['hardware']['bottom'] + 1
             assert all(0 <= row['left'] < row['right'] <= result['viewport'] for row in rows)

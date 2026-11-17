@@ -673,7 +673,9 @@
   #hardware-stat.idle {
     position: static;
     grid-template-columns: max-content max-content;
-    column-gap: 12px;
+    column-gap: 36px;
+    width: max-content;
+    justify-self: end;
   }
   .idle-filaments {
     display: grid;
